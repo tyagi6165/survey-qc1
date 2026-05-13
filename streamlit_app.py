@@ -1,471 +1,505 @@
 """
 ================================================================
-  Survey QC Web App — v8.0
+  Survey QC Tool — v8.1
+  Streamlit Web App
 ================================================================
-Web-based survey QC tool. No terminal needed!
-
-Run with:
-    streamlit run app.py
-
-Features:
-- Upload .docx → AI extracts logic in ANY language
-- Gemini-powered (free API)
-- Browser-based UI (no terminal)
-- Word report download
+8 Phase 1 checks:
+  1. Termination rules (AI, batched)
+  2. Missing words
+  3. Question text match
+  4. Options match
+  5. Mandatory markers
+  6. Piping markers
+  7. Answer codes
+  8. Question order
 """
 
 import streamlit as st
 import os
-import sys
-from pathlib import Path
+import json
 import tempfile
 from datetime import datetime
-import json
+from docx import Document as DocxDocument
 
-# Import our modules
-from doc_analyzer import analyze_document
-from llm_extractor import configure_gemini, extract_all_logic_tables
+import google.generativeai as genai
+from qc_engine import parse_document, run_all_checks
 
-
-# ============================================
+# ============================================================
 # PAGE CONFIG
-# ============================================
+# ============================================================
 st.set_page_config(
-    page_title="Survey QC Tool",
+    page_title="Survey QC Tool v8.1",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-
-# ============================================
-# CUSTOM CSS — Make it look professional
-# ============================================
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1F4E79;
-        margin-bottom: 0;
-    }
-    .sub-header {
-        font-size: 1.1rem;
-        color: #666;
-        margin-top: 0;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background: #f0f7ff;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #1F4E79;
-    }
-    .success-badge {
-        background: #d4edda;
-        color: #155724;
-        padding: 0.5rem 1rem;
-        border-radius: 6px;
-        display: inline-block;
-        font-weight: 600;
-    }
-    .warning-badge {
-        background: #fff3cd;
-        color: #856404;
-        padding: 0.5rem 1rem;
-        border-radius: 6px;
-        display: inline-block;
-        font-weight: 600;
-    }
-    .terminate-rule {
-        background: #fff5f5;
-        border-left: 4px solid #c00000;
-        padding: 0.75rem;
-        margin: 0.5rem 0;
-        border-radius: 4px;
-    }
-    .simple-rule {
-        background: #f0fff4;
-        border-left: 4px solid #2d8a3e;
-        padding: 0.75rem;
-        margin: 0.5rem 0;
-        border-radius: 4px;
-    }
-    .compound-rule {
-        background: #fff8e1;
-        border-left: 4px solid #f57c00;
-        padding: 0.75rem;
-        margin: 0.5rem 0;
-        border-radius: 4px;
-    }
-    .stButton button {
-        background: #1F4E79;
-        color: white;
-        font-weight: 600;
-        padding: 0.5rem 2rem;
-        border-radius: 6px;
-        border: none;
-    }
-    .stButton button:hover {
-        background: #2c6094;
-    }
+.main-title { font-size:2.2rem; font-weight:700; color:#1F4E79; }
+.sub-title { color:#666; margin-top:-10px; margin-bottom:20px; }
+.check-pass { background:#d4edda; border-left:4px solid #28a745;
+              padding:8px 12px; border-radius:4px; margin:4px 0; }
+.check-fail-high { background:#f8d7da; border-left:4px solid #dc3545;
+                   padding:8px 12px; border-radius:4px; margin:4px 0; }
+.check-fail-med  { background:#fff3cd; border-left:4px solid #ffc107;
+                   padding:8px 12px; border-radius:4px; margin:4px 0; }
+.check-info { background:#d1ecf1; border-left:4px solid #17a2b8;
+              padding:8px 12px; border-radius:4px; margin:4px 0; }
+.verdict-pass { background:#d4edda; color:#155724; padding:16px;
+                border-radius:8px; text-align:center; font-size:1.3rem; font-weight:700; }
+.verdict-fail { background:#f8d7da; color:#721c24; padding:16px;
+                border-radius:8px; text-align:center; font-size:1.3rem; font-weight:700; }
+.verdict-review { background:#fff3cd; color:#856404; padding:16px;
+                  border-radius:8px; text-align:center; font-size:1.3rem; font-weight:700; }
+.metric-box { background:#f0f7ff; padding:12px; border-radius:8px;
+              border-left:4px solid #1F4E79; margin:4px; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ============================================
-# HEADER
-# ============================================
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.markdown('<h1 class="main-header">📊 Survey QC Tool</h1>', unsafe_allow_html=True)
-    st.markdown(
-        '<p class="sub-header">AI-powered survey quality check — works with ANY language</p>',
-        unsafe_allow_html=True
-    )
-with col2:
-    st.markdown("**v8.0** — Powered by Gemini AI")
-
-
-# ============================================
-# SIDEBAR — API Key & Settings
-# ============================================
+# ============================================================
+# SIDEBAR
+# ============================================================
 with st.sidebar:
-    st.header("🔑 Setup")
+    st.markdown("### 🔑 API Setup")
 
-    # Try to load saved key from session state
-    if 'gemini_api_key' not in st.session_state:
-        st.session_state.gemini_api_key = ""
+    # Load from Streamlit secrets first
+    if 'api_key' not in st.session_state:
+        try:
+            st.session_state.api_key = st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            st.session_state.api_key = ""
 
-    api_key = st.text_input(
-        "Gemini API Key",
-        value=st.session_state.gemini_api_key,
-        type="password",
-        help="Get free key from: https://aistudio.google.com/app/apikey",
-        placeholder="AIzaSy..."
-    )
-
-    if api_key:
-        st.session_state.gemini_api_key = api_key
-        st.success("✅ API Key set")
-
-    st.markdown("---")
-
-    st.header("⚙️ Settings")
-    fuzzy_threshold = st.slider(
-        "Match strictness",
-        min_value=0.4, max_value=0.95, value=0.65, step=0.05,
-        help="Higher = stricter text matching"
-    )
-
-    test_mode = st.radio(
-        "Test mode",
-        ["Document only (fast)", "Document + Live URL (full)"],
-        help="Pehle 'Document only' try karo"
-    )
+    if st.session_state.api_key:
+        st.success("✅ API Key ready")
+        override = st.text_input("Change API key", type="password",
+                                  placeholder="Paste new key to override...",
+                                  label_visibility="collapsed")
+        if override:
+            st.session_state.api_key = override
+            st.success("✅ Updated")
+    else:
+        key_input = st.text_input("Gemini API Key", type="password",
+                                   placeholder="AIzaSy...",
+                                   help="Free key: aistudio.google.com/app/apikey")
+        if key_input:
+            st.session_state.api_key = key_input
+            st.success("✅ Key set")
 
     st.markdown("---")
+    st.markdown("### ⚙️ Settings")
 
-    st.header("ℹ️ Help")
-    with st.expander("📖 How to use"):
-        st.markdown("""
-        1. **Get free Gemini API key** from [aistudio.google.com](https://aistudio.google.com/app/apikey)
-        2. **Paste API key** in sidebar
-        3. **Upload .docx** screener document
-        4. (Optional) Add survey URL for live testing
-        5. Click **"Run QC Analysis"**
-        6. Download your report
-        """)
+    threshold = st.slider("Text match threshold", 0.4, 0.95, 0.65, 0.05,
+                          help="Higher = stricter matching")
 
-    with st.expander("🌍 Supported languages"):
-        st.markdown("""
-        - ✅ English
-        - ✅ French (Français)
-        - ✅ Italian (Italiano)
-        - ✅ Spanish (Español)
-        - ✅ German (Deutsch)
-        - ✅ Hindi (हिन्दी)
-        - ✅ Urdu (اردو)
-        - ✅ Aur 80+ aur languages
-
-        AI automatically detect karta hai!
-        """)
-
-
-# ============================================
-# MAIN AREA
-# ============================================
-
-# Check if API key is set
-if not st.session_state.gemini_api_key:
-    st.warning("⚠️ Pehle sidebar mein **Gemini API Key** paste karo!")
-    st.info("""
-    **API key kahan se lo (free, 1 minute):**
-    1. Click: https://aistudio.google.com/app/apikey
-    2. "Create API key in new project" click karo
-    3. Key copy karke sidebar mein paste karo
+    st.markdown("---")
+    st.markdown("### ℹ️ Phase 1 Checks")
+    st.markdown("""
+    1. 🛑 Termination rules
+    2. 📝 Missing words
+    3. 🔤 Question text
+    4. 📋 Options match
+    5. ⭐ Mandatory markers
+    6. 🔗 Piping markers
+    7. 🔢 Answer codes
+    8. 📊 Question order
     """)
+
+
+# ============================================================
+# HEADER
+# ============================================================
+st.markdown('<p class="main-title">📊 Survey QC Tool</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">v8.1 — AI-powered · Any language · 8 checks</p>',
+            unsafe_allow_html=True)
+
+# API key check
+if not st.session_state.get('api_key'):
+    st.warning("⚠️ Sidebar mein Gemini API Key paste karo pehle!")
+    st.info("Free key: https://aistudio.google.com/app/apikey — No credit card needed")
     st.stop()
 
 
-# ============================================
-# UPLOAD SECTION
-# ============================================
-st.header("📤 Upload & Configure")
+# ============================================================
+# INPUT SECTION
+# ============================================================
+st.markdown("## 📤 Upload & Configure")
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1, 1])
 
 with col1:
-    uploaded_file = st.file_uploader(
-        "Screener Document (.docx)",
-        type=['docx'],
-        help="Kisi bhi language ka screener doc upload karo"
-    )
+    st.markdown("**📄 Screener Document (.docx)**")
+    uploaded = st.file_uploader("", type=["docx"], label_visibility="collapsed")
+    if uploaded:
+        st.success(f"✅ {uploaded.name} ({len(uploaded.getvalue())//1024} KB)")
 
 with col2:
-    survey_url = st.text_input(
-        "Survey URL (optional)",
+    st.markdown("**🔗 Survey URL**")
+    survey_url = st.text_input("",
         placeholder="https://questionnaire.example.com/...",
-        help="Live link testing ke liye"
-    )
-    country = st.text_input(
-        "Country (if needed)",
-        placeholder="Italy, France, Spain, etc.",
-        help="Live link mein country select karne ke liye"
+        label_visibility="collapsed",
+        help="Live survey link for full QC"
     )
 
+    country = st.text_input("🌍 Country (if needed)",
+        placeholder="Italy, France, Spain...",
+        help="Country to select on survey landing page"
+    )
 
-# ============================================
+    if survey_url:
+        if not survey_url.startswith(("http://", "https://")):
+            st.error("❌ URL http:// ya https:// se start hona chahiye")
+            survey_url = None
+        else:
+            st.success("✅ URL set")
+
+
+# ============================================================
 # RUN BUTTON
-# ============================================
+# ============================================================
 st.markdown("---")
 
-if uploaded_file is None:
-    st.info("👆 Pehle screener document upload karo")
+if not uploaded:
+    st.info("👆 Pehle screener .docx upload karo")
     st.stop()
 
-# Show file info
-file_size_kb = len(uploaded_file.getvalue()) / 1024
-st.success(f"✅ **{uploaded_file.name}** uploaded ({file_size_kb:.1f} KB)")
+if not survey_url:
+    st.warning("⚠️ Survey URL daalo — live QC ke liye zaroori hai")
+    # Allow doc-only mode with confirmation
+    doc_only = st.checkbox("Abhi sirf Document analysis karo (URL baad mein)")
+    if not doc_only:
+        st.stop()
+else:
+    doc_only = False
 
-if st.button("🚀 Run QC Analysis", type="primary", use_container_width=True):
+run_btn = st.button("🚀 Run QC Analysis", type="primary", use_container_width=True)
 
-    # Save uploaded file temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+if not run_btn:
+    st.stop()
 
-    try:
-        # ============================================
-        # PHASE 1: Document Analysis
-        # ============================================
-        st.markdown("### 📄 Phase 1: Document Parsing")
 
-        with st.spinner("Document parse kar raha hoon..."):
-            try:
-                analysis = analyze_document(tmp_path)
-            except Exception as e:
-                st.error(f"❌ Document parse nahi hua: {e}")
-                st.stop()
+# ============================================================
+# RUN QC
+# ============================================================
 
-        # Show parsing results
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📋 Questions", analysis['stats']['total_questions'])
-        with col2:
-            st.metric("📊 LOGIC Tables", analysis['stats']['logic_tables_found'])
-        with col3:
-            st.metric("✏️ With Options", analysis['stats']['questions_with_options'])
+# Setup Gemini
+try:
+    genai.configure(api_key=st.session_state.api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
+except Exception as e:
+    st.error(f"❌ Gemini setup failed: {e}")
+    st.stop()
 
-        if analysis['stats']['logic_tables_found'] == 0:
-            st.warning("⚠️ Document mein LOGIC tables nahi mile. Kya ye sahi screener doc hai?")
-            st.stop()
+# Save uploaded file
+with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
+    tmp.write(uploaded.getvalue())
+    tmp_path = tmp.name
 
-        # ============================================
-        # PHASE 2: AI Logic Extraction
-        # ============================================
-        st.markdown("---")
-        st.markdown("### 🤖 Phase 2: AI Logic Extraction")
+try:
+    # ── PHASE 1: Parse Document ──────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📄 Phase 1: Document Parsing")
 
-        # Configure Gemini
-        try:
-            configure_gemini(st.session_state.gemini_api_key)
-        except Exception as e:
-            st.error(f"❌ Gemini setup fail: {e}")
-            st.stop()
+    with st.spinner("Document parse ho raha hai..."):
+        doc_data = parse_document(tmp_path)
 
-        # Progress bar for table processing
-        n_tables = len(analysis['logic_tables'])
-        progress_bar = st.progress(0, text=f"AI processing 0/{n_tables} tables...")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Questions", doc_data['stats']['total_questions'])
+    c2.metric("LOGIC Tables", doc_data['stats']['logic_tables'])
+    c3.metric("With Options", doc_data['stats']['with_options'])
+    c4.metric("With Piping", doc_data['stats']['with_piping'])
 
-        with st.spinner(f"AI {n_tables} LOGIC tables analyze kar raha hai..."):
-            all_rules, summary = extract_all_logic_tables(analysis['logic_tables'])
-            progress_bar.progress(1.0, text=f"✅ {n_tables}/{n_tables} tables done")
+    if doc_data['stats']['total_questions'] == 0:
+        st.error("❌ Document mein koi question nahi mila — sahi .docx hai?")
+        st.stop()
 
-        # Show errors if any
-        if summary['errors']:
-            with st.expander(f"⚠️ {len(summary['errors'])} tables had errors", expanded=False):
-                for err in summary['errors']:
-                    st.error(f"Table {err['table_idx']} ({err['host_qid']}): {err['error']}")
+    st.success(f"✅ {doc_data['stats']['total_questions']} questions parsed successfully")
 
-        # ============================================
-        # PHASE 3: Results Display
-        # ============================================
-        st.markdown("---")
-        st.markdown("### 📊 Phase 3: Results")
+    # ── PHASE 2: Run All 8 Checks ────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🔍 Phase 2: Running 8 QC Checks")
 
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Rules", summary['total_rules'])
-        with col2:
-            st.metric("🛑 Terminate", summary['terminate_rules'])
-        with col3:
-            st.metric("✅ Simple", summary['simple_terminate'], help="Auto-testable")
-        with col4:
-            st.metric("⚠️ Compound", summary['compound_terminate'], help="Manual review needed")
+    progress = st.progress(0)
+    status_text = st.empty()
 
-        # Tabs for different views
-        tab1, tab2, tab3 = st.tabs([
-            "🛑 Termination Rules",
-            "📋 All Questions",
-            "📊 Raw Data"
-        ])
+    # Checks 1-8 progress updates
+    status_text.text("⏳ Check 1/8: Extracting termination rules (AI)...")
+    progress.progress(10)
 
-        with tab1:
-            terminate_rules = [r for r in all_rules if r.get('action') == 'terminate']
-            if not terminate_rules:
-                st.info("Koi termination rule nahi mila")
+    results = run_all_checks(
+        doc_data=doc_data,
+        live_questions=None,  # Crawler v8.2 mein add hoga
+        gemini_model=model,
+        threshold=threshold
+    )
+
+    progress.progress(100)
+    status_text.text("✅ All checks complete!")
+
+    # ── PHASE 3: Results ─────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📊 Phase 3: Results")
+
+    summary = results["summary"]
+
+    # Verdict
+    if summary["verdict"] == "PASS":
+        st.markdown(f'<div class="verdict-pass">{summary["verdict_msg"]}</div>',
+                    unsafe_allow_html=True)
+    elif summary["verdict"] == "FAIL":
+        st.markdown(f'<div class="verdict-fail">{summary["verdict_msg"]}</div>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="verdict-review">{summary["verdict_msg"]}</div>',
+                    unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Summary metrics
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("🛑 Terminate Rules", summary["termination_rules_found"])
+    m2.metric("✅ Auto-testable", summary["terminate_simple"])
+    m3.metric("⚠️ Compound", summary["terminate_compound"])
+    m4.metric("❌ HIGH Issues", summary["severity"]["HIGH"])
+    m5.metric("⚠️ MEDIUM Issues", summary["severity"]["MEDIUM"])
+
+    st.markdown("---")
+
+    # ── 8 CHECK TABS ─────────────────────────────────────────
+    tabs = st.tabs([
+        "🛑 Termination",
+        "📝 Words",
+        "🔤 Text Match",
+        "📋 Options",
+        "⭐ Mandatory",
+        "🔗 Piping",
+        "🔢 Codes",
+        "📊 Order"
+    ])
+
+    # TAB 1: Termination
+    with tabs[0]:
+        st.markdown("#### 🛑 Check 1: Termination Rules")
+        term_rules = results["termination"]["rules"]
+        meta = results["termination"]["meta"]
+
+        if meta.get("status") == "error":
+            st.error(f"AI Error: {meta.get('message')}")
+        elif not term_rules:
+            st.info("Koi termination rules nahi mile")
+        else:
+            terminate = [r for r in term_rules if r.get("action") == "terminate"]
+            qualify = [r for r in term_rules if r.get("action") == "qualify"]
+            compound = [r for r in terminate if r.get("complexity") == "compound"]
+            simple = [r for r in terminate if r.get("complexity") == "simple"]
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Rules", len(term_rules))
+            c2.metric("Simple (auto-test)", len(simple))
+            c3.metric("Compound (manual)", len(compound))
+
+            if simple:
+                st.markdown(f"**✅ Simple Rules ({len(simple)}) — Auto-testable:**")
+                for r in simple:
+                    st.markdown(
+                        f'<div class="check-pass">🛑 <b>{r.get("test_qid")}</b> = '
+                        f'code <b>{r.get("answer_code")}</b> → TERMINATE | '
+                        f'{r.get("reason","")[:80]}</div>',
+                        unsafe_allow_html=True
+                    )
+
+            if compound:
+                st.markdown(f"**⚠️ Compound Rules ({len(compound)}) — Manual Review:**")
+                for r in compound:
+                    st.markdown(
+                        f'<div class="check-fail-med">⚠️ <b>{r.get("test_qid")}</b> — '
+                        f'{r.get("reason","")[:100]}</div>',
+                        unsafe_allow_html=True
+                    )
+
+            if qualify:
+                st.markdown(f"**ℹ️ Qualify Rules ({len(qualify)}):**")
+                for r in qualify:
+                    st.markdown(
+                        f'<div class="check-info">✅ <b>{r.get("test_qid")}</b> = '
+                        f'code <b>{r.get("answer_code")}</b> → QUALIFY</div>',
+                        unsafe_allow_html=True
+                    )
+
+    # TAB 2-4: Need live URL
+    for tab_idx, (tab, key, name) in enumerate(zip(
+        tabs[1:4],
+        ["missing_words", "text_match", "options_match"],
+        ["Missing Words", "Text Match", "Options Match"]
+    )):
+        with tab:
+            issues = results[key]
+            st.markdown(f"#### Check {tab_idx+2}: {name}")
+            if not survey_url or doc_only:
+                st.warning("⚠️ Live URL required for this check — abhi doc-only mode mein ho")
+                st.info("URL add karke dobara run karo — live survey se compare hoga")
+            elif not issues:
+                st.markdown('<div class="check-pass">✅ No issues found</div>',
+                            unsafe_allow_html=True)
             else:
-                # Group by complexity
-                simple_rules = [r for r in terminate_rules if r.get('complexity') == 'simple']
-                compound_rules = [r for r in terminate_rules if r.get('complexity') == 'compound']
+                for issue in issues:
+                    sev = issue.get("severity", "INFO")
+                    css = "check-fail-high" if sev == "HIGH" else "check-fail-med"
+                    st.markdown(
+                        f'<div class="{css}">❌ <b>{issue["qid"]}</b>: '
+                        f'{issue["details"][:150]}</div>',
+                        unsafe_allow_html=True
+                    )
 
-                if simple_rules:
-                    st.markdown(f"#### ✅ Simple Termination Rules ({len(simple_rules)})")
-                    st.caption("Ye rules tool auto-test kar sakta hai")
-                    for rule in simple_rules:
-                        st.markdown(
-                            f'<div class="simple-rule">'
-                            f'<strong>🛑 {rule.get("test_qid")} = code {rule.get("answer_code")}</strong><br>'
-                            f'<small>{rule.get("reason", "")}</small>'
-                            f'</div>',
-                            unsafe_allow_html=True
-                        )
+    # TAB 5: Mandatory
+    with tabs[4]:
+        st.markdown("#### ⭐ Check 5: Mandatory Markers")
+        issues = results["mandatory"]
+        if not issues:
+            st.markdown('<div class="check-pass">✅ No mandatory marker issues</div>',
+                        unsafe_allow_html=True)
+        else:
+            for issue in issues:
+                sev = issue.get("severity", "INFO")
+                css = ("check-fail-med" if sev == "MEDIUM"
+                       else "check-info" if sev == "INFO"
+                       else "check-fail-high")
+                icon = "⭐" if sev == "INFO" else "❌"
+                st.markdown(
+                    f'<div class="{css}">{icon} <b>{issue["qid"]}</b>: '
+                    f'{issue["details"]}</div>',
+                    unsafe_allow_html=True
+                )
 
-                if compound_rules:
-                    st.markdown(f"#### ⚠️ Compound Logic Rules ({len(compound_rules)})")
-                    st.caption("In rules ko manual review chahiye (cross-question logic)")
-                    for rule in compound_rules:
-                        st.markdown(
-                            f'<div class="compound-rule">'
-                            f'<strong>🛑 {rule.get("test_qid")} = code {rule.get("answer_code")}</strong><br>'
-                            f'<small>{rule.get("reason", "")}</small>'
-                            f'</div>',
-                            unsafe_allow_html=True
-                        )
+    # TAB 6: Piping
+    with tabs[5]:
+        st.markdown("#### 🔗 Check 6: Piping Markers")
+        issues = results["piping"]
+        if not issues:
+            st.markdown('<div class="check-pass">✅ No raw piping markers found</div>',
+                        unsafe_allow_html=True)
+        else:
+            for issue in issues:
+                sev = issue.get("severity", "INFO")
+                css = "check-fail-high" if sev == "HIGH" else "check-info"
+                icon = "❌" if sev == "HIGH" else "ℹ️"
+                st.markdown(
+                    f'<div class="{css}">{icon} <b>{issue["qid"]}</b>: '
+                    f'{issue["details"][:150]}</div>',
+                    unsafe_allow_html=True
+                )
 
-        with tab2:
-            st.markdown(f"#### All Questions ({len(analysis['questions'])})")
-            for qid, qdata in analysis['questions'].items():
-                with st.expander(f"**{qid}** — {qdata['text'][:80]}..."):
-                    st.write(f"**Full text:** {qdata['text']}")
-                    if qdata['options']:
-                        st.write(f"**Options ({len(qdata['options'])}):**")
-                        for opt in qdata['options']:
-                            st.write(f"  - `{opt['code']}` → {opt['text']}")
-                    if qdata.get('is_mandatory'):
-                        st.write("✅ Mandatory")
+    # TAB 7: Answer Codes
+    with tabs[6]:
+        st.markdown("#### 🔢 Check 7: Answer Code Sequence")
+        issues = results["answer_codes"]
+        if not issues:
+            st.markdown('<div class="check-pass">✅ All answer codes sequential — no gaps</div>',
+                        unsafe_allow_html=True)
+        else:
+            for issue in issues:
+                st.markdown(
+                    f'<div class="check-fail-med">⚠️ <b>{issue["qid"]}</b>: '
+                    f'{issue["details"]}</div>',
+                    unsafe_allow_html=True
+                )
 
-        with tab3:
-            st.markdown("#### Extracted Rules (JSON)")
-            st.json(all_rules)
+    # TAB 8: Question Order
+    with tabs[7]:
+        st.markdown("#### 📊 Check 8: Question Order")
+        issues = results["question_order"]
+        if not issues:
+            st.markdown('<div class="check-pass">✅ Question order is correct</div>',
+                        unsafe_allow_html=True)
+        else:
+            for issue in issues:
+                st.markdown(
+                    f'<div class="check-fail-med">⚠️ <b>{issue["qid"]}</b>: '
+                    f'{issue["details"]}</div>',
+                    unsafe_allow_html=True
+                )
 
-        # ============================================
-        # PHASE 4: Download
-        # ============================================
-        st.markdown("---")
-        st.markdown("### 📥 Download Results")
+    # ── DOWNLOAD ─────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📥 Download Report")
 
-        # Create downloadable JSON
-        result_data = {
-            "generated_at": datetime.now().isoformat(),
-            "document": uploaded_file.name,
-            "summary": summary,
-            "rules": all_rules,
-            "questions": {
-                qid: {
-                    "text": q["text"],
-                    "options_count": len(q["options"]),
-                    "is_mandatory": q.get("is_mandatory", False)
-                }
-                for qid, q in analysis['questions'].items()
-            }
-        }
+    term_rules = results["termination"]["rules"]
+    terminate_simple = [r for r in term_rules
+                        if r.get("action") == "terminate" and r.get("complexity") == "simple"]
+    terminate_compound = [r for r in term_rules
+                          if r.get("action") == "terminate" and r.get("complexity") == "compound"]
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                "📄 Download Full Report (JSON)",
-                data=json.dumps(result_data, indent=2, ensure_ascii=False),
-                file_name=f"qc_report_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-
-        with col2:
-            # Create a simple text summary
-            summary_text = f"""SURVEY QC REPORT
+    report_txt = f"""SURVEY QC REPORT v8.1
 Generated: {datetime.now().strftime('%d %B %Y, %H:%M')}
-Document: {uploaded_file.name}
+Document:  {uploaded.name}
+URL:       {survey_url or 'Not provided (doc-only mode)'}
+Mode:      {'Document only' if doc_only else 'Full QC'}
+Verdict:   {summary['verdict']} — {summary['verdict_msg']}
 
-========================================
+{'='*60}
 SUMMARY
-========================================
-- Questions found: {analysis['stats']['total_questions']}
-- LOGIC tables: {analysis['stats']['logic_tables_found']}
-- Total rules extracted: {summary['total_rules']}
-- Termination rules: {summary['terminate_rules']}
-  - Simple (auto-testable): {summary['simple_terminate']}
-  - Compound (need review): {summary['compound_terminate']}
+{'='*60}
+Questions parsed:        {doc_data['stats']['total_questions']}
+LOGIC tables found:      {doc_data['stats']['logic_tables']}
+Termination rules:       {len(term_rules)}
+  Simple (auto-test):    {len(terminate_simple)}
+  Compound (manual):     {len(terminate_compound)}
+Total issues found:      {summary['total_issues']}
+  HIGH severity:         {summary['severity']['HIGH']}
+  MEDIUM severity:       {summary['severity']['MEDIUM']}
+  INFO:                  {summary['severity']['INFO']}
 
-========================================
-TERMINATION RULES
-========================================
-"""
-            for rule in terminate_rules:
-                summary_text += f"\n[{rule.get('complexity', '').upper()}] {rule.get('test_qid')} = code {rule.get('answer_code')}"
-                summary_text += f"\n  Reason: {rule.get('reason', '')}\n"
+{'='*60}
+CHECK 1: TERMINATION RULES
+{'='*60}"""
 
-            st.download_button(
-                "📝 Download Summary (TXT)",
-                data=summary_text,
-                file_name=f"qc_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+    for r in term_rules:
+        action = r.get('action', '').upper()
+        complexity = r.get('complexity', '')
+        icon = "TERMINATE" if action == "TERMINATE" else "QUALIFY"
+        report_txt += f"\n[{icon}][{complexity.upper()}] {r.get('test_qid')} = code {r.get('answer_code')}"
+        report_txt += f"\n  Reason: {r.get('reason', '')}\n"
 
-        # Success message
-        st.markdown("---")
-        st.success(f"""
-        ### 🎉 QC Analysis Complete!
+    for check_name, check_key in [
+        ("CHECK 5: MANDATORY MARKERS", "mandatory"),
+        ("CHECK 6: PIPING MARKERS", "piping"),
+        ("CHECK 7: ANSWER CODES", "answer_codes"),
+        ("CHECK 8: QUESTION ORDER", "question_order"),
+    ]:
+        issues = results[check_key]
+        report_txt += f"\n{'='*60}\n{check_name}\n{'='*60}\n"
+        if not issues:
+            report_txt += "✅ PASS — No issues found\n"
+        else:
+            for issue in issues:
+                report_txt += f"[{issue.get('severity','?')}] {issue['qid']}: {issue['details']}\n"
 
-        - **{analysis['stats']['total_questions']}** questions parsed
-        - **{summary['terminate_rules']}** termination rules extracted by AI
-        - **{summary['simple_terminate']}** rules ready for auto-testing
-        - Document language detected and handled automatically
-        """)
+    report_txt += f"\n{'='*60}\n— End of Report — Survey QC Tool v8.1\n"
 
-    finally:
-        # Cleanup temp file
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            "📄 Download Report (TXT)",
+            data=report_txt,
+            file_name=f"QC_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+    with col2:
+        st.download_button(
+            "📊 Download Raw Data (JSON)",
+            data=json.dumps(results, indent=2, ensure_ascii=False),
+            file_name=f"QC_Data_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
 
+finally:
+    try:
+        os.unlink(tmp_path)
+    except Exception:
+        pass
 
-# ============================================
-# FOOTER
-# ============================================
 st.markdown("---")
-st.caption("Built with Streamlit + Gemini AI | v8.0 | © 2026")
+st.caption("Survey QC Tool v8.1 · Streamlit + Gemini AI · Any language · © 2026")
