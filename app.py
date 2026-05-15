@@ -1382,12 +1382,11 @@ def feedback():
         json.dump(feedbacks, f, indent=2)
     return jsonify({'ok': True})
 
-
 if __name__ == '__main__':
     print("\n" + "="*50)
     print("  SurveyQC Web UI v1.0")
     print("="*50)
-    print(f"\n  Open browser: http://localhost:5000")
+    port = int(os.environ.get('PORT', 8080))
+    print(f"\n  Open browser: http://localhost:{port}")
     print(f"  Press Ctrl+C to stop\n")
-    port = int(os.environ.get('PORT', 5000))
-app.run(debug=False, port=port, host='0.0.0.0')
+    app.run(debug=False, port=port, host='0.0.0.0')
