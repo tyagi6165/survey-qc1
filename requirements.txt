@@ -2,3 +2,4 @@ flask
 playwright
 python-docx
 werkzeug
+gunicorn
