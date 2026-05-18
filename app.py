@@ -4098,4 +4098,3 @@ def get_active_ai_key():
         if api.get('active') and api.get('key'):
             return aid, api['key']
     return None, None
-
