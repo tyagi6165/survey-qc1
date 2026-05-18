@@ -135,6 +135,17 @@ SHARED_CSS = """
   --red: #E24B4A;
   --amber: #EF9F27;
   --card-r: 10px;
+
+  /* Light theme semantic aliases */
+  --color-background-primary: #FFFFFF;
+  --color-background-secondary: #F0F2F5;
+  --color-background-tertiary: #F8F9FA;
+  --color-text-primary: #1A1A2E;
+  --color-text-secondary: #6B7280;
+  --color-text-tertiary: #9CA3AF;
+  --color-border-primary: #DDE1E7;
+  --color-border-secondary: #DDE1E7;
+  --color-border-tertiary: #E5E7EB;
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 body{background:var(--bg);color:var(--text);min-height:100vh}
