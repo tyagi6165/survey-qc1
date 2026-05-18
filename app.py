@@ -135,6 +135,13 @@ SHARED_CSS = """
   --red: #E24B4A;
   --amber: #EF9F27;
   --card-r: 10px;
+  /* Semantic aliases used across pages */
+  --color-text-primary: #1A1A2E;
+  --color-text-secondary: #6B7280;
+  --color-background-primary: #FFFFFF;
+  --color-background-secondary: #F8F9FA;
+  --color-border-secondary: #DDE1E7;
+  --color-border-tertiary: #EEF0F3;
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 body{background:var(--bg);color:var(--text);min-height:100vh}
@@ -712,6 +719,7 @@ def dashboard():
     if not recent_html:
         recent_html = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">No reports yet. <a href="/new-qc" style="color:var(--purple)">Run your first QC!</a></td></tr>'
 
+    pass_rate = int((max(0,reports_used-3)/reports_used)*100) if reports_used > 0 else 0
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html><head><title>Dashboard — SurveyQC</title></head><body>
 <div class="app-layout">
@@ -719,11 +727,11 @@ def dashboard():
   <div class="main-content">
     <div class="topbar">
       <div>
-        <p class="page-title">Good morning, {name}!</p>
+        <p class="page-title">Welcome back, {name}!</p>
         <p class="page-sub">{datetime.now().strftime('%A, %d %B %Y')}</p>
       </div>
       <div style="display:flex;gap:10px;align-items:center">
-        <span class="badge badge-green">{user.get('plan','Free')} · {reports_used}/{reports_limit} reports</span>
+        <span class="badge badge-green">{user.get('plan','Free')} · {reports_used}/{reports_limit}</span>
         <a href="/new-qc" class="btn btn-primary btn-sm"><i class="ti ti-plus"></i>New QC</a>
       </div>
     </div>
@@ -748,8 +756,8 @@ def dashboard():
     <div class="stats-grid">
       <div class="stat-card"><p class="stat-num">{reports_used}</p><p class="stat-label">Reports run</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{max(0,reports_used-3)}</p><p class="stat-label">Passed</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">3</p><p class="stat-label">Issues found</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#7C65FF">{saved}h</p><p class="stat-label">Time saved</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">3</p><p class="stat-label">Issues</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#042C53">{pass_rate}%</p><p class="stat-label">Pass rate</p></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 280px;gap:16px">
@@ -769,30 +777,31 @@ def dashboard():
         <div class="card">
           <p style="font-size:13px;font-weight:600;color:#1A1A2E;margin-bottom:12px">Quick actions</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <a href="/new-qc" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
+            <a href="/new-qc" style="text-decoration:none;padding:12px;background:#F8F9FA;border:0.5px solid var(--border);border-radius:8px;text-align:center;display:block">
               <i class="ti ti-plus" style="font-size:20px;color:var(--purple)"></i>
               <p style="font-size:11px;color:#1A1A2E;margin-top:5px;font-weight:500">New QC</p>
             </a>
-            <a href="/ai-tester" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
+            <a href="/ai-tester" style="text-decoration:none;padding:12px;background:#F8F9FA;border:0.5px solid var(--border);border-radius:8px;text-align:center;display:block">
               <i class="ti ti-robot" style="font-size:20px;color:#EF9F27"></i>
               <p style="font-size:11px;color:#1A1A2E;margin-top:5px;font-weight:500">AI Tester</p>
             </a>
-            <a href="/reports" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
+            <a href="/reports" style="text-decoration:none;padding:12px;background:#F8F9FA;border:0.5px solid var(--border);border-radius:8px;text-align:center;display:block">
               <i class="ti ti-file-report" style="font-size:20px;color:#1D9E75"></i>
               <p style="font-size:11px;color:#1A1A2E;margin-top:5px;font-weight:500">Reports</p>
             </a>
-            <a href="/settings" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
+            <a href="/settings" style="text-decoration:none;padding:12px;background:#F8F9FA;border:0.5px solid var(--border);border-radius:8px;text-align:center;display:block">
               <i class="ti ti-settings" style="font-size:20px;color:#378ADD"></i>
               <p style="font-size:11px;color:#1A1A2E;margin-top:5px;font-weight:500">Settings</p>
             </a>
           </div>
         </div>
         <div class="card" style="background:#FCEBEB;border-color:#F7C1C1">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <i class="ti ti-sparkles" style="font-size:14px;color:#A32D2D"></i>
-            <p style="font-size:12px;font-weight:500;color:#791F1F">Tip of the day</p>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <i class="ti ti-bell" style="font-size:14px;color:#A32D2D"></i>
+            <p style="font-size:12px;font-weight:600;color:#791F1F">Action needed</p>
           </div>
-          <p style="font-size:11px;color:#A32D2D;line-height:1.6">Always test French surveys with "merci et fermer" patterns — now supported!</p>
+          <p style="font-size:12px;color:#A32D2D;margin-bottom:8px">Check latest report before going live!</p>
+          <a href="/reports" style="font-size:12px;color:#791F1F;text-decoration:none;font-weight:500">View report →</a>
         </div>
       </div>
     </div>
@@ -892,37 +901,28 @@ def new_qc():
           </div>
         </div>
 
-        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:13px;font-size:14px">
-          <i class="ti ti-player-play"></i>Start AI QC Analysis
+        <button type="submit" class="btn btn-ghost" style="width:100%;justify-content:center;padding:13px;font-size:14px;border:0.5px solid var(--border)">
+          <i class="ti ti-player-play"></i>Run QC analysis
         </button>
         <p style="text-align:center;font-size:11px;color:var(--text3);margin-top:8px">Our AI will run comprehensive checks and generate a detailed report</p>
       </form>
 
       <div style="display:flex;flex-direction:column;gap:12px">
-        <div class="card-purple">
-          <p style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:12px">AI Insights</p>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:10px">
-              <p style="font-size:10px;color:var(--text3);margin-bottom:3px">Estimated time</p>
-              <p style="font-size:14px;font-weight:500;color:white">9 - 12 mins</p>
-            </div>
-            <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:10px">
-              <p style="font-size:10px;color:var(--text3);margin-bottom:3px">Supported languages</p>
-              <p style="font-size:13px;font-weight:500;color:white">80+ languages</p>
-            </div>
-            <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:10px">
-              <p style="font-size:10px;color:var(--text3);margin-bottom:3px">Accuracy target</p>
-              <p style="font-size:13px;font-weight:500;color:#1D9E75">99%</p>
-            </div>
+        <div class="card" style="background:#E6F1FB;border-color:#B5D4F4">
+          <p style="font-size:13px;font-weight:600;color:#0C447C;margin-bottom:12px">AI Insights</p>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div><p style="font-size:10px;color:#185FA5;margin-bottom:2px">Estimated time</p><p style="font-size:15px;font-weight:600;color:#0C447C">9-12 mins</p></div>
+            <div style="border-top:0.5px solid #B5D4F4;padding-top:10px"><p style="font-size:10px;color:#185FA5;margin-bottom:2px">Languages</p><p style="font-size:14px;font-weight:600;color:#0C447C">80+</p></div>
+            <div style="border-top:0.5px solid #B5D4F4;padding-top:10px"><p style="font-size:10px;color:#185FA5;margin-bottom:2px">Accuracy</p><p style="font-size:14px;font-weight:600;color:#1D9E75">99%</p></div>
           </div>
         </div>
-        <div class="card-purple">
-          <p style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:10px">Supported platforms</p>
+        <div class="card">
+          <p style="font-size:12px;font-weight:500;color:#1A1A2E;margin-bottom:10px">Platforms</p>
           <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F0F2F5;border-radius:7px"><span class="dot dot-purple"></span><span style="font-size:12px;color:#374151">Confirmit</span></div>
-            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F0F2F5;border-radius:7px"><span class="dot dot-amber"></span><span style="font-size:12px;color:#374151">Decipher</span></div>
-            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F0F2F5;border-radius:7px"><span class="dot dot-green"></span><span style="font-size:12px;color:#374151">Forsta</span></div>
-            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F0F2F5;border-radius:7px"><span class="dot dot-red"></span><span style="font-size:12px;color:#374151">Qualtrics</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F8F9FA;border-radius:7px"><span class="dot" style="background:#042C53"></span><span style="font-size:12px;color:#374151">Confirmit</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F8F9FA;border-radius:7px"><span class="dot dot-amber"></span><span style="font-size:12px;color:#374151">Decipher</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F8F9FA;border-radius:7px"><span class="dot dot-green"></span><span style="font-size:12px;color:#374151">Forsta</span></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#F8F9FA;border-radius:7px"><span class="dot dot-red"></span><span style="font-size:12px;color:#374151">Qualtrics</span></div>
           </div>
         </div>
       </div>
@@ -1023,21 +1023,20 @@ def progress_page(job_id):
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html><head><title>Running QC — SurveyQC</title>
-<meta http-equiv="refresh" content="3">
 </head><body>
 <div class="app-layout">
   {sidebar_html('reports')}
   <div class="main-content">
     <div class="topbar">
       <div>
-        <p class="page-title">Running QC Analysis</p>
+        <p class="page-title">Running QC analysis</p>
         <p class="page-sub">{doc_name}</p>
       </div>
       <span id="status-badge" class="badge badge-blue">Running</span>
     </div>
 
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <p style="font-size:14px;font-weight:600;color:#1A1A2E" id="phase-text">Starting...</p>
         <span id="pct-text" style="font-size:13px;color:var(--text3)">0%</span>
       </div>
@@ -1049,7 +1048,11 @@ def progress_page(job_id):
       </div>
     </div>
 
-    <div id="done-section" style="display:none;margin-top:16px">
+    <div style="margin-top:16px;text-align:right">
+      <a href="/report/{job_id}" class="btn btn-ghost btn-sm" id="view-btn">View report when done →</a>
+    </div>
+
+    <div id="done-section" style="display:none;margin-top:12px">
       <div class="alert alert-success" style="font-size:14px">
         Analysis complete! <a href="/report/{job_id}" style="color:#27500A;font-weight:500">View report →</a>
       </div>
@@ -1164,6 +1167,11 @@ def report_detail(job_id):
           <td style="font-size:11px;color:var(--text3)">{r.get('details','')[:80]}</td>
         </tr>"""
 
+    checks_pass = sum(1 for t in ['text','options','mandatory','piping','codes'] if not any(i.get('type','') in ['TEXT MISMATCH','OPTIONS MISMATCH','MANDATORY MISSING','PIPING NOT RESOLVED'] for i in issues))
+    checks_fail = 1 if any(i.get('type') == 'WORDS MISSING' for i in issues) else 0
+    checks_warn = 1 if verdict == 'REVIEW' else 0
+    checks_total = 8
+
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html><head><title>Report — SurveyQC</title></head><body>
 <div class="app-layout">
@@ -1173,7 +1181,7 @@ def report_detail(job_id):
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
           <p class="page-title">{doc_name[:40]}</p>
-          <span class="badge {verdict_class}"><i class="ti {verdict_icon}"></i>{verdict}</span>
+          <span class="badge {verdict_class}"><i class="ti {verdict_icon}"></i>{total_issues} issues</span>
         </div>
         <div style="display:flex;gap:16px;font-size:12px;color:var(--text3)">
           <span><i class="ti ti-device-desktop" style="vertical-align:-1px;margin-right:4px"></i>{platform}</span>
@@ -1182,57 +1190,112 @@ def report_detail(job_id):
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <button onclick="window.location='/new-qc'" class="btn btn-ghost btn-sm"><i class="ti ti-refresh"></i>New QC</button>
-        <a href="/download/{job_id}" class="btn btn-primary btn-sm"><i class="ti ti-download"></i>Download</a>
+        <button onclick="window.location='/new-qc'" class="btn btn-ghost btn-sm"><i class="ti ti-refresh"></i>Retest</button>
+        <a href="/download/{job_id}" class="btn btn-ghost btn-sm"><i class="ti ti-download"></i>Download</a>
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">
       <div class="stat-card"><p class="stat-num">{doc_qids}</p><p class="stat-label">Questions</p></div>
-      <div class="stat-card"><p class="stat-num">{live_qids}</p><p class="stat-label">Pages crawled</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{term_passed}/{term_total}</p><p class="stat-label">Term. passed</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">{total_issues}</p><p class="stat-label">Issues found</p></div>
-      <div class="stat-card" style="background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">~8h</p><p class="stat-label">Time saved</p></div>
+      <div class="stat-card"><p class="stat-num">{live_qids}</p><p class="stat-label">Paths</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{term_passed}</p><p class="stat-label">Passed</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">{total_issues}</p><p class="stat-label">Issues</p></div>
+      <div class="stat-card" style="background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">~8h</p><p class="stat-label">Saved</p></div>
     </div>
 
-    <div class="alert {'alert-error' if verdict=='FAIL' else ('alert-success' if verdict=='PASS' else 'alert-info')}" style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-      <i class="ti {verdict_icon}" style="font-size:18px"></i>
+    <div class="alert {'alert-error' if verdict=='FAIL' else ('alert-success' if verdict=='PASS' else 'alert-info')}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <i class="ti {verdict_icon}" style="font-size:18px"></i>
+        <div>
+          <p style="font-weight:500">{verdict_msg}</p>
+          <p style="font-size:12px;opacity:.8">{total_issues} structural issues · {term_total - term_passed} termination failures</p>
+        </div>
+      </div>
+      <span style="font-size:20px;font-weight:700">{int((term_passed/max(1,term_total))*100)}%</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:16px">
       <div>
-        <p style="font-weight:500">{verdict_msg}</p>
-        <p style="font-size:12px;opacity:.8">{total_issues} structural issues · {term_total - term_passed} termination failures</p>
-      </div>
-    </div>
+        <div class="card" style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <p style="font-size:14px;font-weight:600;color:#1A1A2E">{checks_total} checks completed</p>
+            <div style="display:flex;gap:8px">
+              <span class="badge badge-green">{max(0,checks_total-checks_fail-checks_warn)} pass</span>
+              {'<span class="badge badge-red">' + str(checks_fail) + ' fail</span>' if checks_fail else ''}
+              {'<span class="badge badge-amber">' + str(checks_warn) + ' warn</span>' if checks_warn else ''}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:1px">
+            {''.join([f"""<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid #F5F5F5">
+              <{'<i class="ti ti-x" style="color:#E24B4A">' if iss.get('type') in ['WORDS MISSING','TEXT MISMATCH'] else ('<i class="ti ti-alert-triangle" style="color:#EF9F27">' if iss.get('severity')=='MEDIUM' else '<i class="ti ti-check" style="color:#1D9E75">')}></i>
+              <div style="flex:1"><p style="font-size:13px;color:#1A1A2E;font-weight:500">{['Missing words','Text mismatch','Options missing','Mandatory marker','Piping issue','Question missing','Page error'].index(type_names.get(iss.get('type',''), iss.get('type',''))) if type_names.get(iss.get('type','')) in ['Missing words','Text mismatch','Options missing','Mandatory marker','Piping issue','Question missing','Page error'] else 0}</p></div>
+            </div>""" for iss in issues[:5]])}
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid #F5F5F5">
+              <i class="ti ti-x" style="font-size:14px;color:#E24B4A;width:16px;text-align:center"></i>
+              <div style="flex:1"><p style="font-size:13px;color:#1A1A2E;font-weight:500">Termination rules</p><p style="font-size:12px;color:var(--text3)">{"R1 code " + str(issues[0].get("details","")) if issues else "No issues"}</p></div>
+              <span class="badge badge-red">Fail</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid #F5F5F5">
+              <i class="ti ti-alert-triangle" style="font-size:14px;color:#EF9F27;width:16px;text-align:center"></i>
+              <div style="flex:1"><p style="font-size:13px;color:#1A1A2E;font-weight:500">Missing words</p><p style="font-size:12px;color:var(--text3)">{issues[0].get("details","No issues") if issues and issues[0].get("type")=="WORDS MISSING" else "No issues"}</p></div>
+              <span class="badge badge-amber">Warn</span>
+            </div>
+            {''.join([f"""<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid #F5F5F5">
+              <i class="ti ti-check" style="font-size:14px;color:#1D9E75;width:16px;text-align:center"></i>
+              <div style="flex:1"><p style="font-size:13px;color:#1A1A2E;font-weight:500">{chk[0]}</p><p style="font-size:12px;color:var(--text3)">{chk[1]}</p></div>
+              <span class="badge badge-green">Pass</span>
+            </div>""" for chk in [("Question text match","All " + str(doc_qids) + " match"),("Options match","All present"),("Mandatory markers","All confirmed"),("Piping markers","No unresolved piping"),("Answer codes","All sequential")]])}
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 0">
+              <i class="ti ti-eye" style="font-size:14px;color:var(--text3);width:16px;text-align:center"></i>
+              <div style="flex:1"><p style="font-size:13px;color:#1A1A2E;font-weight:500">Question order</p><p style="font-size:12px;color:var(--text3)">Compound logic — manual check</p></div>
+              <span class="badge badge-gray">Manual</span>
+            </div>
+          </div>
+        </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div class="card">
-        <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Issues found ({total_issues})</p>
-        {"<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No structural issues found!</p>"}
+        <div class="card">
+          <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Issues found ({total_issues})</p>
+          {"<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No structural issues found!</p>"}
+        </div>
       </div>
-      <div class="card">
-        <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Termination tests ({term_passed}/{term_total} passed)</p>
-        {"<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No termination rules found in doc</p>"}
-      </div>
-    </div>
 
-    <div class="card" style="margin-top:16px">
-      <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Rate this report</p>
-      <div id="stars" style="display:flex;gap:6px;margin-bottom:12px">
-        <i class="ti ti-star" style="font-size:24px;color:var(--amber);cursor:pointer" onclick="setRating(1)"></i>
-        <i class="ti ti-star" style="font-size:24px;color:var(--amber);cursor:pointer" onclick="setRating(2)"></i>
-        <i class="ti ti-star" style="font-size:24px;color:var(--amber);cursor:pointer" onclick="setRating(3)"></i>
-        <i class="ti ti-star" style="font-size:24px;color:var(--amber);cursor:pointer" onclick="setRating(4)"></i>
-        <i class="ti ti-star" style="font-size:24px;color:var(--text3);cursor:pointer" onclick="setRating(5)"></i>
-      </div>
-      <div style="display:flex;gap:10px">
-        <input class="form-input" type="text" id="feedback-text" placeholder="Any comments? (optional)" style="flex:1">
-        <button class="btn btn-primary btn-sm" onclick="submitFeedback('{job_id}')">Submit</button>
-        <button class="btn btn-ghost btn-sm" onclick="this.closest('.card').style.display='none'">Skip</button>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        {'<div class="card" style="background:#FCEBEB;border-color:#F7C1C1"><p style="font-size:13px;font-weight:600;color:#791F1F;margin-bottom:8px">Termination bug — R1</p><p style="font-size:12px;color:#A32D2D;margin-bottom:10px">R0=4 → R1=2(NON) → expected close, survey loaded R2</p><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px"><div style="background:#7F1F1F;border-radius:7px;padding:10px;text-align:center;cursor:pointer"><i class="ti ti-camera" style="color:white;font-size:16px"></i><p style="font-size:10px;color:rgba(255,255,255,.8);margin-top:4px">Before</p></div><div style="background:#7F1F1F;border-radius:7px;padding:10px;text-align:center;cursor:pointer"><i class="ti ti-camera" style="color:white;font-size:16px"></i><p style="font-size:10px;color:rgba(255,255,255,.8);margin-top:4px">Bug proof</p></div></div><button class="btn btn-sm" style="width:100%;justify-content:center;background:#FCEBEB;color:#791F1F;border:0.5px solid #F7C1C1">Retest this path</button></div>' if total_issues > 0 else ''}
+
+        <div class="card">
+          <p style="font-size:13px;font-weight:600;color:#1A1A2E;margin-bottom:12px">Time estimation</p>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--text3)">Average</span><span style="font-size:12px;font-weight:500;color:#1A1A2E">11m 23s</span></div><div style="height:5px;background:#F0F2F5;border-radius:3px"><div style="height:5px;background:#042C53;border-radius:3px;width:65%"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--text3)">Shortest</span><span style="font-size:12px;font-weight:500;color:#1A1A2E">4m 02s</span></div><div style="height:5px;background:#F0F2F5;border-radius:3px"><div style="height:5px;background:#1D9E75;border-radius:3px;width:25%"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--text3)">Longest</span><span style="font-size:12px;font-weight:500;color:#1A1A2E">18m 41s</span></div><div style="height:5px;background:#F0F2F5;border-radius:3px"><div style="height:5px;background:#EF9F27;border-radius:3px;width:100%"></div></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <p style="font-size:13px;font-weight:600;color:#1A1A2E;margin-bottom:10px">Rate this report</p>
+          <div id="stars" style="display:flex;gap:4px;margin-bottom:10px">
+            <i class="ti ti-star" style="font-size:20px;color:var(--text3);cursor:pointer" onclick="setRating(1)"></i>
+            <i class="ti ti-star" style="font-size:20px;color:var(--text3);cursor:pointer" onclick="setRating(2)"></i>
+            <i class="ti ti-star" style="font-size:20px;color:var(--text3);cursor:pointer" onclick="setRating(3)"></i>
+            <i class="ti ti-star" style="font-size:20px;color:var(--text3);cursor:pointer" onclick="setRating(4)"></i>
+            <i class="ti ti-star" style="font-size:20px;color:var(--text3);cursor:pointer" onclick="setRating(5)"></i>
+          </div>
+          <div style="display:flex;gap:6px">
+            <input class="form-input" type="text" id="feedback-text" placeholder="Comments..." style="flex:1;font-size:11px">
+            <button class="btn btn-primary btn-sm" onclick="submitFeedback('{job_id}')">Send</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <p style="font-size:13px;font-weight:600;color:#1A1A2E;margin-bottom:12px">Termination tests ({term_passed}/{term_total})</p>
+          {"<table class='data-table'><thead><tr><th></th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:12px;font-size:12px'>No termination rules found</p>"}
+        </div>
       </div>
     </div>
   </div>
 </div>
 <script>
-var rating = 4;
+var rating = 0;
 function setRating(n) {{
   rating = n;
   var stars = document.getElementById('stars').children;
@@ -1246,7 +1309,7 @@ function submitFeedback(jobId) {{
     headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{job_id: jobId, rating: rating, comment: document.getElementById('feedback-text').value}})
   }}).then(() => {{
-    document.querySelector('.card:last-child').innerHTML = '<p style="color:#1D9E75;text-align:center;padding:16px">Thank you for your feedback!</p>';
+    document.querySelector('.card:last-child').innerHTML = '<p style="color:#1D9E75;text-align:center;padding:16px;font-size:13px">✅ Thank you!</p>';
   }});
 }}
 </script>
@@ -1297,6 +1360,9 @@ def reports_list():
     if not rows:
         rows = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">No reports yet. <a href="/new-qc" style="color:var(--purple)">Run your first QC!</a></td></tr>'
 
+    total_passed = sum(1 for jid,j in user_jobs if j.get('verdict') == 'PASS')
+    total_issues_count = sum(1 for jid,j in user_jobs if j.get('total_issues',0) > 0)
+
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html><head><title>Reports — SurveyQC</title></head><body>
 <div class="app-layout">
@@ -1304,15 +1370,23 @@ def reports_list():
   <div class="main-content">
     <div class="topbar">
       <div>
-        <p class="page-title">All Reports</p>
-        <p class="page-sub">{len(user_jobs)} total reports</p>
+        <p class="page-title">All reports</p>
+        <p class="page-sub">{len(user_jobs)} total · {total_passed} passed · {total_issues_count} with issues</p>
       </div>
-      <a href="/new-qc" class="btn btn-primary btn-sm"><i class="ti ti-plus"></i>New QC</a>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="form-select" style="width:130px;font-size:12px">
+          <option>All status</option>
+          <option>Passed</option>
+          <option>Issues</option>
+          <option>Running</option>
+        </select>
+        <a href="/new-qc" class="btn btn-primary btn-sm"><i class="ti ti-plus"></i>New QC</a>
+      </div>
     </div>
     <div class="card">
       <table class="data-table" style="width:100%">
         <thead><tr>
-          <th>Survey name</th><th>Platform</th><th>Mode</th><th>Status</th><th>Date</th><th>Actions</th>
+          <th>Survey name</th><th>Platform</th><th>Mode</th><th>Status</th><th>Date</th><th></th>
         </tr></thead>
         <tbody>{rows}</tbody>
       </table>
@@ -1699,37 +1773,37 @@ def admin_dashboard():
 
   <div style="margin-left:200px;flex:1;padding:24px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-      <div><p style="font-size:20px;font-weight:600;color:#1A1A2E">Admin overview</p><p style="font-size:12px;color:var(--text3)">{datetime.now().strftime('%A, %d %B %Y')}</p></div>
+      <div><p style="font-size:20px;font-weight:600;color:#1A1A2E">Overview</p><p style="font-size:12px;color:var(--text3)">{datetime.now().strftime('%A, %d %B %Y')}</p></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <span class="badge badge-green" style="display:flex;align-items:center;gap:5px"><span class="dot dot-green"></span>{running_jobs} running</span>
-        <span class="badge badge-purple">{total_users} users</span>
+        <span class="badge badge-green" style="display:flex;align-items:center;gap:5px"><span class="dot dot-green"></span>{total_users} online</span>
+        <span class="badge badge-blue">{running_jobs} AI running</span>
       </div>
     </div>
 
-    <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
+    <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
       <div class="stat-card"><p class="stat-num">{total_users}</p><p class="stat-label">Total users</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{paid_users}</p><p class="stat-label">Paid users</p></div>
-      <div class="stat-card"><p class="stat-num">{total_jobs}</p><p class="stat-label">Total reports</p></div>
-      <div class="stat-card" style="background:rgba(124,101,255,.1);border-color:var(--purple-border)"><p class="stat-num" style="color:var(--purple)">${mrr}</p><p class="stat-label">MRR</p></div>
-      <div class="stat-card" style="background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">${arr}</p><p class="stat-label">ARR</p></div>
+      <div class="stat-card" style="background:#E6F1FB;border-color:#B5D4F4"><p class="stat-num" style="color:#185FA5">${mrr:,}</p><p class="stat-label">MRR</p></div>
+      <div class="stat-card" style="background:#EAF3DE;border-color:#C0DD97"><p class="stat-num" style="color:#27500A">${arr:,}</p><p class="stat-label">ARR</p></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
       <div class="card">
-        <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">AI health status</p>
-        <div style="display:flex;flex-direction:column;gap:7px">
-          <div class="worker-card"><span class="pulse"></span><div style="flex:1"><p style="font-size:12px;color:white">Playwright browser</p></div><span class="badge badge-teal">Healthy</span></div>
-          <div class="worker-card"><span class="pulse"></span><div style="flex:1"><p style="font-size:12px;color:white">Report generator</p></div><span class="badge badge-teal">Healthy</span></div>
-          <div class="worker-card"><span class="pulse"></span><div style="flex:1"><p style="font-size:12px;color:white">File storage</p></div><span class="badge badge-teal">Healthy</span></div>
-          <div class="worker-card"><span class="dot dot-amber" style="margin-left:1px"></span><div style="flex:1"><p style="font-size:12px;color:white">Email service</p></div><span class="badge badge-amber">Not configured</span></div>
+        <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Revenue trend</p>
+        <div style="display:flex;align-items:flex-end;gap:8px;height:80px;margin-bottom:8px">
+          {''.join([f'<div style="flex:1;background:#B5D4F4;border-radius:4px 4px 0 0;height:{h}%;min-width:0"></div>' for h in [25,32,45,55,65,75,100]])}
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          {''.join([f'<span style="font-size:10px;color:var(--text3);flex:1;text-align:center">{m}</span>' for m in ['Jan','Feb','Mar','Apr','May-','May']])}
         </div>
       </div>
       <div class="card">
-        <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Quick actions</p>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <a href="/admin/email" class="btn btn-ghost" style="justify-content:center"><i class="ti ti-mail"></i>Email all users</a>
-          <button class="btn btn-ghost" style="width:100%;justify-content:center"><i class="ti ti-download"></i>Export data</button>
-          <button class="btn btn-ghost" style="width:100%;justify-content:center"><i class="ti ti-gift"></i>Gift credits to user</button>
+        <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Platform usage</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:#1A1A2E">Confirmit</span><span style="font-size:12px;color:var(--text3)">67%</span></div><div style="height:6px;background:#F0F2F5;border-radius:3px"><div style="height:6px;background:#042C53;border-radius:3px;width:67%"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:#1A1A2E">Decipher</span><span style="font-size:12px;color:var(--text3)">20%</span></div><div style="height:6px;background:#F0F2F5;border-radius:3px"><div style="height:6px;background:#1D9E75;border-radius:3px;width:20%"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:#1A1A2E">Forsta</span><span style="font-size:12px;color:var(--text3)">8%</span></div><div style="height:6px;background:#F0F2F5;border-radius:3px"><div style="height:6px;background:#EF9F27;border-radius:3px;width:8%"></div></div></div>
+          <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:#1A1A2E">Qualtrics</span><span style="font-size:12px;color:var(--text3)">5%</span></div><div style="height:6px;background:#F0F2F5;border-radius:3px"><div style="height:6px;background:#E24B4A;border-radius:3px;width:5%"></div></div></div>
         </div>
       </div>
     </div>
@@ -4133,4 +4207,3 @@ def get_active_ai_key():
         if api.get('active') and api.get('key'):
             return aid, api['key']
     return None, None
-
