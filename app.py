@@ -2420,17 +2420,6 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 # ================================================================
 # MAIN
 # ================================================================
-if __name__ == '__main__':
-    print("\n" + "="*55)
-    print("  SurveyQC — Full Stack App v10.0")
-    print("="*55)
-    print(f"\n  Open:  http://localhost:5000")
-    print(f"  Admin: http://localhost:5000/admin/login")
-    print(f"  Demo:  demo@surveyqc.com / demo123")
-    print(f"  Admin password: {ADMIN_PASSWORD}")
-    print(f"\n  Press Ctrl+C to stop\n")
-    port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, port=port, host='0.0.0.0')
 
 
 # ================================================================
