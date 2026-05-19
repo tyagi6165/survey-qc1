@@ -327,146 +327,9 @@ def sidebar_html(active='dashboard'):
 # ================================================================
 @app.route('/')
 def landing():
-    return render_template_string(SHARED_CSS + """
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>SurveyQC — AI Survey Testing</title></head><body>
-<div class="public-page">
-  <nav class="pub-nav">
-    <div class="pub-nav-logo">
-      <div style="width:28px;height:28px;background:var(--purple);border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="color:white;font-size:14px"></i></div>
-      <span style="color:white;font-size:15px;font-weight:500;margin-left:9px">SurveyQC</span>
-    </div>
-    <div class="pub-nav-links">
-      <a href="#features" class="pub-link">Features</a>
-      <a href="#how" class="pub-link">How it works</a>
-      <a href="#pricing" class="pub-link">Pricing</a>
-      <a href="/login" class="pub-link">Login</a>
-      <a href="/signup" class="btn btn-primary btn-sm">Start Free</a>
-    </div>
-  </nav>
+    return redirect('/home')
 
-  <div class="pub-hero">
-    <div style="display:inline-flex;align-items:center;gap:7px;background:rgba(124,101,255,.15);border:0.5px solid var(--purple-border);color:#AFA9EC;font-size:12px;padding:5px 14px;border-radius:20px;margin-bottom:18px">
-      <i class="ti ti-sparkles" style="font-size:12px"></i>World's first AI-powered survey QC tool
-    </div>
-    <h1>AI-Powered Survey QC for<br><span>Perfect Data</span></h1>
-    <p>Upload your screener doc and paste the survey URL. Our AI tests every question, every path, every termination rule — in any language, on any platform.</p>
-    <div style="display:flex;gap:12px;justify-content:center">
-      <a href="/signup" class="btn btn-primary" style="font-size:14px;padding:12px 28px">Start Free Trial</a>
-      <button class="btn btn-ghost" style="font-size:14px;padding:12px 24px">Book a Demo</button>
-    </div>
-    <p style="font-size:12px;color:var(--text3);margin-top:12px">No credit card · 5 free reports/month forever</p>
-    <div style="display:flex;gap:20px;justify-content:center;margin-top:20px">
-      <span style="color:var(--text3);font-size:13px;font-weight:500">Confirmit</span>
-      <span style="color:var(--text3);font-size:13px;font-weight:500">Decipher</span>
-      <span style="color:var(--text3);font-size:13px;font-weight:500">Forsta</span>
-      <span style="color:var(--text3);font-size:13px;font-weight:500">Qualtrics</span>
-    </div>
-  </div>
 
-  <div id="features" style="padding:20px 0 50px">
-    <p style="text-align:center;font-size:11px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:16px">What we check automatically</p>
-    <div class="feature-grid">
-      <div class="feature-card">
-        <div class="feature-icon"><i class="ti ti-x-octagon"></i></div>
-        <h3>Termination rules</h3>
-        <p>Tests every close/terminate rule automatically. Catches bugs before they kill your data.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(29,158,117,.15);color:#1D9E75"><i class="ti ti-text-recognition"></i></div>
-        <h3>Text & word match</h3>
-        <p>Catches every missing word and typo between your doc and live survey.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(239,159,39,.15);color:#EF9F27"><i class="ti ti-list-check"></i></div>
-        <h3>Options match</h3>
-        <p>Verifies all answer options exist exactly as specified in your screener.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(226,75,74,.15);color:#E24B4A"><i class="ti ti-asterisk"></i></div>
-        <h3>Mandatory markers</h3>
-        <p>Confirms all required field markers are present and correct.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(55,138,221,.15);color:#378ADD"><i class="ti ti-arrows-shuffle"></i></div>
-        <h3>Piping markers</h3>
-        <p>Detects unresolved piping — no more [PIPE] variables showing to respondents.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(29,158,117,.15);color:#1D9E75"><i class="ti ti-camera"></i></div>
-        <h3>Auto screenshots</h3>
-        <p>Every bug auto-captured with screenshot proof. Share directly with programmers.</p>
-      </div>
-    </div>
-  </div>
-
-  <div id="how" style="padding:20px 0 50px;text-align:center">
-    <p style="font-size:11px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">How it works</p>
-    <p style="font-size:22px;font-weight:500;color:white;margin-bottom:30px">3 steps to perfect QC</p>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:700px;margin:0 auto;padding:0 20px">
-      <div class="card">
-        <div style="width:36px;height:36px;border-radius:50%;background:var(--purple);color:white;font-size:16px;font-weight:500;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">1</div>
-        <p style="font-weight:500;color:white;margin-bottom:6px">Upload doc + URL</p>
-        <p style="font-size:12px;color:var(--text3);line-height:1.6">Upload screener .docx and paste the live survey URL</p>
-      </div>
-      <div class="card">
-        <div style="width:36px;height:36px;border-radius:50%;background:var(--purple);color:white;font-size:16px;font-weight:500;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">2</div>
-        <p style="font-weight:500;color:white;margin-bottom:6px">AI tests everything</p>
-        <p style="font-size:12px;color:var(--text3);line-height:1.6">All 8 checks run automatically with screenshots</p>
-      </div>
-      <div class="card">
-        <div style="width:36px;height:36px;border-radius:50%;background:var(--purple);color:white;font-size:16px;font-weight:500;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">3</div>
-        <p style="font-weight:500;color:white;margin-bottom:6px">Get Word report</p>
-        <p style="font-size:12px;color:var(--text3);line-height:1.6">Download detailed report with all issues and screenshots</p>
-      </div>
-    </div>
-  </div>
-
-  <div id="pricing" style="padding:20px 0 20px;text-align:center">
-    <p style="font-size:22px;font-weight:500;color:white;margin-bottom:6px">Simple pricing</p>
-    <p style="font-size:14px;color:var(--text3);margin-bottom:30px">Start free, upgrade when you need more</p>
-    <div class="pricing-grid">
-      <div class="pricing-card">
-        <h3>Free</h3>
-        <div class="pricing-price">$0<span style="font-size:14px;color:var(--text3)">/mo</span></div>
-        <p class="pricing-sub">5 reports/month forever</p>
-        <div class="pricing-feature"><i class="ti ti-check"></i>All 8 checks</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Word report</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Any language</div>
-        <a href="/signup" class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:12px">Get started</a>
-      </div>
-      <div class="pricing-card featured">
-        <div class="badge badge-purple" style="margin-bottom:10px;font-size:10px">Most popular</div>
-        <h3>Pro</h3>
-        <div class="pricing-price">$29<span style="font-size:14px;color:var(--text3)">/mo</span></div>
-        <p class="pricing-sub">50 reports/month</p>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Everything in Free</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>AI auto tester</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Auto screenshots</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Priority support</div>
-        <a href="/signup" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px">Start Pro trial</a>
-      </div>
-      <div class="pricing-card">
-        <h3>Business</h3>
-        <div class="pricing-price">$99<span style="font-size:14px;color:var(--text3)">/mo</span></div>
-        <p class="pricing-sub">Unlimited reports</p>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Everything in Pro</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Team access</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>API access</div>
-        <div class="pricing-feature"><i class="ti ti-check"></i>Custom onboarding</div>
-        <a href="/signup" class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:12px">Get Business</a>
-      </div>
-    </div>
-  </div>
-
-  <div style="background:white;border-top:0.5px solid var(--border);padding:20px 40px;text-align:center">
-    <p style="color:var(--text3);font-size:12px">© 2026 SurveyQC · Built for QC professionals worldwide</p>
-  </div>
-</div>
-</body></html>""")
-
-# ================================================================
-# PAGE: LOGIN
-# ================================================================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = ''
@@ -604,7 +467,7 @@ def signup():
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect('/')
+    return redirect('/home')
 
 # ================================================================
 # PAGE: DASHBOARD
@@ -3189,7 +3052,7 @@ start_cleanup_scheduler()
 def blog():
     c = site_content
     tag_colors = {
-        'AI & QC':'#E6F1FB|#0C447C','Best Practices':'#EAF3DE|#27500A',
+        'AI & QC':'#F5E6D8|#0C447C','Best Practices':'#EAF3DE|#27500A',
         'Languages':'#EEEDFE|#3C3489','Platforms':'#FAEEDA|#633806',
         'Productivity':'#E1F5EE|#085041','ROI':'#FCEBEB|#791F1F'
     }
@@ -3210,20 +3073,21 @@ def blog():
             '<p style="font-size:13px;color:#6B7280;line-height:1.7;margin-bottom:14px">'+summary+'</p>'
             '<div style="display:flex;justify-content:space-between;align-items:center">'
             '<p style="font-size:11px;color:#9CA3AF">'+date+'</p>'
-            '<span style="font-size:13px;color:#042C53;font-weight:500">Read more &rarr;</span>'
+            '<span style="font-size:13px;color:#1B140F;font-weight:500">Read more &rarr;</span>'
             '</div></div>')
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     page += '<title>Blog - '+c['site_name']+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F8F9FA;color:#1A1A2E}a{text-decoration:none}'
+    page += '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:Inter,Plus Jakarta Sans,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}body{background:#F7F4EE;color:#171717}a{text-decoration:none}'
     page += '.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}'
     page += '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1100px;margin:0 auto}'
     page += '@media(max-width:768px){.grid{grid-template-columns:1fr}.nav{padding:0 16px}}</style></head><body>'
-    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#042C53;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div>'
-    page += '<div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:7px 14px;border-radius:7px;font-weight:500">Sign up free</a></div></nav>'
-    page += '<div style="background:#042C53;padding:50px 40px;text-align:center"><p style="font-size:12px;color:#85B7EB;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Blog</p><h1 style="font-size:36px;font-weight:700;color:white;margin-bottom:10px">QC Insights & Guides</h1><p style="font-size:16px;color:#85B7EB">Best practices, platform guides, and industry news from the QC world.</p></div>'
+    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#1B140F;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div>'
+    page += '<div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:7px 14px;border-radius:7px;font-weight:500">Sign up free</a></div></nav>'
+    page += '<div style="background:#1B140F;padding:50px 40px;text-align:center"><p style="font-size:12px;color:#B8AC9F;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">Blog</p><h1 style="font-size:36px;font-weight:700;color:white;margin-bottom:10px">QC Insights & Guides</h1><p style="font-size:16px;color:#B8AC9F">Best practices, platform guides, and industry news from the QC world.</p></div>'
     page += '<div style="padding:50px 40px"><div class="grid">'+cards+'</div></div>'
-    page += '<footer style="background:#1A1A2E;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p><div style="margin-top:10px;display:flex;gap:16px;justify-content:center"><a href="/home" style="font-size:12px;color:#6B7280">Home</a><a href="/privacy-policy" style="font-size:12px;color:#6B7280">Privacy</a><a href="/terms" style="font-size:12px;color:#6B7280">Terms</a></div></footer>'
+    page += '<footer style="background:#1B140F;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p><div style="margin-top:10px;display:flex;gap:16px;justify-content:center"><a href="/home" style="font-size:12px;color:#6B7280">Home</a><a href="/privacy-policy" style="font-size:12px;color:#6B7280">Privacy</a><a href="/terms" style="font-size:12px;color:#6B7280">Terms</a></div></footer>'
     page += '</body></html>'
     return page
 
@@ -3235,7 +3099,7 @@ def blog():
 def docs():
     c = site_content
     sections = [
-        ('Getting Started','ti-rocket','#E6F1FB','#0C447C',[
+        ('Getting Started','ti-rocket','#F5E6D8','#0C447C',[
             ('Create your account','Sign up free at surveyqc.online. No credit card needed. 5 reports/month free forever.'),
             ('Upload your screener doc','Go to New QC. Upload the .docx screener/spec document for your survey.'),
             ('Paste survey URL','Paste the live survey URL (Confirmit, Decipher, Forsta, or Qualtrics).'),
@@ -3290,11 +3154,11 @@ def docs():
         content_sections += '</div>'
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Docs - '+c['site_name']+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F8F9FA;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}.layout{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 60px)}.sidebar{background:white;border-right:0.5px solid #DDE1E7;padding:24px 16px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto}.content{padding:40px;max-width:800px}@media(max-width:768px){.layout{grid-template-columns:1fr}.sidebar{display:none}.nav{padding:0 16px}.content{padding:20px}}</style></head><body>'
-    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#042C53;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:7px 14px;border-radius:7px;font-weight:500">Sign up free</a></div></nav>'
-    page += '<div class="layout"><div class="sidebar"><p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">Documentation</p>'+nav_items+'<div style="margin-top:20px;padding:12px;background:#E6F1FB;border-radius:8px"><p style="font-size:12px;color:#0C447C;font-weight:500;margin-bottom:4px">Need help?</p><a href="mailto:'+c['support_email']+'" style="font-size:12px;color:#185FA5">'+c['support_email']+'</a></div></div>'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#FBF8F2;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}.layout{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 60px)}.sidebar{background:white;border-right:0.5px solid #DDE1E7;padding:24px 16px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto}.content{padding:40px;max-width:800px}@media(max-width:768px){.layout{grid-template-columns:1fr}.sidebar{display:none}.nav{padding:0 16px}.content{padding:20px}}</style></head><body>'
+    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#1B140F;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:7px 14px;border-radius:7px;font-weight:500">Sign up free</a></div></nav>'
+    page += '<div class="layout"><div class="sidebar"><p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">Documentation</p>'+nav_items+'<div style="margin-top:20px;padding:12px;background:#F5E6D8;border-radius:8px"><p style="font-size:12px;color:#C46A2B;font-weight:500;margin-bottom:4px">Need help?</p><a href="mailto:'+c['support_email']+'" style="font-size:12px;color:#185FA5">'+c['support_email']+'</a></div></div>'
     page += '<div class="content"><h1 style="font-size:28px;font-weight:700;color:#1A1A2E;margin-bottom:8px">Documentation</h1><p style="font-size:15px;color:#6B7280;margin-bottom:32px">'+c['docs_intro']+'</p>'+content_sections+'</div></div>'
-    page += '<footer style="background:#1A1A2E;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
+    page += '<footer style="background:#1B140F;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
     return page
 
 
@@ -3325,15 +3189,15 @@ def compare_page(slug):
         table_rows += '<tr style="background:'+color+'"><td style="padding:12px 16px;font-size:13px;color:#374151;border-right:0.5px solid #DDE1E7">'+col1[i]+'</td><td style="padding:12px 16px;font-size:13px;color:#374151">'+col2[i]+'</td></tr>'
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+heading+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F8F9FA;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}@media(max-width:768px){.nav{padding:0 16px}}</style></head><body>'
-    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#042C53;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:7px 14px;border-radius:7px;font-weight:500">Try free</a></div></nav>'
-    page += '<div style="background:#042C53;padding:50px 40px;text-align:center"><h1 style="font-size:34px;font-weight:700;color:white;margin-bottom:12px">'+heading+'</h1><p style="font-size:16px;color:#85B7EB;max-width:600px;margin:0 auto;line-height:1.7">'+summary+'</p></div>'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#FBF8F2;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}@media(max-width:768px){.nav{padding:0 16px}}</style></head><body>'
+    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#1B140F;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:7px 14px;border-radius:7px;font-weight:500">Try free</a></div></nav>'
+    page += '<div style="background:#1B140F;padding:50px 40px;text-align:center"><h1 style="font-size:34px;font-weight:700;color:white;margin-bottom:12px">'+heading+'</h1><p style="font-size:16px;color:#B8AC9F;max-width:600px;margin:0 auto;line-height:1.7">'+summary+'</p></div>'
     page += '<div style="padding:50px 40px;max-width:900px;margin:0 auto">'
     page += '<div style="background:white;border-radius:14px;overflow:hidden;border:0.5px solid #DDE1E7">'
-    page += '<div style="display:grid;grid-template-columns:1fr 1fr"><div style="padding:16px;background:#042C53;text-align:center"><p style="font-size:15px;font-weight:700;color:white">'+col1[0]+'</p></div><div style="padding:16px;background:#F8F9FA;text-align:center;border-left:0.5px solid #DDE1E7"><p style="font-size:15px;font-weight:600;color:#6B7280">'+col2[0]+'</p></div></div>'
+    page += '<div style="display:grid;grid-template-columns:1fr 1fr"><div style="padding:16px;background:#1B140F;text-align:center"><p style="font-size:15px;font-weight:700;color:white">'+col1[0]+'</p></div><div style="padding:16px;background:#FBF8F2;text-align:center;border-left:0.5px solid #DDE1E7"><p style="font-size:15px;font-weight:600;color:#6B7280">'+col2[0]+'</p></div></div>'
     page += '<table style="width:100%;border-collapse:collapse"><tbody>'+table_rows+'</tbody></table></div>'
-    page += '<div style="text-align:center;margin-top:40px"><p style="font-size:18px;font-weight:600;color:#1A1A2E;margin-bottom:16px">Ready to try '+c['site_name']+'?</p><a href="/signup" style="background:#042C53;color:white;font-size:15px;padding:14px 36px;border-radius:10px;font-weight:600">Start free -- no card required</a></div>'
-    page += '</div><footer style="background:#1A1A2E;padding:30px 40px;text-align:center;margin-top:40px"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
+    page += '<div style="text-align:center;margin-top:40px"><p style="font-size:18px;font-weight:600;color:#1A1A2E;margin-bottom:16px">Ready to try '+c['site_name']+'?</p><a href="/signup" style="background:#1B140F;color:white;font-size:15px;padding:14px 36px;border-radius:10px;font-weight:600">Start free -- no card required</a></div>'
+    page += '</div><footer style="background:#1B140F;padding:30px 40px;text-align:center;margin-top:40px"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
     return page
 
 
@@ -3344,7 +3208,7 @@ def compare_page(slug):
 def community():
     c = site_content
     posts = [
-        ('SarahQC','How I reduced QC time from 8 hours to 15 minutes','Sharing my workflow after using SurveyQC for 3 months. The auto screenshot feature alone saved me countless hours of back-and-forth with developers.','14 replies','2 days ago','#E6F1FB','#0C447C'),
+        ('SarahQC','How I reduced QC time from 8 hours to 15 minutes','Sharing my workflow after using SurveyQC for 3 months. The auto screenshot feature alone saved me countless hours of back-and-forth with developers.','14 replies','2 days ago','#F5E6D8','#0C447C'),
         ('MarieL','French survey QC tips -- accents and encoding','Been testing French surveys on Confirmit. A few things I have learned about handling accent marks and special characters with SurveyQC.','8 replies','5 days ago','#EAF3DE','#27500A'),
         ('JamesMR','Share your QC report templates','Who has built good templates for specific survey types? Sharing mine for trackers and ad hoc studies. Would love to see others.','22 replies','1 week ago','#EEEDFE','#3C3489'),
         ('RahulD','Qualtrics integration -- complete guide','After much trial and error, here is the complete guide to running SurveyQC on Qualtrics surveys including where to find the right URL.','11 replies','1 week ago','#FAEEDA','#633806'),
@@ -3362,15 +3226,15 @@ def community():
             '</div></div></div>')
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Community - '+c['site_name']+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F8F9FA;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}.layout{display:grid;grid-template-columns:1fr 320px;gap:24px;max-width:1100px;margin:0 auto;padding:40px}@media(max-width:768px){.layout{grid-template-columns:1fr}.nav{padding:0 16px}}</style></head><body>'
-    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#042C53;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:7px 14px;border-radius:7px;font-weight:500">Join free</a></div></nav>'
-    page += '<div style="background:#042C53;padding:50px 40px;text-align:center"><p style="font-size:36px">&#128106;</p><h1 style="font-size:34px;font-weight:700;color:white;margin-bottom:12px">'+c['community_heading']+'</h1><p style="font-size:16px;color:#85B7EB;max-width:500px;margin:0 auto">'+c['community_subheading']+'</p></div>'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#FBF8F2;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}.layout{display:grid;grid-template-columns:1fr 320px;gap:24px;max-width:1100px;margin:0 auto;padding:40px}@media(max-width:768px){.layout{grid-template-columns:1fr}.nav{padding:0 16px}}</style></head><body>'
+    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#1B140F;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:7px 14px;border-radius:7px;font-weight:500">Join free</a></div></nav>'
+    page += '<div style="background:#1B140F;padding:50px 40px;text-align:center"><p style="font-size:36px">&#128106;</p><h1 style="font-size:34px;font-weight:700;color:white;margin-bottom:12px">'+c['community_heading']+'</h1><p style="font-size:16px;color:#B8AC9F;max-width:500px;margin:0 auto">'+c['community_subheading']+'</p></div>'
     page += '<div class="layout"><div>'
-    page += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><p style="font-size:16px;font-weight:600;color:#1A1A2E">Recent discussions</p><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:8px 16px;border-radius:8px;font-weight:500">+ New post</a></div>'
+    page += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><p style="font-size:16px;font-weight:600;color:#1A1A2E">Recent discussions</p><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:8px 16px;border-radius:8px;font-weight:500">+ New post</a></div>'
     page += post_cards + '</div>'
     page += '<div><div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:20px;margin-bottom:16px"><p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:12px">Community stats</p><div style="display:flex;flex-direction:column;gap:10px"><div style="display:flex;justify-content:space-between"><span style="font-size:13px;color:#6B7280">Members</span><span style="font-size:13px;font-weight:600;color:#1A1A2E">500+</span></div><div style="display:flex;justify-content:space-between"><span style="font-size:13px;color:#6B7280">Posts</span><span style="font-size:13px;font-weight:600;color:#1A1A2E">1,200+</span></div><div style="display:flex;justify-content:space-between"><span style="font-size:13px;color:#6B7280">Countries</span><span style="font-size:13px;font-weight:600;color:#1A1A2E">40+</span></div></div></div>'
-    page += '<div style="background:#E6F1FB;border-radius:12px;padding:20px"><p style="font-size:14px;font-weight:600;color:#0C447C;margin-bottom:8px">Earn with our affiliate program</p><p style="font-size:13px;color:#185FA5;margin-bottom:12px;line-height:1.6">'+c['affiliate_commission']+'% recurring commission. No cap.</p><a href="/affiliate" style="display:block;text-align:center;background:#042C53;color:white;padding:9px;border-radius:8px;font-size:13px;font-weight:500">Learn more</a></div></div>'
-    page += '</div><footer style="background:#1A1A2E;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
+    page += '<div style="background:#F5E6D8;border-radius:12px;padding:20px"><p style="font-size:14px;font-weight:600;color:#C46A2B;margin-bottom:8px">Earn with our affiliate program</p><p style="font-size:13px;color:#185FA5;margin-bottom:12px;line-height:1.6">'+c['affiliate_commission']+'% recurring commission. No cap.</p><a href="/affiliate" style="display:block;text-align:center;background:#1B140F;color:white;padding:9px;border-radius:8px;font-size:13px;font-weight:500">Learn more</a></div></div>'
+    page += '</div><footer style="background:#1B140F;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
     return page
 
 
@@ -3381,24 +3245,24 @@ def community():
 def affiliate():
     c = site_content
     steps = [
-        ('1','Sign up free','Create your SurveyQC account. No approval needed. Takes 30 seconds.','#E6F1FB','#0C447C'),
+        ('1','Sign up free','Create your SurveyQC account. No approval needed. Takes 30 seconds.','#F5E6D8','#0C447C'),
         ('2','Get your link','Copy your unique affiliate link from Settings > Affiliate.','#EAF3DE','#27500A'),
         ('3','Share it','Share with QC professionals, on LinkedIn, in communities, in blog posts.','#FAEEDA','#633806'),
         ('4','Earn monthly','Get '+c['affiliate_commission']+'% of every payment, every month, forever. No cap.','#EEEDFE','#3C3489'),
     ]
     step_cards = ''
     for num,title,desc,bg,col in steps:
-        step_cards += '<div style="background:'+bg+';border-radius:12px;padding:24px;text-align:center"><div style="width:44px;height:44px;border-radius:50%;background:#042C53;color:white;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;margin:0 auto 16px">'+num+'</div><p style="font-size:15px;font-weight:600;color:#1A1A2E;margin-bottom:8px">'+title+'</p><p style="font-size:13px;color:#6B7280;line-height:1.6">'+desc+'</p></div>'
+        step_cards += '<div style="background:'+bg+';border-radius:12px;padding:24px;text-align:center"><div style="width:44px;height:44px;border-radius:50%;background:#1B140F;color:white;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;margin:0 auto 16px">'+num+'</div><p style="font-size:15px;font-weight:600;color:#1A1A2E;margin-bottom:8px">'+title+'</p><p style="font-size:13px;color:#6B7280;line-height:1.6">'+desc+'</p></div>'
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Affiliate Program - '+c['site_name']+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F8F9FA;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}@media(max-width:768px){.grid4{grid-template-columns:repeat(2,1fr)}.nav{padding:0 16px}}</style></head><body>'
-    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#042C53;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:7px 14px;border-radius:7px;font-weight:500">Join free</a></div></nav>'
-    page += '<div style="background:#042C53;padding:60px 40px;text-align:center"><p style="font-size:40px;margin-bottom:12px">&#128176;</p><h1 style="font-size:36px;font-weight:700;color:white;margin-bottom:12px">'+c['affiliate_heading']+'</h1><p style="font-size:18px;color:#85B7EB;margin-bottom:8px">'+c['affiliate_details']+'</p><p style="font-size:24px;font-weight:700;color:white;margin-top:16px">'+c['affiliate_commission']+'% recurring commission</p></div>'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#FBF8F2;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}@media(max-width:768px){.grid4{grid-template-columns:repeat(2,1fr)}.nav{padding:0 16px}}</style></head><body>'
+    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#1B140F;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:7px 14px;border-radius:7px;font-weight:500">Join free</a></div></nav>'
+    page += '<div style="background:#1B140F;padding:60px 40px;text-align:center"><p style="font-size:40px;margin-bottom:12px">&#128176;</p><h1 style="font-size:36px;font-weight:700;color:white;margin-bottom:12px">'+c['affiliate_heading']+'</h1><p style="font-size:18px;color:#B8AC9F;margin-bottom:8px">'+c['affiliate_details']+'</p><p style="font-size:24px;font-weight:700;color:white;margin-top:16px">'+c['affiliate_commission']+'% recurring commission</p></div>'
     page += '<div style="padding:60px 40px;max-width:1000px;margin:0 auto">'
     page += '<div style="text-align:center;margin-bottom:40px"><h2 style="font-size:28px;font-weight:700;color:#1A1A2E;margin-bottom:8px">How it works</h2></div>'
     page += '<div class="grid4" style="margin-bottom:50px">'+step_cards+'</div>'
-    page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:14px;padding:32px;text-align:center"><h3 style="font-size:22px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Example earnings</h3><p style="font-size:14px;color:#6B7280;margin-bottom:24px">If you refer 10 Pro users ($29/mo each):</p><p style="font-size:36px;font-weight:700;color:#042C53;margin-bottom:4px">$87/month</p><p style="font-size:14px;color:#9CA3AF">recurring, every month, forever &middot; $1,044/year</p><a href="/signup" style="display:inline-block;background:#042C53;color:white;font-size:15px;padding:14px 36px;border-radius:10px;font-weight:600;margin-top:24px">Start earning free</a></div>'
-    page += '</div><footer style="background:#1A1A2E;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
+    page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:14px;padding:32px;text-align:center"><h3 style="font-size:22px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Example earnings</h3><p style="font-size:14px;color:#6B7280;margin-bottom:24px">If you refer 10 Pro users ($29/mo each):</p><p style="font-size:36px;font-weight:700;color:#1B140F;margin-bottom:4px">$87/month</p><p style="font-size:14px;color:#9CA3AF">recurring, every month, forever &middot; $1,044/year</p><a href="/signup" style="display:inline-block;background:#1B140F;color:white;font-size:15px;padding:14px 36px;border-radius:10px;font-weight:600;margin-top:24px">Start earning free</a></div>'
+    page += '</div><footer style="background:#1B140F;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
     return page
 
 
@@ -3410,7 +3274,7 @@ def changelog():
     c = site_content
     logs = [
         (c['changelog_v10'],'May 2026','#EAF3DE','#27500A','Latest'),
-        (c['changelog_v9'],'April 2026','#E6F1FB','#0C447C',''),
+        (c['changelog_v9'],'April 2026','#F5E6D8','#0C447C',''),
         (c['changelog_v8'],'March 2026','#FAEEDA','#633806',''),
         (c['changelog_v7'],'February 2026','#EEEDFE','#3C3489',''),
         (c['changelog_v6'],'January 2026','#F1EFE8','#444441',''),
@@ -3422,11 +3286,11 @@ def changelog():
         items += '<div style="display:flex;gap:20px;margin-bottom:24px"><div style="text-align:right;min-width:90px;padding-top:4px"><p style="font-size:12px;color:#9CA3AF">'+date+'</p></div><div style="display:flex;flex-direction:column;align-items:center"><div style="width:12px;height:12px;border-radius:50%;background:'+col+';margin-top:4px;flex-shrink:0"></div><div style="width:1px;background:#DDE1E7;flex:1;margin-top:4px"></div></div><div style="flex:1;background:white;border:0.5px solid #DDE1E7;border-radius:10px;padding:16px;margin-bottom:4px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><p style="font-size:14px;font-weight:600;color:#1A1A2E">'+version+'</p>'+(('<span style="background:'+bg+';color:'+col+';font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500">'+label+'</span>') if label else '')+'</div><p style="font-size:13px;color:#6B7280;line-height:1.6">'+rest+'</p></div></div>'
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Changelog - '+c['site_name']+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F8F9FA;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}@media(max-width:768px){.nav{padding:0 16px}}</style></head><body>'
-    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#042C53;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#042C53;padding:7px 14px;border-radius:7px;font-weight:500">Sign up</a></div></nav>'
-    page += '<div style="background:#042C53;padding:50px 40px;text-align:center"><h1 style="font-size:34px;font-weight:700;color:white;margin-bottom:10px">Changelog</h1><p style="font-size:16px;color:#85B7EB">What is new in '+c['site_name']+'</p></div>'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#FBF8F2;color:#1A1A2E}a{text-decoration:none}.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}@media(max-width:768px){.nav{padding:0 16px}}</style></head><body>'
+    page += '<nav class="nav"><div style="display:flex;align-items:center;gap:10px"><div style="width:28px;height:28px;background:#1B140F;border-radius:7px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:14px;color:white"></i></div><a href="/home" style="font-size:15px;font-weight:700;color:#1A1A2E">'+c['site_name']+'</a></div><div style="display:flex;gap:10px"><a href="/login" style="font-size:13px;color:#6B7280;padding:7px 14px;border:0.5px solid #DDE1E7;border-radius:7px">Sign in</a><a href="/signup" style="font-size:13px;color:white;background:#1B140F;padding:7px 14px;border-radius:7px;font-weight:500">Sign up</a></div></nav>'
+    page += '<div style="background:#1B140F;padding:50px 40px;text-align:center"><h1 style="font-size:34px;font-weight:700;color:white;margin-bottom:10px">Changelog</h1><p style="font-size:16px;color:#B8AC9F">What is new in '+c['site_name']+'</p></div>'
     page += '<div style="padding:50px 40px;max-width:700px;margin:0 auto">'+items+'</div>'
-    page += '<footer style="background:#1A1A2E;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
+    page += '<footer style="background:#1B140F;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
     return page
 
 
@@ -4570,8 +4434,8 @@ def admin_privacy():
           </select>
         </div>
       </div>
-      <div style="background:#E6F1FB;border-radius:8px;padding:12px;margin-bottom:12px">
-        <p style="font-size:11px;color:#0C447C">🕛 Auto-delete runs every night at 12:00 AM · Compliant: 🇪🇺 GDPR · 🇺🇸 CCPA · 🇮🇳 DPDP · 🇬🇧 UK · 🇦🇺 AUS</p>
+      <div style="background:#F5E6D8;border-radius:8px;padding:12px;margin-bottom:12px">
+        <p style="font-size:11px;color:#C46A2B">🕛 Auto-delete runs every night at 12:00 AM · Compliant: 🇪🇺 GDPR · 🇺🇸 CCPA · 🇮🇳 DPDP · 🇬🇧 UK · 🇦🇺 AUS</p>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px;cursor:pointer">
         <input type="checkbox" name="auto_delete" {'checked' if privacy_settings['auto_delete_enabled'] else ''} style="width:15px;height:15px">
@@ -4822,9 +4686,9 @@ def admin_apis():
         masked = chr(8226)*10 + a['key'][-4:] if len(a.get('key','')) > 4 else ''
         ph = 'Update key...' if has_key else 'Paste API key...'
         lbl = 'Disable' if is_active else 'Enable'
-        toggle = ('<form method="POST" style="display:inline"><input type="hidden" name="api_id" value="'+aid+'"><input type="hidden" name="action" value="toggle"><button type="submit" style="background:#F8F9FA;color:#374151;border:0.5px solid #DDE1E7;font-size:11px;padding:5px 10px;border-radius:7px;cursor:pointer;margin-right:4px">'+lbl+'</button></form>') if has_key else ''
+        toggle = ('<form method="POST" style="display:inline"><input type="hidden" name="api_id" value="'+aid+'"><input type="hidden" name="action" value="toggle"><button type="submit" style="background:#FBF8F2;color:#374151;border:0.5px solid #DDE1E7;font-size:11px;padding:5px 10px;border-radius:7px;cursor:pointer;margin-right:4px">'+lbl+'</button></form>') if has_key else ''
         remove = ('<form method="POST" style="display:inline"><input type="hidden" name="api_id" value="'+aid+'"><input type="hidden" name="action" value="delete"><button type="submit" style="background:#FCEBEB;color:#791F1F;border:none;font-size:11px;padding:5px 10px;border-radius:7px;cursor:pointer">Remove</button></form>') if has_key else ''
-        masked_row = ('<p style="font-family:monospace;font-size:11px;background:#F8F9FA;padding:4px 8px;border-radius:5px;margin-bottom:8px;color:#9CA3AF">'+masked+'</p>') if masked else ''
+        masked_row = ('<p style="font-family:monospace;font-size:11px;background:#FBF8F2;padding:4px 8px;border-radius:5px;margin-bottom:8px;color:#9CA3AF">'+masked+'</p>') if masked else ''
         return ('<div style="background:'+bg+';border:0.5px solid '+border+';border-radius:10px;padding:14px;margin-bottom:10px">'
             '<div style="display:flex;align-items:start;gap:10px">'
             '<div style="width:34px;height:34px;border-radius:8px;background:'+a['color']+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
@@ -4837,7 +4701,7 @@ def admin_apis():
             '<form method="POST" style="display:flex;gap:6px;margin-bottom:6px">'
             '<input type="hidden" name="api_id" value="'+aid+'"><input type="hidden" name="action" value="save">'
             '<input name="key" type="password" placeholder="'+ph+'" style="flex:1;padding:7px 10px;border:0.5px solid #DDE1E7;border-radius:7px;font-size:12px;outline:none">'
-            '<button type="submit" style="background:#042C53;color:white;border:none;font-size:12px;padding:7px 12px;border-radius:7px;cursor:pointer;white-space:nowrap">Save</button>'
+            '<button type="submit" style="background:#1B140F;color:white;border:none;font-size:12px;padding:7px 12px;border-radius:7px;cursor:pointer;white-space:nowrap">Save</button>'
             '</form>'
             '<div style="display:flex;align-items:center;gap:4px">'+toggle+remove+'<a href="https://'+a['docs']+'" target="_blank" style="font-size:10px;color:#185FA5;margin-left:6px">Get key</a></div>'
             '</div></div></div>')
@@ -4860,7 +4724,7 @@ def admin_apis():
     page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:8px;padding:10px 16px;text-align:center"><p style="font-size:18px;font-weight:600;color:#1A1A2E">'+str(len(api_store))+'</p><p style="font-size:10px;color:#6B7280">Total</p></div>'
     page += '<div style="background:#FCEBEB;border-radius:8px;padding:10px 16px;text-align:center"><p style="font-size:18px;font-weight:600;color:#791F1F">'+str(not_added)+'</p><p style="font-size:10px;color:#A32D2D">Not added</p></div>'
     page += '</div></div>'+alert
-    page += '<div style="background:#E6F1FB;border:0.5px solid #B5D4F4;border-radius:10px;padding:12px 16px;margin-bottom:20px"><p style="font-size:12px;color:#0C447C">Security: API keys server pe store hoti hain. GitHub pe kabhi nahi jaati. Sirf admin dekh sakta hai.</p></div>'
+    page += '<div style="background:#F5E6D8;border:0.5px solid #B5D4F4;border-radius:10px;padding:12px 16px;margin-bottom:20px"><p style="font-size:12px;color:#C46A2B">Security: API keys server pe store hoti hain. GitHub pe kabhi nahi jaati. Sirf admin dekh sakta hai.</p></div>'
     page += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">'
     page += '<div><p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">AI APIs</p>'+ai_html
     page += '<p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 12px">Notifications</p>'+notif_html+'</div>'
