@@ -251,6 +251,11 @@ tr:hover td{background:#FCFAF6}
 @media(max-width:480px){
   .stats-grid{grid-template-columns:1fr}
 }
+
+.time-saved-banner{background:linear-gradient(135deg,#FFFDF9,#F5E6D8);border:1px solid #E8C9A7;border-radius:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.stat-card{transition:all .2s}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(24,17,10,0.08)}
+.card:hover{box-shadow:0 8px 24px rgba(24,17,10,0.06)}
 </style>
 """
 
@@ -639,7 +644,7 @@ def dashboard():
       <div>
         <p style="font-size:11px;color:var(--text3);margin-bottom:5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase">This month you saved</p>
         <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
-          <p style="font-size:30px;font-weight:700;color:white">{saved} hours</p>
+          <p style="font-size:32px;font-weight:800;color:#2E8B57;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.5px">{saved} hours</p>
           <p style="font-size:13px;color:var(--green);font-weight:500">= {saved//8 if saved > 0 else 0} full working days back in your life</p>
         </div>
         <p style="font-size:11px;color:var(--text3)">{reports_used} surveys completed — manual would take {reports_used*8}h, SurveyQC did it in {reports_used} mins</p>
@@ -654,9 +659,9 @@ def dashboard():
 
     <div class="stats-grid">
       <div class="stat-card"><p class="stat-num">{reports_used}</p><p class="stat-label">Reports run</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{max(0,reports_used-3)}</p><p class="stat-label">Passed</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">3</p><p class="stat-label">Issues found</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#7C65FF">{saved}h</p><p class="stat-label">Time saved</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#3F7D58">{max(0,reports_used-3)}</p><p class="stat-label">Passed</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#C84B31">3</p><p class="stat-label">Issues found</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#2E8B57">{saved}h</p><p class="stat-label">Time saved</p></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 280px;gap:16px">
@@ -2612,6 +2617,13 @@ site_content = {
     'docs_intro': 'SurveyQC documentation -- everything you need to run perfect QC checks.',
 }
 
+token_limits = {
+    'free': 20000,
+    'pro': 100000,
+    'business': 150000,
+    'monthly_budget': 50,
+}
+
 
 # ---- COUPONS STORE ----
 coupons_db = {}
@@ -4197,8 +4209,8 @@ img{max-width:100%}
 .trusted-row{display:flex;align-items:center;justify-content:center;gap:48px;flex-wrap:wrap;opacity:.7}
 .trusted-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:700;color:var(--text2)}
 
-.section{padding:100px 24px}
-.container{max-width:1180px;margin:0 auto}
+.section{padding:120px 24px}
+.container{max-width:1280px;margin:0 auto;padding:0 24px}
 .sec-head{text-align:center;max-width:720px;margin:0 auto 64px}
 .sec-tag{display:inline-block;background:var(--accent-bg);color:var(--accent);font-size:12px;font-weight:700;padding:5px 14px;border-radius:100px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px}
 .sec-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(28px,4vw,46px);font-weight:800;line-height:1.1;letter-spacing:-1.2px;margin-bottom:18px;color:var(--text)}
@@ -4276,7 +4288,7 @@ img{max-width:100%}
   .nav-cta .btn-sign{display:none}
   .nav{padding:0 18px}
   .hero{padding:60px 18px 70px}
-  .section{padding:64px 18px}
+  .section{padding:80px 18px}
   .cta-banner{padding:64px 18px}
   .cta-inner{padding:48px 28px;border-radius:24px}
   .feat-grid,.steps-grid,.test-grid{grid-template-columns:1fr;gap:14px}
@@ -4371,12 +4383,12 @@ img{max-width:100%}
     </div>
     <div class="feat-grid">
       <div class="feat-card">
-        <div class="feat-icon"><i class="ti ti-x-octagon"></i></div>
+        <div class="feat-icon"><i class="ti ti-shield-check"></i></div>
         <div class="feat-title">""" + c['feature1_title'] + """</div>
         <div class="feat-desc">""" + c['feature1_desc'] + """</div>
       </div>
       <div class="feat-card">
-        <div class="feat-icon"><i class="ti ti-text-recognition"></i></div>
+        <div class="feat-icon"><i class="ti ti-search"></i></div>
         <div class="feat-title">""" + c['feature2_title'] + """</div>
         <div class="feat-desc">""" + c['feature2_desc'] + """</div>
       </div>
