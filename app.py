@@ -41,6 +41,21 @@ from werkzeug.utils import secure_filename
 # ================================================================
 # CONFIG
 # ================================================================
+
+# Load API keys from .env file
+import os
+from pathlib import Path
+
+def load_env():
+    env_file = Path('/var/www/surveyqc/.env')
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if '=' in line and not line.startswith('#'):
+                key, val = line.split('=', 1)
+                os.environ[key.strip()] = val.strip()
+
+load_env()
+
 app = Flask(__name__)
 app.secret_key = 'surveyqc-secret-key-change-in-production'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
@@ -117,8 +132,9 @@ def get_current_user():
 # CSS + JS (shared across all pages)
 # ================================================================
 SHARED_CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="/admin-sidebar-js"></script>
+
+
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
 <style>
 :root {
@@ -156,7 +172,7 @@ SHARED_CSS = """
   --color-border-secondary: #E8E1D8;
   --color-border-tertiary: #F0EBE3;
 }
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
 body{background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:#F0EBE3}
@@ -256,6 +272,9 @@ tr:hover td{background:#FCFAF6}
 .stat-card{transition:all .2s}
 .stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(24,17,10,0.08)}
 .card:hover{box-shadow:0 8px 24px rgba(24,17,10,0.06)}
+
+.content-narrow{max-width:880px}
+.content-wide{max-width:1200px}
 </style>
 """
 
@@ -353,56 +372,56 @@ def login():
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sign in \u2014 SurveyQC</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
-:root{{--bg:#F7F4EE;--card:#FFFFFF;--text:#171717;--text2:#5F5B53;--text3:#8A847A;--accent:#C46A2B;--accent-hover:#A9551F;--accent-bg:#F5E6D8;--border:#E8E1D8;--dark:#1B140F;--danger:#C84B31;--success:#3F7D58;--shadow-lg:0 10px 40px rgba(24,17,10,0.08)}}
-*{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Plus Jakarta Sans',sans-serif;-webkit-font-smoothing:antialiased}}
-body{{background:var(--bg);color:var(--text);min-height:100vh;display:flex}}
-a{{text-decoration:none;color:inherit}}
-.auth-wrap{{display:grid;grid-template-columns:1fr 1fr;width:100%;min-height:100vh}}
-.auth-left{{background:var(--dark);padding:56px 64px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}}
-.auth-left::before{{content:"";position:absolute;top:-100px;right:-100px;width:400px;height:400px;background:radial-gradient(circle,rgba(196,106,43,.3),transparent 70%);pointer-events:none}}
-.auth-logo{{display:flex;align-items:center;gap:11px;position:relative;z-index:1}}
-.auth-logo-mark{{width:36px;height:36px;background:var(--accent);border-radius:9px;display:flex;align-items:center;justify-content:center}}
-.auth-logo-text{{font-family:'Plus Jakarta Sans',sans-serif;font-size:19px;font-weight:700;color:white}}
-.auth-left-content{{position:relative;z-index:1}}
-.auth-left-content h2{{font-family:'Plus Jakarta Sans',sans-serif;font-size:34px;font-weight:800;color:white;line-height:1.2;letter-spacing:-1px;margin-bottom:20px}}
-.auth-quote{{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:24px;margin-top:32px}}
-.auth-quote p{{font-size:15px;color:#E8DDD2;line-height:1.7;margin-bottom:16px}}
-.auth-quote-author{{display:flex;align-items:center;gap:12px}}
-.auth-quote-avatar{{width:40px;height:40px;border-radius:50%;background:var(--accent);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}}
-.auth-quote-name{{font-size:14px;font-weight:700;color:white}}
-.auth-quote-role{{font-size:12px;color:#9A8C7B}}
-.auth-stats{{display:flex;gap:32px;position:relative;z-index:1}}
-.auth-stat-num{{font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:800;color:white}}
-.auth-stat-lbl{{font-size:12px;color:#9A8C7B;margin-top:2px}}
-.auth-right{{display:flex;align-items:center;justify-content:center;padding:40px 24px;background:var(--bg)}}
-.auth-card{{width:100%;max-width:400px}}
-.auth-card h1{{font-family:'Plus Jakarta Sans',sans-serif;font-size:30px;font-weight:800;letter-spacing:-1px;margin-bottom:8px}}
-.auth-card-sub{{font-size:15px;color:var(--text2);margin-bottom:32px}}
-.auth-card-sub a{{color:var(--accent);font-weight:600}}
-.form-group{{margin-bottom:18px}}
-.form-label{{font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:7px}}
-.form-input{{width:100%;padding:13px 16px;border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text);background:white;outline:none;transition:all .15s;font-family:inherit}}
-.form-input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(196,106,43,.12)}}
-.auth-btn{{width:100%;background:var(--dark);color:#F7F4EE;border:none;padding:14px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;margin-top:6px}}
-.auth-btn:hover{{background:#2A1F18;transform:translateY(-1px)}}
-.auth-error{{background:#FAE5E0;border:1px solid #F0C4BA;color:var(--danger);font-size:13px;padding:11px 14px;border-radius:10px;margin-bottom:18px;display:flex;align-items:center;gap:8px}}
-.auth-divider{{display:flex;align-items:center;gap:14px;margin:24px 0;color:var(--text3);font-size:13px}}
-.auth-divider::before,.auth-divider::after{{content:"";flex:1;height:1px;background:var(--border)}}
-.auth-social{{display:flex;gap:10px}}
-.auth-social-btn{{flex:1;border:1px solid var(--border);background:white;border-radius:12px;padding:11px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer;transition:all .15s}}
-.auth-social-btn:hover{{background:var(--bg)}}
-.auth-row{{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}}
-.auth-check{{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text2);cursor:pointer}}
-.auth-link{{font-size:13px;color:var(--accent);font-weight:600}}
-.auth-back{{position:absolute;top:24px;left:24px;font-size:13px;color:#9A8C7B;display:flex;align-items:center;gap:6px;z-index:2}}
-.auth-back:hover{{color:white}}
-@media(max-width:900px){{
-  .auth-wrap{{grid-template-columns:1fr}}
-  .auth-left{{display:none}}
-  .auth-right{{padding:40px 20px}}
-}}
+:root{--bg:#F7F4EE;--card:#FFFFFF;--text:#171717;--text2:#5F5B53;--text3:#8A847A;--accent:#C46A2B;--accent-hover:#A9551F;--accent-bg:#F5E6D8;--border:#E8E1D8;--dark:#1B140F;--danger:#C84B31;--success:#3F7D58;--shadow-lg:0 10px 40px rgba(24,17,10,0.08)}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--text);min-height:100vh;display:flex}
+a{text-decoration:none;color:inherit}
+.auth-wrap{display:grid;grid-template-columns:1fr 1fr;width:100%;min-height:100vh}
+.auth-left{background:var(--dark);padding:56px 64px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.auth-left::before{content:"";position:absolute;top:-100px;right:-100px;width:400px;height:400px;background:radial-gradient(circle,rgba(196,106,43,.3),transparent 70%);pointer-events:none}
+.auth-logo{display:flex;align-items:center;gap:11px;position:relative;z-index:1}
+.auth-logo-mark{width:36px;height:36px;background:var(--accent);border-radius:9px;display:flex;align-items:center;justify-content:center}
+.auth-logo-text{font-family:'Plus Jakarta Sans',sans-serif;font-size:19px;font-weight:700;color:white}
+.auth-left-content{position:relative;z-index:1}
+.auth-left-content h2{font-family:'Plus Jakarta Sans',sans-serif;font-size:34px;font-weight:800;color:white;line-height:1.2;letter-spacing:-1px;margin-bottom:20px}
+.auth-quote{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:24px;margin-top:32px}
+.auth-quote p{font-size:15px;color:#E8DDD2;line-height:1.7;margin-bottom:16px}
+.auth-quote-author{display:flex;align-items:center;gap:12px}
+.auth-quote-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.auth-quote-name{font-size:14px;font-weight:700;color:white}
+.auth-quote-role{font-size:12px;color:#9A8C7B}
+.auth-stats{display:flex;gap:32px;position:relative;z-index:1}
+.auth-stat-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:800;color:white}
+.auth-stat-lbl{font-size:12px;color:#9A8C7B;margin-top:2px}
+.auth-right{display:flex;align-items:center;justify-content:center;padding:40px 24px;background:var(--bg)}
+.auth-card{width:100%;max-width:400px}
+.auth-card h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:30px;font-weight:800;letter-spacing:-1px;margin-bottom:8px}
+.auth-card-sub{font-size:15px;color:var(--text2);margin-bottom:32px}
+.auth-card-sub a{color:var(--accent);font-weight:600}
+.form-group{margin-bottom:18px}
+.form-label{font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:7px}
+.form-input{width:100%;padding:13px 16px;border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text);background:white;outline:none;transition:all .15s;font-family:inherit}
+.form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(196,106,43,.12)}
+.auth-btn{width:100%;background:var(--dark);color:#F7F4EE;border:none;padding:14px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;margin-top:6px}
+.auth-btn:hover{background:#2A1F18;transform:translateY(-1px)}
+.auth-error{background:#FAE5E0;border:1px solid #F0C4BA;color:var(--danger);font-size:13px;padding:11px 14px;border-radius:10px;margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.auth-divider{display:flex;align-items:center;gap:14px;margin:24px 0;color:var(--text3);font-size:13px}
+.auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--border)}
+.auth-social{display:flex;gap:10px}
+.auth-social-btn{flex:1;border:1px solid var(--border);background:white;border-radius:12px;padding:11px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer;transition:all .15s}
+.auth-social-btn:hover{background:var(--bg)}
+.auth-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.auth-check{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text2);cursor:pointer}
+.auth-link{font-size:13px;color:var(--accent);font-weight:600}
+.auth-back{position:absolute;top:24px;left:24px;font-size:13px;color:#9A8C7B;display:flex;align-items:center;gap:6px;z-index:2}
+.auth-back:hover{color:white}
+@media(max-width:900px){
+  .auth-wrap{grid-template-columns:1fr}
+  .auth-left{display:none}
+  .auth-right{padding:40px 20px}
+}
 </style></head><body>
 <div class="auth-wrap">
   <div class="auth-left">
@@ -487,10 +506,10 @@ def signup():
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sign up \u2014 SurveyQC</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
 :root{--bg:#F7F4EE;--card:#FFFFFF;--text:#171717;--text2:#5F5B53;--text3:#8A847A;--accent:#C46A2B;--accent-hover:#A9551F;--accent-bg:#F5E6D8;--border:#E8E1D8;--dark:#1B140F;--danger:#C84B31;--success:#3F7D58}
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Plus Jakarta Sans',sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 body{background:var(--bg);color:var(--text);min-height:100vh;display:flex}
 a{text-decoration:none;color:inherit}
 .auth-wrap{display:grid;grid-template-columns:1fr 1fr;width:100%;min-height:100vh}
@@ -944,6 +963,7 @@ def progress_page(job_id):
         <p class="page-sub">{doc_name}</p>
       </div>
       <span id="status-badge" class="badge badge-blue">Running</span>
+      <button onclick="stopJob()" id="stop-btn" style="margin-left:12px;background:#dc2626;color:white;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">⏹ Stop</button>
     </div>
 
     <div class="card">
@@ -1006,8 +1026,28 @@ function poll() {{
 
 var timer = setInterval(poll, 1500);
 poll();
+function stopJob() {{
+  if(!confirm('Stop this QC run?')) return;
+  fetch('/stop/' + jobId, {{method:'POST'}})
+    .then(() => {{
+      document.getElementById('stop-btn').textContent = 'Stopped';
+      document.getElementById('stop-btn').disabled = true;
+      clearInterval(timer);
+      document.getElementById('status-badge').textContent = 'Stopped';
+      document.getElementById('status-badge').className = 'badge badge-red';
+    }});
+}}
 </script>
 </body></html>""")
+
+
+@app.route('/stop/<job_id>', methods=['POST'])
+@login_required
+def stop_job(job_id):
+    if job_id in jobs:
+        jobs[job_id]['status'] = 'stopped'
+        jobs[job_id]['phase'] = 'Stopped by user'
+    return jsonify({'ok': True})
 
 # ================================================================
 # PAGE: REPORT DETAIL
@@ -1027,6 +1067,7 @@ def report_detail(job_id):
     issues = j.get('issues', [])
     term_results = j.get('term_results', [])
     verdict = j.get('verdict', 'REVIEW')
+    ai_summary = j.get('ai_summary', '')
     doc_qids = j.get('doc_qids', 0)
     live_qids = j.get('live_qids', 0)
     term_passed = j.get('term_passed', 0)
@@ -1113,6 +1154,8 @@ def report_detail(job_id):
         <p style="font-size:12px;opacity:.8">{total_issues} structural issues · {term_total - term_passed} termination failures</p>
       </div>
     </div>
+
+    {f'<div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="ti ti-sparkles" style="color:var(--accent);font-size:16px"></i><span style="font-size:13px;font-weight:700;color:var(--text)">AI Summary</span></div><p style="font-size:14px;color:var(--text2);line-height:1.7">{ai_summary}</p></div>' if ai_summary else ''}
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div class="card">
@@ -1220,16 +1263,59 @@ def reports_list():
       </div>
       <a href="/new-qc" class="btn btn-primary btn-sm"><i class="ti ti-plus"></i>New QC</a>
     </div>
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px;position:relative">
+        <i class="ti ti-search" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:16px"></i>
+        <input type="text" id="searchBox" onkeyup="filterReports()" placeholder="Search reports..." style="width:100%;padding:11px 14px 11px 40px;border:1px solid var(--border);border-radius:12px;font-size:14px;font-family:inherit;outline:none;background:white">
+      </div>
+      <select id="platformFilter" onchange="filterReports()" style="padding:11px 14px;border:1px solid var(--border);border-radius:12px;font-size:14px;font-family:inherit;background:white;outline:none;cursor:pointer">
+        <option value="">All platforms</option>
+        <option value="confirmit">Confirmit</option>
+        <option value="decipher">Decipher</option>
+        <option value="forsta">Forsta</option>
+        <option value="qualtrics">Qualtrics</option>
+      </select>
+      <select id="statusFilter" onchange="filterReports()" style="padding:11px 14px;border:1px solid var(--border);border-radius:12px;font-size:14px;font-family:inherit;background:white;outline:none;cursor:pointer">
+        <option value="">All status</option>
+        <option value="pass">Passed</option>
+        <option value="fail">Issues</option>
+        <option value="running">Running</option>
+      </select>
+    </div>
     <div class="card">
       <table class="data-table" style="width:100%">
         <thead><tr>
           <th>Survey name</th><th>Platform</th><th>Mode</th><th>Status</th><th>Date</th><th>Actions</th>
         </tr></thead>
-        <tbody>{rows}</tbody>
+        <tbody id="reportsBody">{rows}</tbody>
       </table>
+      <div id="noResults" style="display:none;text-align:center;color:var(--text3);padding:24px">No reports match your filters.</div>
     </div>
   </div>
 </div>
+<script>
+function filterReports(){{
+  var q=document.getElementById('searchBox').value.toLowerCase();
+  var plat=document.getElementById('platformFilter').value.toLowerCase();
+  var stat=document.getElementById('statusFilter').value.toLowerCase();
+  var rows=document.querySelectorAll('#reportsBody tr');
+  var visible=0;
+  rows.forEach(function(r){{
+    var txt=r.textContent.toLowerCase();
+    var show=true;
+    if(q && txt.indexOf(q)===-1) show=false;
+    if(plat && txt.indexOf(plat)===-1) show=false;
+    if(stat){{
+      if(stat==='pass' && txt.indexOf('all pass')===-1) show=false;
+      if(stat==='fail' && txt.indexOf('issues')===-1) show=false;
+      if(stat==='running' && txt.indexOf('running')===-1) show=false;
+    }}
+    r.style.display=show?'':'none';
+    if(show) visible++;
+  }});
+  document.getElementById('noResults').style.display=visible===0?'block':'none';
+}}
+</script>
 </body></html>""")
 
 # ================================================================
@@ -1517,31 +1603,10 @@ def admin_dashboard():
           <td style="color:var(--text3)">{j.get('created_at','')[:16]}</td>
         </tr>"""
 
-    return render_template_string(SHARED_CSS + f"""
+    return render_template_string(SHARED_CSS + """<style>.app-layout{margin-left:0!important}.main-content{margin-left:220px!important}</style>""" + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Admin — SurveyQC</title></head><body>
-<div style="display:flex;min-height:100vh">
-  <div style="width:220px;min-width:220px;background:white;border-right:0.5px solid var(--border);padding:20px 12px;position:fixed;height:100vh;overflow-y:auto">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;padding:0 8px">
-      <div style="width:26px;height:26px;background:#378ADD;border-radius:6px;display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="color:white;font-size:13px"></i></div>
-      <span style="color:white;font-size:13px;font-weight:600">Admin Panel</span>
-    </div>
-    <p style="font-size:9px;color:rgba(255,255,255,.3);padding:0 8px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em">Management</p>
-    <a href="/admin" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;background:rgba(255,255,255,.15);border-left:2px solid #378ADD;text-decoration:none;color:white;font-size:12px;margin-bottom:2px"><i class="ti ti-layout-dashboard" style="font-size:13px"></i>Overview</a>
-    <a href="/admin/users" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-users" style="font-size:13px"></i>Users</a>
-    <a href="/admin/reports" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-file-report" style="font-size:13px"></i>QC Reports</a>
-    <a href="/admin/email" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-mail" style="font-size:13px"></i>Email Users</a>
-    <div style="border-top:0.5px solid rgba(255,255,255,.1);margin:10px 0"></div>
-    <p style="font-size:9px;color:rgba(255,255,255,.3);padding:0 8px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em">Settings</p>
-    <a href="/admin/apis" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-key" style="font-size:13px"></i>API Keys</a>
-    <a href="/admin/tokens" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-coin" style="font-size:13px"></i>Token Limits</a>
-    <a href="/admin/content" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-pencil" style="font-size:13px"></i>Content</a>
-    <a href="/admin/privacy" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-shield-lock" style="font-size:13px"></i>Privacy</a>
-    <a href="/admin/gift" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px;margin-bottom:2px"><i class="ti ti-gift" style="font-size:13px"></i>Gift Access</a>
-    <div style="border-top:0.5px solid rgba(255,255,255,.1);margin:10px 0"></div>
-    <a href="/" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;text-decoration:none;color:#85B7EB;font-size:12px"><i class="ti ti-arrow-left" style="font-size:13px"></i>Back to site</a>
-  </div>
-
-  <div style="margin-left:220px;flex:1;padding:28px">
+<div style="display:flex;min-height:100vh"><div style="margin-left:220px;flex:1;padding:28px;min-width:0;width:calc(100% - 220px)">
+  
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <div><p style="font-size:20px;font-weight:600;color:var(--text)">Admin overview</p><p style="font-size:12px;color:var(--text3)">{datetime.now().strftime('%A, %d %B %Y')}</p></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -1601,6 +1666,7 @@ def admin_dashboard():
     </div>
   </div>
 </div>
+</div>
 </body></html>""")
 
 # ================================================================
@@ -1636,7 +1702,7 @@ def admin_users():
         </tr>"""
 
     return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Users — Admin</title></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Users — Admin</title><script src="/admin-sidebar-js"></script></head><body>
 <div style="padding:24px;margin-left:0">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--text3);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
@@ -1662,7 +1728,7 @@ def admin_email():
         sent = True
 
     return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Email Users — Admin</title></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Email Users — Admin</title><script src="/admin-sidebar-js"></script></head><body>
 <div style="padding:24px;max-width:600px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--text3);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
@@ -1720,7 +1786,7 @@ def admin_reports():
         </tr>"""
 
     return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Reports — Admin</title></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Reports — Admin</title><script src="/admin-sidebar-js"></script></head><body>
 <div style="padding:24px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--text3);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
@@ -1804,6 +1870,105 @@ def find_missing_words(doc_text, live_text):
             seen.add(w)
     return missing
 
+def _extract_options(page):
+    """Extract answer options from a survey page (multi-platform)."""
+    import re as _re
+    opts = []
+    seen = set()
+    selectors = [
+        ".cf-radio-answer__text", ".cf-checkbox-answer__text",
+        "label.cf-answer", ".answer-text", ".option-text",
+        "label[for]", ".sv-item__control-label", ".response-option"
+    ]
+    for sel in selectors:
+        try:
+            els = page.locator(sel).all()
+            if els:
+                for el in els:
+                    try:
+                        t = el.inner_text().strip()
+                        if t and len(t) < 200 and t not in seen:
+                            seen.add(t)
+                            opts.append({"text": t})
+                    except: continue
+                if opts: break
+        except: continue
+    return opts
+
+
+def get_gemini_model():
+    """Returns a configured Gemini model if API key is set, else None."""
+    try:
+        key = api_store.get('gemini', {}).get('key', '').strip()
+        if not key:
+            key = os.environ.get('GEMINI_API_KEY', '').strip()
+        if not key:
+            return None
+        import google.generativeai as genai
+        genai.configure(api_key=key)
+        return genai.GenerativeModel('gemini-2.5-flash')
+    except Exception:
+        return None
+
+
+def ai_compare_text(model, qid, doc_text, live_text):
+    """Use Gemini to intelligently compare doc question vs live question.
+    Returns (is_issue, issue_type, details) or None if AI unavailable/errors."""
+    if not model:
+        return None
+    try:
+        prompt = (
+            "You are a survey QC expert. Compare the SPEC (expected) question text "
+            "against the LIVE (actual) question text from a deployed survey.\n\n"
+            "SPEC: " + doc_text[:1500] + "\n\n"
+            "LIVE: " + live_text[:1500] + "\n\n"
+            "Ignore trivial differences (whitespace, punctuation, HTML artifacts). "
+            "Flag ONLY real issues: missing words, changed meaning, wrong wording, missing instructions.\n"
+            "Respond ONLY with valid JSON, nothing else:\n"
+            '{"issue": true/false, "type": "short type e.g. MISSING WORDS", "details": "one short sentence", "severity": "HIGH/MEDIUM/LOW"}'
+        )
+        resp = model.generate_content(prompt)
+        import json, re as _re
+        raw = resp.text.strip()
+        raw = _re.sub(r'```json|```', '', raw).strip()
+        data = json.loads(raw)
+        if data.get('issue'):
+            return (True, data.get('type', 'AI FLAGGED'), data.get('details', ''), data.get('severity', 'MEDIUM'))
+        return (False, None, None, None)
+    except Exception:
+        return None
+
+
+def ai_generate_summary(model, questions, live_data, issues):
+    """Generate a human-readable AI summary of the QC report."""
+    if not model:
+        # Fallback: rule-based summary
+        high = sum(1 for i in issues if i.get('severity') == 'HIGH')
+        med = sum(1 for i in issues if i.get('severity') == 'MEDIUM')
+        total = len(issues)
+        if total == 0:
+            return "All checks passed. No issues detected across " + str(len(questions)) + " questions. Survey is ready to launch."
+        return (str(total) + " issue(s) detected: " + str(high) + " high-priority, " + str(med) + " medium. "
+                "Review high-priority issues before launching the survey.")
+    try:
+        issue_brief = "; ".join([i.get('type', '') + " on " + i.get('qid', '') for i in issues[:15]])
+        prompt = (
+            "You are a survey QC expert. Write a 2-3 sentence professional summary "
+            "of this survey QC report for a client.\n\n"
+            "Total questions: " + str(len(questions)) + "\n"
+            "Total issues: " + str(len(issues)) + "\n"
+            "Issues found: " + (issue_brief if issue_brief else "none") + "\n\n"
+            "Be concise, professional, actionable. Plain text only, no markdown."
+        )
+        resp = model.generate_content(prompt)
+        return resp.text.strip()[:600]
+    except Exception:
+        total = len(issues)
+        if total == 0:
+            return "All checks passed. No issues detected. Survey is ready to launch."
+        return str(total) + " issue(s) detected. Review before launching."
+
+
 def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
     try:
         from playwright.sync_api import sync_playwright
@@ -1836,7 +2001,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 
         doc = Document(doc_path)
         questions = {}
-        qid_pat = re.compile(r'^\s*\[?\s*(?P<qid>[RSQ]\d+(?:bis|ter|Info|info|Ex)?)\s*[\.\-\s\]]')
+        qid_pat = re.compile(r'^\s*\[?\s*(?P<qid>[A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)\s*[\.\-\s\]\:\)]')
         current_qid = None
 
         for para in doc.paragraphs:
@@ -1872,7 +2037,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             r'|GRACIAS\s+Y\s+CIERRE|TERMINATE\b)',
             re.IGNORECASE
         )
-        qid_heading_re = re.compile(r'^\s*\[?\s*([RSQ]\d+(?:bis|ter|Info|info|Ex)?)\s*[\.\-\s\]]')
+        qid_heading_re = re.compile(r'^\s*\[?\s*([A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)\s*[\.\-\s\]\:\)]')
         body_elements = []
         for child in doc.element.body.iterchildren():
             if child.tag == qn('w:p'):
@@ -1902,7 +2067,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     ct = "\n".join(p.text.strip() for p in cell.paragraphs if p.text.strip())
                     all_cells_text.append(ct)
             joined = "\n".join(all_cells_text)
-            pt_match = re.search(r'PROGRAMMING\s+TABLE[\s\|\n]*([RSQ]\d+\w*)', joined, re.IGNORECASE)
+            pt_match = re.search(r'PROGRAMMING\s+TABLE[\s\|\n]*([A-Za-z]{1,8}\d+\w*)', joined, re.IGNORECASE)
             if pt_match: table_qid = pt_match.group(1)
 
             for cell_text in all_cells_text:
@@ -1942,11 +2107,14 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             log('════════════════════════════════════', 'cyan')
 
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, slow_mo=200)
+                browser = p.chromium.launch(headless=True, slow_mo=150)
                 context = browser.new_context(viewport={"width":1400,"height":900})
                 page = context.new_page()
                 page.goto(survey_url, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
+
+                ss_dir = f"{OUTPUT_FOLDER}/{job_id}/screenshots"
+                os.makedirs(ss_dir, exist_ok=True)
 
                 if country:
                     try:
@@ -1954,101 +2122,231 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                         page.wait_for_timeout(1000)
                         for sel in ["button:has-text('>>')", "input[value='>>']", ".cf-button-next"]:
                             try:
-                                page.locator(sel).first.click(timeout=3000)
-                                break
+                                page.locator(sel).first.click(timeout=3000); break
                             except: continue
-                        page.wait_for_timeout(3000)
+                        page.wait_for_timeout(2500)
                     except Exception as e:
-                        log(f'  Country select warning: {str(e)[:50]}', 'yellow')
+                        log('  Country select skipped: ' + str(e)[:40], 'yellow')
 
+                has_test_nav = False
                 try:
-                    if not page.locator(".sr-tn-question__text").count():
-                        page.locator("text=Test Navigator").first.click(timeout=3000)
-                        page.wait_for_timeout(800)
+                    page_html = page.content()
+                    log("  Page HTML length: " + str(len(page_html)), "cyan")
+                    tn_selectors = [
+                        ".cf-tn-list-item",
+                        ".sr-tn-question__text",
+                        "[class*='tn-question']",
+                        "[class*='test-navigator']",
+                        ".wix-tn-item",
+                        "[class*='tn-item']",
+                    ]
+                    for tn_sel in tn_selectors:
+                        count = page.locator(tn_sel).count()
+                        log("  TN selector " + tn_sel + " count: " + str(count), "yellow")
+                        if count > 0:
+                            has_test_nav = True
+                            log("  Found TN with: " + tn_sel, "green")
+                            break
+                    if not has_test_nav:
+                        for btn_text in ["Test Navigator", "Navigator", "Navigateur"]:
+                            try:
+                                page.locator(f"text={btn_text}").first.click(timeout=3000)
+                                page.wait_for_timeout(1000)
+                                for tn_sel in tn_selectors:
+                                    if page.locator(tn_sel).count() > 0:
+                                        has_test_nav = True
+                                        log("  TN found: " + tn_sel, "green")
+                                        break
+                                if has_test_nav:
+                                    break
+                            except: pass
+                    if not has_test_nav:
+                        try:
+                            page.screenshot(path="/var/www/surveyqc/debug_page.png", full_page=True)
+                            log("  Debug screenshot saved", "yellow")
+                        except: pass
+                        classes = page.evaluate("""() => {
+                            const els = document.querySelectorAll("[class]");
+                            const cls = new Set();
+                            els.forEach(e => e.className.toString().split(" ").forEach(c => { if(c) cls.add(c); }));
+                            return Array.from(cls).slice(0, 50);
+                        }""")
+                        log("  Page CSS classes: " + str(classes[:30]), "cyan")
+                except Exception as ex:
+                    log("  TN detection error: " + str(ex), "red")
+
                 except: pass
 
-                nav_items = page.locator(".sr-tn-question__text").all()
-                qid_index_map = []
-                seen_qids = set()
-                for idx, el in enumerate(nav_items):
-                    try:
-                        txt = el.inner_text().strip().split('\n')[0].strip()
-                        m = re.match(r'^([RSQ]\d+(?:bis|ter|Info|info|Ex)?)$', txt)
-                        if m and m.group(1) not in seen_qids:
-                            qid_index_map.append((idx, m.group(1)))
-                            seen_qids.add(m.group(1))
-                    except: continue
-
-                log(f'  {len(qid_index_map)} QIDs found', 'blue')
-                ss_dir = f"{OUTPUT_FOLDER}/{job_id}/screenshots"
-                os.makedirs(ss_dir, exist_ok=True)
-
-                total = len(qid_index_map)
-                for i, (nav_idx, qid) in enumerate(qid_index_map, 1):
-                    prog = 20 + int((i/total)*40)
-                    progress(prog, f'Crawling {qid} ({i}/{total})...')
-                    try:
+                if has_test_nav:
+                    log('  Mode: Test Navigator (Confirmit)', 'blue')
+                    nav_items = page.locator(".cf-tn-list-item").all()
+                    qid_index_map = []
+                    seen_qids = set()
+                    for ni, el in enumerate(nav_items):
                         try:
-                            if not page.locator(".sr-tn-question__text").count():
-                                page.locator("text=Test Navigator").first.click(timeout=3000)
-                                page.wait_for_timeout(500)
-                        except: pass
+                            txt = el.inner_text().strip().split()[0].strip()
+                            m = re.match(r'^([A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)$', txt)
+                            if m and m.group(1) not in seen_qids:
+                                qid_index_map.append((ni, m.group(1)))
+                                seen_qids.add(m.group(1))
+                        except: continue
 
-                        page.locator(".sr-tn-question__text").nth(nav_idx).click(timeout=5000, force=True)
-                        page.wait_for_timeout(1500)
-
+                    log('  ' + str(len(qid_index_map)) + ' QIDs found in navigator', 'blue')
+                    total = max(1, len(qid_index_map))
+                    for i, (nav_idx, qid) in enumerate(qid_index_map, 1):
+                        progress(20 + int((i/total)*40), 'Crawling ' + qid + '...')
                         try:
-                            if page.locator(".sr-tn-question__text").count() > 0:
-                                page.locator("text=Test Navigator").first.click(timeout=2000)
-                                page.wait_for_timeout(300)
-                        except: pass
+                            try:
+                                if not page.locator(".cf-tn-list-item").count():
+                                    page.locator("text=Test Navigator").first.click(timeout=3000)
+                                    page.wait_for_timeout(500)
+                            except: pass
+                            page.locator(".cf-tn-list-item").nth(nav_idx).click(timeout=5000, force=True)
+                            page.wait_for_timeout(1200)
+                            text = page.evaluate("() => { const b=document.body.cloneNode(true); ['.sr-test-navigator','[class*=sr-tn]'].forEach(s=>b.querySelectorAll(s).forEach(e=>e.remove())); return b.innerText.trim(); }")
+                            text = re.sub(r'\*Shown in Testing mode only\*', '', text or '')
+                            text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
+                            opts = _extract_options(page)
+                            try: page.screenshot(path=ss_dir + '/' + qid + '.png', full_page=True)
+                            except: pass
+                            piping = re.findall(r'\[PIPE[^\]]*\]', text, re.I)
+                            live_data[qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"status":"OK"}
+                            log('   ' + qid + ' (' + str(len(text)) + ' chars)', 'green')
+                        except Exception as e:
+                            live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"status":"ERROR: " + str(e)[:50]}
+                            log('   ' + qid + ' ERROR: ' + str(e)[:80], 'red')
 
-                        text = page.evaluate("""
-                            () => {
-                                const b = document.body.cloneNode(true);
-                                ['.sr-test-navigator','[class*="sr-tn"]'].forEach(s => b.querySelectorAll(s).forEach(e => e.remove()));
-                                return b.innerText.trim();
-                            }
-                        """)
+                else:
+                    log('  Mode: Respondent flow (auto-navigate)', 'blue')
+                    log('  No test navigator - walking page by page', 'yellow')
+                    # DIAGNOSTIC: log all clickable elements on first page
+                    try:
+                        diag = page.evaluate("""() => {
+                            const out = [];
+                            document.querySelectorAll('button, input[type=submit], input[type=button], a').forEach(el => {
+                                const t = (el.innerText || el.value || el.id || '').trim().slice(0,40);
+                                const tag = el.tagName.toLowerCase();
+                                const typ = el.type || '';
+                                const id = el.id || '';
+                                const cls = (el.className || '').toString().slice(0,40);
+                                if (t || id) out.push(tag + '[' + typ + '] text=' + t + ' id=' + id + ' cls=' + cls);
+                            });
+                            return out.slice(0, 25);
+                        }""")
+                        log('  DIAGNOSTIC - clickable elements found:', 'cyan')
+                        for d in diag:
+                            log('    ' + d, 'white')
+                        if not diag:
+                            log('    (no buttons/links found - survey may use JS framework)', 'yellow')
+                    except Exception as de:
+                        log('  Diagnostic error: ' + str(de)[:50], 'yellow')
+                    max_pages = 80
+                    page_num = 0
+                    doc_qid_list = list(questions.keys())
+
+                    while page_num < max_pages:
+                        page_num += 1
+                        progress(20 + int((page_num/max_pages)*40), 'Page ' + str(page_num) + '...')
+                        page.wait_for_timeout(800)
+                        try:
+                            text = page.evaluate("() => document.body.innerText.trim()")
+                        except:
+                            text = ""
                         text = re.sub(r'\*Shown in Testing mode only\*', '', text or '')
-                        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+                        text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
 
-                        opts = []
-                        for sel in [".cf-radio-answer__text", ".cf-checkbox-answer__text"]:
-                            els = page.locator(sel).all()
-                            if els:
-                                seen_t = set()
-                                for el in els:
-                                    try:
-                                        t = el.inner_text().strip()
-                                        if t and len(t) < 200 and t not in seen_t:
-                                            seen_t.add(t)
-                                            opts.append({"text": t})
-                                    except: continue
-                                if opts: break
+                        detected_qid = None
+                        for dq in doc_qid_list:
+                            if dq in live_data:
+                                continue
+                            if re.search(r'\b' + re.escape(dq) + r'\b', text):
+                                detected_qid = dq
+                                break
+                        if not detected_qid:
+                            detected_qid = 'PAGE' + str(page_num)
 
-                        has_mandatory = any(m in text for m in [" *", "*\n"])
-                        piping = []
-                        for pat in [r'\[PIPE[^\]]*\]', r'\{\{[^}]+\}\}']:
-                            found = re.findall(pat, text, re.IGNORECASE)
-                            piping.extend(found)
+                        opts = _extract_options(page)
+                        try: page.screenshot(path=ss_dir + '/' + detected_qid + '.png', full_page=True)
+                        except: pass
 
-                        ss_path = f"{ss_dir}/{qid}.png"
-                        page.screenshot(path=ss_path, full_page=True)
+                        if text and detected_qid not in live_data:
+                            piping = re.findall(r'\[PIPE[^\]]*\]', text, re.I)
+                            live_data[detected_qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"status":"OK"}
+                            log('   ' + detected_qid + ' (' + str(len(text)) + ' chars)', 'green')
 
-                        live_data[qid] = {
-                            "text": text, "options": opts,
-                            "has_mandatory_marker": has_mandatory,
-                            "has_raw_piping": len(piping) > 0,
-                            "raw_piping_found": piping, "status": "OK"
-                        }
-                        log(f'   {qid} ({len(text)} chars)', 'green')
-                    except Exception as e:
-                        live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"status":f"ERROR: {str(e)[:60]}"}
-                        log(f'   {qid} ERROR', 'red')
+                        try:
+                            # Tick all checkboxes (consent pages need all checked)
+                            checks = page.locator("input[type=checkbox]")
+                            cc = checks.count()
+                            if cc > 0:
+                                for ci in range(min(cc, 10)):
+                                    try: checks.nth(ci).check(force=True, timeout=1000)
+                                    except: pass
+                            # Select first radio in each radio group
+                            radios = page.locator("input[type=radio]")
+                            if radios.count() > 0:
+                                try: radios.first.check(force=True, timeout=2000)
+                                except:
+                                    try: radios.first.click(force=True, timeout=2000)
+                                    except: pass
+                            # Fill text inputs
+                            txt_inputs = page.locator("input[type=text], input[type=number], textarea")
+                            ti = txt_inputs.count()
+                            if ti > 0:
+                                for tidx in range(min(ti, 5)):
+                                    try: txt_inputs.nth(tidx).fill("5", timeout=1000)
+                                    except: pass
+                            # Dropdowns - select first real option
+                            selects = page.locator("select")
+                            if selects.count() > 0:
+                                for sidx in range(min(selects.count(), 5)):
+                                    try: selects.nth(sidx).select_option(index=1, timeout=1000)
+                                    except: pass
+                            page.wait_for_timeout(400)
+                        except: pass
+
+                        clicked_next = False
+                        matched_selector = ''
+                        next_selectors = [".cf-button-next", "button:has-text('Next')", "button:has-text('Continue')", "button:has-text('Suivant')", "button:has-text('Continuer')", "button:has-text('Weiter')", "button:has-text('Siguiente')", "input[value='Next']", "input[value='Continue']", "input[value='Suivant']", "input[value='Continuer']", "input[value='>>']", "input[value='>']", "button:has-text('>>')", "button:has-text('>')", "a:has-text('Next')", "a:has-text('Suivant')", "#NextButton", "#nextButton", "#btnNext", "input[type=submit]", "button[type=submit]", ".next-button", ".btn-next", "a.button", "[onclick*=next]", "[onclick*=submit]", "[id*=Next]", "[name*=next]"]
+                        for sel in next_selectors:
+                            try:
+                                btn = page.locator(sel).first
+                                if btn.count() > 0 and btn.is_visible():
+                                    btn.click(timeout=2500, force=True)
+                                    clicked_next = True
+                                    matched_selector = sel
+                                    break
+                            except: continue
+                        if clicked_next:
+                            log('  Clicked next via: ' + matched_selector, 'green')
+
+                        if not clicked_next:
+                            log('  Survey end (no next button) at page ' + str(page_num), 'blue')
+                            break
+                        # Capture text before wait to detect if page changed
+                        prev_text_hash = hash(text[:200])
+                        page.wait_for_timeout(1500)
+                        try:
+                            new_text = page.evaluate("() => document.body.innerText.trim()")[:200]
+                            if hash(new_text) == prev_text_hash:
+                                # Page didn't change - try clicking next once more, else stop
+                                log('  Page unchanged, retrying...', 'yellow')
+                                page.wait_for_timeout(1000)
+                                still_same = page.evaluate("() => document.body.innerText.trim()")[:200]
+                                if hash(still_same) == prev_text_hash:
+                                    log('  Stuck on same page - validation may be blocking. Stopping.', 'yellow')
+                                    break
+                        except: pass
+
+                        try:
+                            low = (text or "").lower()
+                            if any(w in low for w in ["thank you", "merci", "survey complete", "questionnaire complete", "has been recorded"]):
+                                log('  Completion page detected', 'blue')
+                                break
+                        except: pass
 
                 browser.close()
-            log(f'\n  Crawled {len(live_data)} pages', 'green')
+            log(chr(10) + '  Crawled ' + str(len(live_data)) + ' pages', 'green')
 
         # PHASE 3: COMPARE
         if mode in ('full', 'quick') and live_data:
@@ -2057,6 +2355,13 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             log('════════════════════════════════════', 'cyan')
             log('  PHASE 3: COMPARISON', 'cyan')
             log('════════════════════════════════════', 'cyan')
+
+            # Initialize AI model (uses admin Gemini key if set)
+            ai_model = get_gemini_model()
+            if ai_model:
+                log('  AI mode: Gemini active - smart comparison enabled', 'green')
+            else:
+                log('  AI mode: text-matching (add Gemini key in admin for AI)', 'yellow')
 
             for qid in sorted(set(questions.keys()) | set(live_data.keys())):
                 in_doc = qid in questions
@@ -2075,7 +2380,16 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 live_text = live_data[qid]["text"]
                 is_match, ratio = fuzzy_match(doc_text, live_text)
                 if not is_match:
-                    issues.append({"qid":qid,"type":"TEXT MISMATCH","details":f"Match: {int(ratio*100)}%","severity":"HIGH" if ratio<0.4 else "MEDIUM"})
+                    # If AI available, verify before flagging (reduces false positives)
+                    ai_result = ai_compare_text(ai_model, qid, doc_text, live_text)
+                    if ai_result is not None:
+                        ai_issue, ai_type, ai_details, ai_sev = ai_result
+                        if ai_issue:
+                            issues.append({"qid":qid,"type":ai_type or "TEXT MISMATCH","details":ai_details or f"Match: {int(ratio*100)}%","severity":ai_sev or ("HIGH" if ratio<0.4 else "MEDIUM")})
+                        # if AI says no issue, skip (false positive avoided)
+                    else:
+                        # No AI - use fuzzy match result
+                        issues.append({"qid":qid,"type":"TEXT MISMATCH","details":f"Match: {int(ratio*100)}%","severity":"HIGH" if ratio<0.4 else "MEDIUM"})
 
                 missing = find_missing_words(doc_text, live_text)
                 if missing:
@@ -2307,7 +2621,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 
         h = report.add_paragraph()
         hr = h.add_run("Quick Summary")
-        hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0x7C, 0x65, 0xFF)
+        hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0xC4, 0x6A, 0x2B)
+
+        # AI-generated human-readable summary
+        try:
+            ai_summary_text = ai_generate_summary(get_gemini_model(), questions, live_data, issues)
+        except Exception:
+            ai_summary_text = ""
+        job['ai_summary'] = ai_summary_text
+        if ai_summary_text:
+            sp = report.add_paragraph()
+            sr = sp.add_run(ai_summary_text)
+            sr.font.size = Pt(11); sr.italic = True; sr.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+            report.add_paragraph()
 
         for line in [
             f"Questions checked: {len(questions)}",
@@ -3013,7 +3339,7 @@ def admin_content():
     page = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Content CMS - Admin</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
 <style>
 :root{--bg:#F7F4EE;--card:#FFF;--text:#171717;--text2:#5F5B53;--text3:#8A847A;--accent:#C46A2B;--border:#E8E1D8;--dark:#1B140F}
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}
@@ -3043,7 +3369,7 @@ a{text-decoration:none;color:inherit}
   .cms-tabs{flex-direction:row;overflow-x:auto;position:static}
   .cms-tab{white-space:nowrap}
 }
-</style></head><body>
+</style><script src="/admin-sidebar-js"></script></head><body>
 <div class="cms-wrap">
   <div class="cms-hdr">
     <a href="/admin" style="color:var(--text3);font-size:22px"><i class="ti ti-arrow-left"></i></a>
@@ -3085,7 +3411,7 @@ def admin_tokens():
         except: pass
 
     return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Token Control — Admin</title></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Token Control — Admin</title><script src="/admin-sidebar-js"></script></head><body>
 <div style="padding:24px;max-width:500px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--color-text-secondary);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
@@ -3157,7 +3483,7 @@ def admin_gift():
             error = 'Email required'
 
     return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Gift Access — Admin</title></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Gift Access — Admin</title><script src="/admin-sidebar-js"></script></head><body>
 <div style="padding:24px;max-width:500px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--color-text-secondary);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
@@ -3400,10 +3726,10 @@ def pricing_page():
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Pricing — """ + c['site_name'] + """</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
 :root{--bg:#F7F4EE;--card:#FFFFFF;--text:#171717;--text2:#5F5B53;--text3:#8A847A;--accent:#C46A2B;--accent-hover:#A9551F;--accent-bg:#F5E6D8;--border:#E8E1D8;--dark:#1B140F;--success:#3F7D58;--shadow-lg:0 10px 40px rgba(24,17,10,0.08)}
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Plus Jakarta Sans',sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 body{background:var(--bg);color:var(--text);line-height:1.5}
 a{text-decoration:none;color:inherit}
 .nav{background:rgba(247,244,238,.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 32px;height:68px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
@@ -3570,10 +3896,10 @@ def features_page():
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Features — """ + c['site_name'] + """</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
 :root{--bg:#F7F4EE;--bg2:#FFFDF9;--card:#FFFFFF;--text:#171717;--text2:#5F5B53;--text3:#8A847A;--accent:#C46A2B;--accent-bg:#F5E6D8;--border:#E8E1D8;--dark:#1B140F;--shadow-lg:0 10px 40px rgba(24,17,10,0.08)}
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Plus Jakarta Sans',sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 body{background:var(--bg);color:var(--text);line-height:1.5}
 a{text-decoration:none;color:inherit}
 .nav{background:rgba(247,244,238,.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 32px;height:68px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
@@ -3693,7 +4019,7 @@ def blog():
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     page += '<title>Blog - '+c['site_name']+'</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
+    page += ''
     page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:Inter,Plus Jakarta Sans,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}body{background:#F7F4EE;color:#171717}a{text-decoration:none}'
     page += '.nav{background:white;border-bottom:0.5px solid #DDE1E7;padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between}'
     page += '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1100px;margin:0 auto}'
@@ -3955,7 +4281,7 @@ def run_screenshot_qc():
 
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
 
             issues = []
             total = len(ss_list)
@@ -4149,9 +4475,9 @@ def home_landing():
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>SurveyQC — Premium AI Survey QC for Market Research Teams</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
+
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
 :root{
   --bg:#F7F4EE; --bg2:#FFFDF9; --card:#FFFFFF;
@@ -4164,7 +4490,7 @@ def home_landing():
   --shadow-lg:0 10px 40px rgba(24,17,10,0.08);
   --radius:20px; --radius-btn:14px;
 }
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Plus Jakarta Sans',-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',sans-serif;-webkit-font-smoothing:antialiased}
 html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden}
 a{text-decoration:none;color:inherit}
@@ -4189,7 +4515,7 @@ img{max-width:100%}
 .hamburger{display:none;background:none;border:none;cursor:pointer;width:36px;height:36px;align-items:center;justify-content:center}
 .hamburger i{font-size:22px;color:var(--text)}
 
-.hero{padding:80px 24px 100px;text-align:center;position:relative;overflow:hidden}
+.hero{padding:72px 24px 72px;text-align:center;position:relative;overflow:hidden}
 .hero::before{content:"";position:absolute;top:-100px;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(196,106,43,.12),transparent 60%);pointer-events:none;z-index:0}
 .hero-inner{position:relative;z-index:1;max-width:920px;margin:0 auto}
 .hero-badge{display:inline-flex;align-items:center;gap:8px;background:white;border:1px solid var(--border);padding:6px 16px 6px 8px;border-radius:100px;font-size:13px;color:var(--text2);margin-bottom:32px;font-weight:500;box-shadow:var(--shadow)}
@@ -4197,24 +4523,24 @@ img{max-width:100%}
 .hero h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(36px,6vw,72px);font-weight:800;line-height:1.05;letter-spacing:-2px;color:var(--text);margin-bottom:24px}
 .hero h1 .accent{color:var(--accent);position:relative;display:inline-block}
 .hero h1 .accent::after{content:"";position:absolute;bottom:6px;left:0;right:0;height:8px;background:rgba(196,106,43,.18);z-index:-1;border-radius:4px}
-.hero-sub{font-size:clamp(16px,2vw,20px);color:var(--text2);max-width:620px;margin:0 auto 40px;line-height:1.6}
+.hero-sub{font-size:clamp(17px,2vw,21px);color:var(--text2);max-width:600px;margin:0 auto 36px;line-height:1.65}
 .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
 .hero-cta .btn-primary{padding:14px 28px;font-size:15px}
 .hero-meta{font-size:13px;color:var(--text3);display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap}
 .hero-meta-item{display:flex;align-items:center;gap:6px}
 .hero-meta-item i{color:var(--success);font-size:15px}
 
-.trusted{padding:60px 24px 40px;text-align:center}
+.trusted{padding:40px 24px 20px;text-align:center}
 .trusted-l{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin-bottom:24px}
 .trusted-row{display:flex;align-items:center;justify-content:center;gap:48px;flex-wrap:wrap;opacity:.7}
 .trusted-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:700;color:var(--text2)}
 
-.section{padding:120px 24px}
-.container{max-width:1280px;margin:0 auto;padding:0 24px}
-.sec-head{text-align:center;max-width:720px;margin:0 auto 64px}
+.section{padding:88px 24px}
+.container{max-width:1240px;margin:0 auto;padding:0 24px}
+.sec-head{text-align:center;max-width:720px;margin:0 auto 48px}
 .sec-tag{display:inline-block;background:var(--accent-bg);color:var(--accent);font-size:12px;font-weight:700;padding:5px 14px;border-radius:100px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px}
 .sec-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(28px,4vw,46px);font-weight:800;line-height:1.1;letter-spacing:-1.2px;margin-bottom:18px;color:var(--text)}
-.sec-sub{font-size:17px;color:var(--text2);line-height:1.65;max-width:580px;margin:0 auto}
+.sec-sub{font-size:18px;color:var(--text2);line-height:1.65;max-width:600px;margin:0 auto}
 
 .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .feat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:32px;transition:all .3s ease}
@@ -4250,7 +4576,7 @@ img{max-width:100%}
 .pricing-cta-meta-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:24px;font-weight:800;color:var(--accent)}
 .pricing-cta-meta-lbl{font-size:12px;color:var(--text3);margin-top:2px;font-weight:500}
 
-.cta-banner{padding:100px 24px}
+.cta-banner{padding:80px 24px}
 .cta-inner{max-width:920px;margin:0 auto;background:linear-gradient(135deg,var(--dark) 0%,#2A1F18 100%);border-radius:32px;padding:64px 48px;text-align:center;position:relative;overflow:hidden}
 .cta-inner::before{content:"";position:absolute;top:-100px;right:-100px;width:300px;height:300px;background:radial-gradient(circle,rgba(196,106,43,.4),transparent 70%);pointer-events:none}
 .cta-inner h2{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(28px,4vw,42px);color:white;margin-bottom:14px;font-weight:800;letter-spacing:-1px;position:relative;z-index:1}
@@ -4279,6 +4605,27 @@ img{max-width:100%}
 .mobile-menu a{font-size:18px;font-weight:600;color:var(--text);padding:12px 0;border-bottom:1px solid var(--border)}
 .mobile-menu-close{position:absolute;top:20px;right:20px;background:none;border:none;font-size:28px;color:var(--text);cursor:pointer}
 
+
+
+.platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:880px;margin:0 auto}
+.platform-pill{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;transition:all .2s}
+.platform-pill:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}
+.platform-pill-mark{width:42px;height:42px;border-radius:11px;background:var(--dark);color:var(--accent);display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:18px;flex-shrink:0}
+.platform-pill-name{font-size:15px;font-weight:700;color:var(--text)}
+.platform-pill-status{font-size:11px;font-weight:600;margin-top:2px}
+.platform-pill-status.live{color:var(--success)}
+.platform-pill-status.soon{color:var(--text3)}
+@media(max-width:768px){.platform-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.platform-grid{grid-template-columns:1fr}}
+.checks-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;max-width:1100px;margin:0 auto}
+.check-pill{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:13px 14px;transition:all .2s}
+.check-pill:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.check-pill-icon{width:30px;height:30px;border-radius:8px;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.check-pill-icon i{font-size:15px;color:var(--accent)}
+.check-pill span{font-size:13px;font-weight:600;color:var(--text);line-height:1.3}
+@media(max-width:1024px){.checks-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:768px){.checks-grid{grid-template-columns:repeat(2,1fr);gap:10px}}
+@media(max-width:480px){.checks-grid{grid-template-columns:1fr}}
 @media(max-width:1024px){
   .footer-grid{grid-template-columns:1fr 1fr 1fr}
 }
@@ -4288,7 +4635,7 @@ img{max-width:100%}
   .nav-cta .btn-sign{display:none}
   .nav{padding:0 18px}
   .hero{padding:60px 18px 70px}
-  .section{padding:80px 18px}
+  .section{padding:56px 18px}
   .cta-banner{padding:64px 18px}
   .cta-inner{padding:48px 28px;border-radius:24px}
   .feat-grid,.steps-grid,.test-grid{grid-template-columns:1fr;gap:14px}
@@ -4373,6 +4720,23 @@ img{max-width:100%}
     <div class="trusted-logo">Dynata</div>
   </div>
 </section>
+<section style="padding:20px 24px 60px">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:32px">
+      <span class="sec-tag">Integrations</span>
+      <h2 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-1px;margin-top:12px">Works with every major platform</h2>
+    </div>
+    <div class="platform-grid">
+      <div class="platform-pill"><div class="platform-pill-mark">C</div><div><div class="platform-pill-name">Confirmit</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark">D</div><div><div class="platform-pill-name">Decipher</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark">F</div><div><div class="platform-pill-name">Forsta</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark">Q</div><div><div class="platform-pill-name">Qualtrics</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark">S</div><div><div class="platform-pill-name">SurveyMonkey</div><div class="platform-pill-status soon">Coming soon</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark">A</div><div><div class="platform-pill-name">Alchemer</div><div class="platform-pill-status soon">Coming soon</div></div></div>
+    </div>
+  </div>
+</section>
+
 
 <section class="section" id="features">
   <div class="container">
@@ -4419,6 +4783,9 @@ img{max-width:100%}
   </div>
 </section>
 
+
+
+
 <section class="section" id="how" style="background:var(--bg2)">
   <div class="container">
     <div class="sec-head">
@@ -4457,20 +4824,7 @@ img{max-width:100%}
   </div>
 </section>
 
-<section class="section" style="background:var(--bg2)">
-  <div class="container">
-    <div class="pricing-cta-box">
-      <h3>Pricing that scales with you</h3>
-      <p>Start free. Upgrade when ready. No contracts, no hidden fees.</p>
-      <div class="pricing-cta-meta">
-        <div class="pricing-cta-meta-item"><div class="pricing-cta-meta-num">Free</div><div class="pricing-cta-meta-lbl">Start at $0</div></div>
-        <div class="pricing-cta-meta-item"><div class="pricing-cta-meta-num">$29</div><div class="pricing-cta-meta-lbl">Pro / month</div></div>
-        <div class="pricing-cta-meta-item"><div class="pricing-cta-meta-num">$99</div><div class="pricing-cta-meta-lbl">Business / month</div></div>
-      </div>
-      <a href="/pricing" class="btn-primary">View full pricing <i class="ti ti-arrow-right"></i></a>
-    </div>
-  </div>
-</section>
+
 
 <section class="cta-banner">
   <div class="cta-inner">
@@ -4740,7 +5094,7 @@ def admin_privacy():
         saved = True
 
     return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Privacy Settings — Admin</title></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Privacy Settings — Admin</title><script src="/admin-sidebar-js"></script></head><body>
 <div style="padding:24px;max-width:600px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--color-text-secondary);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
@@ -4999,6 +5353,14 @@ api_store = {
 }
 
 
+# Load saved Gemini key from .env into api_store on startup
+import os as _os
+_saved_gemini = _os.environ.get('GEMINI_API_KEY', '').strip()
+if _saved_gemini and 'gemini' in api_store:
+    api_store['gemini']['key'] = _saved_gemini
+    api_store['gemini']['status'] = 'active'
+    api_store['gemini']['active'] = True
+
 @app.route('/admin/apis', methods=['GET', 'POST'])
 @admin_required
 def admin_apis():
@@ -5012,6 +5374,20 @@ def admin_apis():
             if action == 'save' and key:
                 api['key'] = key; api['status'] = 'active'; api['active'] = True
                 saved_msg = api['name'] + ' key saved!'
+                # Save gemini key to .env for persistence
+                if api_id == 'gemini':
+                    try:
+                        from pathlib import Path
+                        env_file = Path('/var/www/surveyqc/.env')
+                        lines = []
+                        if env_file.exists():
+                            lines = [l for l in env_file.read_text().splitlines() if not l.startswith('GEMINI_API_KEY')]
+                        lines.append('GEMINI_API_KEY=' + key)
+                        env_file.write_text(chr(10).join(lines) + chr(10))
+                        import os
+                        os.environ['GEMINI_API_KEY'] = key
+                    except Exception as e:
+                        pass
             elif action == 'delete':
                 api['key'] = ''; api['status'] = 'not_added'; api['active'] = False
                 saved_msg = api['name'] + ' removed.'
@@ -5066,7 +5442,7 @@ def admin_apis():
 
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API Management - Admin</title>'
     page += '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">'
-    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F0F2F5;color:#1A1A2E}a{text-decoration:none}</style></head><body>'
+    page += '<style>*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{background:#F0F2F5;color:#1A1A2E}a{text-decoration:none}</style><script src="/admin-sidebar-js"></script></head><body>'
     page += '<div style="padding:24px;max-width:1000px;margin:0 auto">'
     page += '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">'
     page += '<a href="/admin" style="color:#6B7280;font-size:22px">&larr;</a>'
@@ -5084,6 +5460,45 @@ def admin_apis():
     page += '<p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 12px">Other Services</p>'+other_html+'</div>'
     page += '</div></div></body></html>'
     return render_template_string(page)
+
+
+
+
+@app.route('/admin-sidebar-js')
+def admin_sidebar_js():
+    js = """
+(function(){
+  if(!window.location.pathname.startsWith('/admin') || window.location.pathname === '/admin/login') return;
+  if(document.getElementById('admsb')) return;
+  var s = document.createElement('div');
+  s.id = 'admsb';
+  s.style.cssText = 'width:220px;background:#1B140F;padding:20px 12px;position:fixed;height:100vh;overflow-y:auto;left:0;top:0;z-index:9999;box-sizing:border-box';
+  s.innerHTML = [
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px">',
+    '<div style="width:26px;height:26px;background:#C46A2B;border-radius:6px;display:flex;align-items:center;justify-content:center">',
+    '<span style="color:white;font-size:16px">&#9673;</span></div>',
+    '<span style="color:white;font-size:13px;font-weight:600">Admin Panel</span></div>',
+    '<p style="font-size:9px;color:rgba(255,255,255,.3);margin-bottom:8px;text-transform:uppercase;padding:0 8px">Management</p>',
+    '<a href="/admin" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Overview</a>',
+    '<a href="/admin/users" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Users</a>',
+    '<a href="/admin/reports" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; QC Reports</a>',
+    '<a href="/admin/email" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Email Users</a>',
+    '<hr style="border-color:rgba(255,255,255,.1);margin:8px 0">',
+    '<p style="font-size:9px;color:rgba(255,255,255,.3);margin-bottom:8px;text-transform:uppercase;padding:0 8px">Settings</p>',
+    '<a href="/admin/apis" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; API Keys</a>',
+    '<a href="/admin/tokens" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Token Limits</a>',
+    '<a href="/admin/content" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Content</a>',
+    '<a href="/admin/privacy" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Privacy</a>',
+    '<a href="/admin/gift" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Gift Access</a>',
+    '<hr style="border-color:rgba(255,255,255,.1);margin:8px 0">',
+    '<a href="/" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px">&#8592; Back to site</a>',
+  ].join('');
+  document.addEventListener('DOMContentLoaded',function(){document.body.insertBefore(s,document.body.firstChild);if(!document.querySelector('.main-content'))if(!document.querySelector('.main-content'))document.body.style.marginLeft='220px';});
+})();
+"""
+    from flask import Response
+    return Response(js, mimetype='application/javascript')
+
 
 
 
