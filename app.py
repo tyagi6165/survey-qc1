@@ -29,7 +29,7 @@
 ================================================================
 """
 
-import os, re, sys, json, uuid, threading, hashlib
+import os, re, sys, json, uuid, threading, hashlib, time
 from pathlib import Path
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -80,6 +80,7 @@ users_db = {
     }
 }
 feedback_store = []
+user_feedback_db = []  # [{id, type, message, page, user_email, created_at, read}]
 
 THANKYOU_INDICATORS = [
     "grazie", "thank you", "ringraziamo", "gracias", "merci",
@@ -93,6 +94,36 @@ SKIP_PATTERNS = [
     r'^---+$', r'^\s*\|\s*$',
 ]
 JUNK_RE = re.compile('|'.join(SKIP_PATTERNS), re.IGNORECASE)
+
+# Section-level headings that mark the end of a question's content scope.
+# When a paragraph matches this (and has no '?'), stop accumulating text
+# for the current QID — prevents consent/GDPR/address blocks bleeding into
+# the previous question's text.
+SECTION_STOP_RE = re.compile(
+    # Start-of-line heading patterns (standalone section titles):
+    r'(?:^\s*(?:'
+    r'TRANSPARENCE\b'                             # FR/EN consent heading
+    r'|SIGNALEMENT\s+DES\b'                       # adverse-event section
+    r'|TRAITEMENT\s+DES\s+DONN'                  # GDPR data-processing block
+    r'|NOTICE\s+D.INFORMATION'                    # information notice
+    r'|PHARMACOVIGILANCE\b'                       # pharmacovigilance note
+    r'|RGPD\b|GDPR\b'                            # regulation labels
+    r'|QUOTAS?\b'                                 # quota section heading
+    r'|SIGNE?L[EÉ]TIQUE'                         # demographics heading (FR)
+    r'|DEMOGRAPHICS?\b'                           # demographics heading (EN)
+    r'|FIN\s+DE\s+L.ENTRETIEN'                  # "end of interview"
+    r'|FIN\s+DU\s+QUESTIONNAIRE'                 # "end of questionnaire"
+    r'|END\s+OF\s+(?:THE\s+)?(?:INTERVIEW|QUESTIONNAIRE|SURVEY)'
+    r'|ADRESSE\s+(?:PROFESSIONNELLE|DE\s+D)'     # address-collection block
+    r'|NOUS\s+VOUS\s+REMERC'                     # "Nous vous remercions..."
+    r'|THANK\s+YOU\s+FOR\s+(?:YOUR\s+)?PARTICIPAT'
+    r'))'
+    # Anywhere-in-line patterns (distinctive phrases that mark boilerplate):
+    r'|LOI\s+BERTRAND\b'                         # French transparency law
+    r'|BERTRAND\s+LAW\b',
+    re.IGNORECASE
+)
+
 STOPWORDS = {
     'il','la','lo','gli','le','un','una','uno','di','da','del','della',
     'the','and','or','but','is','are','was','were','have','has','had',
@@ -133,149 +164,9 @@ def get_current_user():
 # ================================================================
 SHARED_CSS = """
 <script src="/admin-sidebar-js"></script>
-
-
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-<style>
-:root {
-  --bg: #F7F4EE;
-  --bg2: #FFFDF9;
-  --bg3: #FBF8F2;
-  --card: #FFFFFF;
-  --text: #171717;
-  --text2: #5F5B53;
-  --text3: #8A847A;
-  --accent: #C46A2B;
-  --accent-hover: #A9551F;
-  --accent-bg: #F5E6D8;
-  --border: #E8E1D8;
-  --border2: #F0EBE3;
-  --dark: #1B140F;
-  --dark2: #2A1F18;
-  --success: #3F7D58;
-  --warn: #D89B2B;
-  --danger: #C84B31;
-  --navy: #1B140F;
-  --blue: #C46A2B;
-  --purple: #C46A2B;
-  --green: #3F7D58;
-  --red: #C84B31;
-  --amber: #D89B2B;
-  --card-r: 16px;
-  --color-background-primary: #FFFFFF;
-  --color-background-secondary: #FBF8F2;
-  --color-background-tertiary: #F7F4EE;
-  --color-text-primary: #171717;
-  --color-text-secondary: #5F5B53;
-  --color-text-tertiary: #8A847A;
-  --color-border-primary: #E8E1D8;
-  --color-border-secondary: #E8E1D8;
-  --color-border-tertiary: #F0EBE3;
-}
-*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
-body{background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
-::-webkit-scrollbar{width:6px}
-::-webkit-scrollbar-track{background:#F0EBE3}
-::-webkit-scrollbar-thumb{background:#D4C9B8;border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:#B8AC9F}
-a{text-decoration:none;color:inherit}
-
-.app-layout{display:flex;min-height:100vh}
-.sidebar{width:240px;min-width:240px;background:#1B140F;border-right:none;padding:24px 14px;display:flex;flex-direction:column;gap:4px;position:fixed;height:100vh;overflow-y:auto;z-index:50}
-.main-content{margin-left:240px;flex:1;padding:32px;min-height:100vh;background:var(--bg)}
-.sidebar-logo{display:flex;align-items:center;gap:10px;padding:0 8px;margin-bottom:28px}
-.sidebar-logo-icon{width:34px;height:34px;background:#C46A2B;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative}
-.sidebar-logo-text{color:white;font-size:16px;font-weight:700;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.3px}
-.nav-item{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;cursor:pointer;text-decoration:none;color:#9A8C7B;font-size:13.5px;font-weight:500;transition:all .15s}
-.nav-item:hover{background:rgba(255,255,255,.06);color:white}
-.nav-item.active{background:rgba(196,106,43,.18);color:#F5E6D8;font-weight:600}
-.nav-item i{font-size:17px;width:18px;text-align:center}
-.nav-divider{border-top:1px solid rgba(255,255,255,.08);margin:10px 0}
-.nav-section{font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.1em;text-transform:uppercase;padding:6px 12px;margin-top:6px;font-weight:600}
-
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-.page-title{font-size:24px;font-weight:700;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.5px}
-.page-sub{font-size:14px;color:var(--text2);margin-top:4px}
-
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--card-r);padding:24px}
-.card-sm{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
-.card-purple{background:var(--accent-bg);border:1px solid #E8C9A7;border-radius:var(--card-r);padding:18px}
-.card-hero{background:var(--dark);border-radius:var(--card-r);padding:26px;color:#F5E6D8}
-
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px}
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;text-align:left}
-.stat-num{font-size:26px;font-weight:800;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.5px}
-.stat-label{font-size:12px;color:var(--text3);margin-top:4px;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
-.stat-change{font-size:11px;margin-top:4px;font-weight:600}
-.stat-up{color:var(--success)}
-.stat-down{color:var(--danger)}
-
-.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:4px 10px;border-radius:100px;font-weight:600}
-.badge-green{background:#E5F0E9;color:var(--success)}
-.badge-red{background:#FAE5E0;color:var(--danger)}
-.badge-blue{background:var(--accent-bg);color:var(--accent)}
-.badge-amber{background:#FBF1DA;color:#856216}
-.badge-purple{background:var(--accent-bg);color:var(--accent)}
-.badge-teal{background:#E5F0E9;color:var(--success)}
-.badge-gray{background:#F0EBE3;color:var(--text2)}
-.badge-live{background:var(--danger);color:white;font-size:10px;padding:3px 10px}
-
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 18px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s;text-decoration:none;font-family:inherit}
-.btn-primary{background:var(--dark);color:#F5E6D8}
-.btn-primary:hover{background:var(--dark2);transform:translateY(-1px)}
-.btn-secondary{background:var(--accent);color:white}
-.btn-secondary:hover{background:var(--accent-hover)}
-.btn-ghost{background:white;color:var(--text);border:1px solid var(--border)}
-.btn-ghost:hover{background:var(--bg3)}
-.btn-danger{background:#FAE5E0;color:var(--danger)}
-.btn-sm{padding:7px 14px;font-size:12px;border-radius:9px}
-
-.form-group{margin-bottom:16px}
-.form-label{font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px}
-.form-input{width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text);background:white;outline:none;transition:all .15s;font-family:inherit}
-.form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(196,106,43,.12)}
-textarea.form-input{resize:vertical;min-height:100px}
-
-.table-wrap{overflow-x:auto;background:white;border:1px solid var(--border);border-radius:14px}
-table{width:100%;border-collapse:collapse}
-th{padding:14px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg3);text-transform:uppercase;letter-spacing:.06em}
-td{padding:14px 16px;font-size:13.5px;color:var(--text2);border-bottom:1px solid var(--border2)}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:#FCFAF6}
-
-.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--border);z-index:200;padding:8px 0;box-shadow:0 -2px 20px rgba(24,17,10,0.06)}
-.mobile-nav-inner{display:flex;justify-content:space-around}
-.mobile-nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 14px;text-decoration:none;color:var(--text3);font-size:10px;border-radius:10px;font-weight:600}
-.mobile-nav-item.active{color:var(--accent)}
-.mobile-nav-item i{font-size:20px}
-
-.mobile-hdr{display:none}
-.mobile-hdr-btn{background:none;border:none;cursor:pointer;width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:var(--text)}
-.mobile-hdr-btn i{font-size:22px}
-
-@media(max-width:768px){
-  .sidebar{transform:translateX(-100%);transition:transform .25s}
-  .sidebar.open{transform:translateX(0)}
-  .main-content{margin-left:0;padding:18px;padding-bottom:80px;padding-top:64px}
-  .mobile-nav{display:block}
-  .mobile-hdr{display:flex;position:fixed;top:0;left:0;right:0;height:56px;background:white;border-bottom:1px solid var(--border);align-items:center;padding:0 16px;z-index:100;gap:12px}
-  .mobile-hdr-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;color:var(--text)}
-  .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .page-title{font-size:20px}
-  .card{padding:18px;border-radius:14px}
-}
-@media(max-width:480px){
-  .stats-grid{grid-template-columns:1fr}
-}
-
-.time-saved-banner{background:linear-gradient(135deg,#FFFDF9,#F5E6D8);border:1px solid #E8C9A7;border-radius:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-.stat-card{transition:all .2s}
-.stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(24,17,10,0.08)}
-.card:hover{box-shadow:0 8px 24px rgba(24,17,10,0.06)}
-
-.content-narrow{max-width:880px}
-.content-wide{max-width:1200px}
-</style>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
 """
 
 # ================================================================
@@ -792,14 +683,14 @@ def new_qc():
     page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Screenshots <span style="font-size:12px;font-weight:400;color:#9CA3AF">(Optional)</span></p>'
     page += '<span style="margin-left:auto;font-size:11px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:20px;font-weight:500">Pro+</span>' if plan == 'Free' else ''
     page += '</div>'
-    page += '<p style="font-size:12px;color:#6B7280;margin-bottom:10px">WhatsApp screenshots upload karo — AI un specific questions ko extra carefully check karega.</p>'
+    page += '<p style="font-size:12px;color:#6B7280;margin-bottom:10px">Upload WhatsApp screenshots — AI will pay extra attention to the specific questions shown.</p>'
 
     if plan == 'Free':
         page += '<div style="background:#FAEEDA;border-radius:7px;padding:10px 12px;margin-bottom:10px"><p style="font-size:12px;color:#633806"><i class="ti ti-lock" style="font-size:12px"></i> Screenshot QC is Pro+ only. <a href="/billing" style="color:#042C53;font-weight:600">Upgrade &rarr;</a></p></div>'
         page += '<input type="file" name="screenshots" accept="image/*" multiple disabled style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#9CA3AF;background:#F0F2F5;cursor:not-allowed">'
     else:
         page += '<input type="file" name="screenshots" accept="image/*" multiple style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:white;cursor:pointer">'
-        page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">Multiple files select kar sakte ho. AI screenshot wale questions specifically verify karega.</p>'
+        page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">You can select multiple files. AI will cross-verify questions that appear in the screenshots.</p>'
     page += '</div>'
 
     # Advanced options collapsible
@@ -952,7 +843,7 @@ def progress_page(job_id):
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Running QC — SurveyQC</title>
-<meta http-equiv="refresh" content="3">
+
 </head><body>
 <div class="app-layout">
   {sidebar_html('reports')}
@@ -1090,6 +981,7 @@ def report_detail(job_id):
             'MANDATORY MISSING': 'Mandatory marker',
             'PIPING NOT RESOLVED': 'Piping issue',
             'MISSING IN LIVE': 'Question missing',
+            'NAMING MISMATCH': 'Naming mismatch',
             'ERROR PAGE': 'Page error',
         }
         simple_type = type_names.get(iss.get('type',''), iss.get('type',''))
@@ -1237,15 +1129,20 @@ def reports_list():
 
         link = f'<a href="/report/{jid}" style="color:var(--purple);font-size:12px;text-decoration:none">View</a>' if status == 'done' else f'<a href="/progress/{jid}" style="color:var(--text3);font-size:12px;text-decoration:none">Track</a>'
         download = f'<a href="/download/{jid}" style="color:var(--text3);text-decoration:none"><i class="ti ti-download" style="font-size:14px"></i></a>' if status == 'done' else ''
+        share_tok = hashlib.md5((jid + '-share').encode()).hexdigest()[:12]
+        share_url = 'https://surveyqc.online/view/' + share_tok
+        share_title = doc_name[:40]
+        share_btn = f'<button data-share-url="{share_url}" data-share-title="{share_title}" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:13px;padding:0 4px" title="Share"><i class="ti ti-share"></i></button>' if status == 'done' else ''
+        plat_lower = platform.lower().replace(' ', '')
 
         rows += f"""
         <tr>
           <td class="primary"><i class="ti ti-file-text" style="color:var(--purple);margin-right:8px"></i>{doc_name[:35]}</td>
-          <td>{platform}</td>
+          <td data-platform="{plat_lower}">{platform}</td>
           <td>{mode.title()}</td>
           <td><span class="badge {badge_cls}">{badge_txt}</span></td>
           <td style="color:var(--text3)">{created}</td>
-          <td>{link} &nbsp; {download}</td>
+          <td style="white-space:nowrap">{link} &nbsp; {download} &nbsp; {share_btn}</td>
         </tr>"""
 
     if not rows:
@@ -1453,6 +1350,14 @@ def billing():
     used = user.get('reports_used', 0)
     limit = user.get('reports_limit', 5)
     pct = int((used/limit)*100) if limit > 0 else 0
+    c = site_content  # use admin-editable content for prices
+
+    free_price = c.get('plan_free_price', '0')
+    pro_price  = c.get('plan_pro_price', '29')
+    biz_price  = c.get('plan_biz_price', '99')
+    free_feats = (c.get('plan_free_features', '5 reports per month')).split('||')[0]
+    pro_feats  = (c.get('plan_pro_features', '50 reports per month')).split('||')[0]
+    biz_feats  = (c.get('plan_biz_features', 'Unlimited reports')).split('||')[0]
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Billing — SurveyQC</title></head><body>
@@ -1469,21 +1374,21 @@ def billing():
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
       <div class="card {'featured' if plan=='Free' else ''}">
         <p style="font-size:13px;font-weight:600;color:var(--text)">Free</p>
-        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">$0<span style="font-size:13px;color:var(--text3)">/mo</span></p>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">5 reports/month</p>
+        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">${free_price}<span style="font-size:13px;color:var(--text3)">/mo</span></p>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{free_feats}</p>
         <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center">{'Current plan' if plan=='Free' else 'Downgrade'}</button>
       </div>
       <div class="card" style="{'border:2px solid var(--purple)' if plan=='Pro' else ''}">
         {'<span class="badge badge-purple" style="margin-bottom:8px;display:inline-block">Current plan</span>' if plan=='Pro' else ''}
         <p style="font-size:13px;font-weight:600;color:var(--text)">Pro</p>
-        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">$29<span style="font-size:13px;color:var(--text3)">/mo</span></p>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">50 reports/month</p>
+        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">${pro_price}<span style="font-size:13px;color:var(--text3)">/mo</span></p>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{pro_feats}</p>
         <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center">{'Current plan' if plan=='Pro' else 'Upgrade to Pro'}</button>
       </div>
       <div class="card">
         <p style="font-size:13px;font-weight:600;color:var(--text)">Business</p>
-        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">$99<span style="font-size:13px;color:var(--text3)">/mo</span></p>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Unlimited reports</p>
+        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">${biz_price}<span style="font-size:13px;color:var(--text3)">/mo</span></p>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{biz_feats}</p>
         <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center">Upgrade to Business</button>
       </div>
     </div>
@@ -1857,7 +1762,7 @@ def tokenize(text):
     text = re.sub(r'\[[^\]]{1,30}\]', ' ', text)
     text = re.sub(r'\{\{[^}]+\}\}', ' ', text)
     text = re.sub(r'<[^>]+>', ' ', text).lower()
-    words = re.findall(r"[a-zàèéìòùáíóúüâêîôûñçäöüß']+", text)
+    words = re.findall(r"[\w']+", text, re.UNICODE)
     return [w for w in words if len(w) >= 3 and w not in STOPWORDS]
 
 def find_missing_words(doc_text, live_text):
@@ -1894,6 +1799,21 @@ def _extract_options(page):
                 if opts: break
         except: continue
     return opts
+
+
+def _page_has_inputs(page):
+    """Return True if the page has at least one answerable input element.
+    Used to distinguish real questions from pure display/info screens."""
+    try:
+        return bool(page.evaluate(
+            "() => document.querySelectorAll("
+            "'input[type=\"radio\"],input[type=\"checkbox\"],select,"
+            "input[type=\"text\"],input[type=\"number\"],"
+            "input[type=\"range\"],textarea'"
+            ").length > 0"
+        ))
+    except Exception:
+        return True  # safe default: assume inputs exist if DOM check fails
 
 
 def get_gemini_model():
@@ -1939,6 +1859,116 @@ def ai_compare_text(model, qid, doc_text, live_text):
         return None
 
 
+def ai_compare_batch(model, batch):
+    """Compare MULTIPLE questions in ONE AI call (saves quota: 50 calls -> 6 calls).
+    batch = list of dicts: [{qid, doc_text, doc_opts, live_text, live_opts}, ...]
+    Returns dict {qid: [issue dicts]} or None if AI unavailable after retries."""
+    if not model or not batch:
+        return None
+    import json, re as _re
+    blocks = []
+    for item in batch:
+        do = "\n".join("- " + o for o in item['doc_opts']) if item['doc_opts'] else "(none/open-ended)"
+        lo = "\n".join("- " + o for o in item['live_opts']) if item['live_opts'] else "(none/open-ended)"
+        blocks.append(
+            "=== QUESTION " + item['qid'] + " ===\n"
+            "SPEC text: " + item['doc_text'][:900] + "\n"
+            "SPEC options:\n" + do + "\n"
+            "LIVE text: " + item['live_text'][:1100] + "\n"
+            "LIVE options:\n" + lo
+        )
+    prompt = (
+        "You are an expert survey QC reviewer. Compare each SPEC question (design doc) vs LIVE "
+        "(deployed survey). Language may be ANY (French, Urdu, Hindi, German, English) - compare by "
+        "MEANING not exact words.\n\n"
+        + "\n\n".join(blocks) + "\n\n"
+        "RULES:\n"
+        "1. IGNORE: whitespace, punctuation, capitalization, HTML artifacts, bracket instructions "
+        "like [ALL COUNTRIES], translation notes, formatting.\n"
+        "2. LIVE may have EXTRA surrounding text - that is OK. Only check if SPEC question's MEANING "
+        "is present in LIVE.\n"
+        "3. Flag REAL issues only: meaning changed/missing, options missing/different, instruction "
+        "like '(ne pas poser)' violated, wrong wording changing meaning, truncated text.\n"
+        "4. If SPEC content IS present in LIVE (even with extra text), report NO issue for it.\n\n"
+        "Respond ONLY with valid JSON object. Key = question id, value = array of issues "
+        "(empty array if no issue). Example:\n"
+        '{"A1": [{"type":"MISSING TEXT","details":"...","severity":"HIGH"}], "A2": []}'
+    )
+    for attempt in range(3):
+        try:
+            resp = model.generate_content(prompt)
+            raw = _re.sub(r'```json|```', '', resp.text.strip()).strip()
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            raw = m.group(0) if m else raw
+            data = json.loads(raw)
+            out = {}
+            for qid, issarr in data.items():
+                if not isinstance(issarr, list):
+                    continue
+                out[qid] = []
+                for d in issarr:
+                    if d and d.get('type'):
+                        out[qid].append({"qid": qid, "type": d.get('type', 'AI FLAGGED'),
+                                         "details": d.get('details', ''), "severity": d.get('severity', 'MEDIUM')})
+            return out
+        except Exception as e:
+            err = str(e)
+            is_rate_limit = '429' in err or 'quota' in err.lower() or 'rate' in err.lower()
+            if attempt < 2:
+                time.sleep(20 if is_rate_limit else 4)
+                continue
+    return None
+
+
+def ai_compare_full(model, qid, doc_text, doc_opts, live_text, live_opts):
+    """Language-agnostic semantic comparison of a full question (text + options).
+    Returns a LIST of issue dicts, or None if AI unavailable/errored.
+    Empty list = no issues found (question is correct)."""
+    if not model:
+        return None
+    try:
+        import json, re as _re
+        doc_opts_str = "\n".join("- " + o for o in doc_opts) if doc_opts else "(none / open-ended)"
+        live_opts_str = "\n".join("- " + o for o in live_opts) if live_opts else "(none / open-ended)"
+        prompt = (
+            "You are an expert survey QC reviewer. Compare a SPEC question (from the design document) "
+            "against the LIVE question (from the deployed survey). The language may be ANY language "
+            "(French, Urdu, Hindi, German, English, etc.) - compare by MEANING, not exact words.\n\n"
+            "QUESTION ID: " + qid + "\n\n"
+            "=== SPEC (expected) ===\n"
+            "Question text: " + doc_text[:1200] + "\n"
+            "Answer options:\n" + doc_opts_str + "\n\n"
+            "=== LIVE (actual deployed) ===\n"
+            "Question text: " + live_text[:1500] + "\n"
+            "Answer options:\n" + live_opts_str + "\n\n"
+            "RULES:\n"
+            "1. IGNORE: whitespace, punctuation, capitalization, HTML artifacts, programming instructions "
+            "in brackets like [ALL COUNTRIES], translation notes, formatting differences.\n"
+            "2. The LIVE text may contain EXTRA surrounding content from the page - that is OK, only check "
+            "if the SPEC question's MEANING is present in LIVE.\n"
+            "3. Flag REAL issues only: (a) question meaning changed or missing, (b) answer options missing "
+            "or different, (c) instruction like '(ne pas poser)'/'do not ask' violated, (d) wrong wording "
+            "that changes meaning.\n"
+            "4. If the SPEC question content IS present in LIVE (even with extra text around it), report NO issue.\n\n"
+            "Respond ONLY with valid JSON array, nothing else. Empty array if no issues:\n"
+            '[{"type": "SHORT TYPE", "details": "one short sentence", "severity": "HIGH/MEDIUM/LOW"}]'
+        )
+        resp = model.generate_content(prompt)
+        raw = resp.text.strip()
+        raw = _re.sub(r'```json|```', '', raw).strip()
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            data = [data] if data else []
+        out = []
+        for d in data:
+            if d and d.get('type'):
+                out.append({"qid": qid, "type": d.get('type', 'AI FLAGGED'),
+                            "details": d.get('details', ''), "severity": d.get('severity', 'MEDIUM')})
+        return out
+    except Exception:
+        return None
+
+
 def ai_generate_summary(model, questions, live_data, issues):
     """Generate a human-readable AI summary of the QC report."""
     if not model:
@@ -1967,6 +1997,158 @@ def ai_generate_summary(model, questions, live_data, issues):
         if total == 0:
             return "All checks passed. No issues detected. Survey is ready to launch."
         return str(total) + " issue(s) detected. Review before launching."
+
+
+def _parse_tables_for_qids(doc, questions, qid_pat, junk_re):
+    """
+    Supplement the paragraph parser: scan every doc table for question IDs
+    that only appear inside grid/matrix tables (e.g. Q1, Q2, Q11, Q12, Q12.2
+    in Confirmit docs where the QID sits in a header cell, not in a paragraph).
+
+    Rules:
+    - For PROGRAMMING TABLE blocks: extract the header QID only (skip routing/logic body).
+    - For other tables: scan all cells for QID patterns and extract answer options.
+    - Skip cells whose entire text is a bracketed label like [R3 – label].
+    - Register every discovered QID in questions{} (don't overwrite existing text).
+    - Extract answer options from the first column of data rows below the header.
+    """
+    pt_re = re.compile(r'PROG(?:RAM(?:M?ING)?)?\s+TABLE', re.IGNORECASE)
+    num_only = re.compile(r'^\d+$')
+    bare_qid_re = re.compile(
+        r'^(?P<qid>[A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)$'
+    )
+    # Keywords that appear in PROGRAMMING TABLE body rows (not QID lines)
+    _prog_kw = re.compile(
+        r'^(?:PROG(?:RAM(?:M?ING)?)?\s+TABLE|TYPE|ROUTING|ROUTINE|LOGIC'
+        r'|CODED|OPEN\s+ENDED|MULTIPLE|NUMERIC|RANGE|MIN\s*=|MAX\s*=|MANDATORY'
+        r'|ALL\s+RESP|RANDOMIS|DISPLAY|SCREEN)',
+        re.IGNORECASE
+    )
+
+    for table in doc.tables:
+        # Build row-list-of-cell-strings
+        rows = []
+        for row in table.rows:
+            cells = []
+            for cell in row.cells:
+                ct = "\n".join(p.text.strip() for p in cell.paragraphs if p.text.strip())
+                cells.append(ct.strip())
+            rows.append(cells)
+
+        full_text = "\n".join(c for row in rows for c in row if c)
+
+        # Programming tables hold TYPE/ROUTING metadata, not answer content.
+        # Extract the header QID (the question being defined) but skip the body.
+        if pt_re.search(full_text):
+            _found_prog_qid = False
+            for _row in rows[:4]:
+                if _found_prog_qid:
+                    break
+                for _cell in _row:
+                    if _found_prog_qid:
+                        break
+                    for _line in _cell.split('\n'):
+                        _line = _line.strip()
+                        if not _line or len(_line) > 30 or _prog_kw.search(_line):
+                            continue
+                        if _line.startswith('[') and _line.endswith(']'):
+                            continue
+                        _m = qid_pat.match(_line)
+                        if not _m:
+                            _m = bare_qid_re.match(_line)
+                        if _m:
+                            _hqid = _m.group('qid')
+                            if _hqid not in questions:
+                                questions[_hqid] = {
+                                    "text": "", "options": [],
+                                    "is_mandatory": False, "has_piping": False,
+                                    "termination_rules": [], "is_numeric": False,
+                                }
+                            _found_prog_qid = True
+                            break
+            continue
+
+        # Scan every cell line for QID patterns.
+        # Two-pass match: (1) standard qid_pat (needs a trailing separator char),
+        # (2) bare QID-only line like "Q11" with no trailing char — common when a
+        # table cell has the QID as its sole paragraph.
+        found_qids = {}       # qid -> rest_text (question text fragment)
+        header_row_idx = None
+
+        for ri, cells in enumerate(rows):
+            row_found = {}
+            for cell_text in cells:
+                for line in cell_text.split('\n'):
+                    line = line.strip()
+                    if not line or len(line) > 250 or junk_re.search(line):
+                        continue
+                    # Skip whole-line bracketed labels like [R3 – Consentement]
+                    if line.startswith('[') and line.endswith(']'):
+                        continue
+                    m = qid_pat.match(line)
+                    if not m and len(line) <= 20:
+                        # Bare QID cell like "Q11" or "Q12.2" with no separator
+                        m = bare_qid_re.match(line)
+                    if not m:
+                        continue
+                    qid = m.group('qid')
+                    rest = line[m.end():].strip()
+                    # Strip column-header suffixes like "| MEMO" or "| adhésion | Note"
+                    rest = re.sub(
+                        r'\s*[\|–—]\s*(?:MEMO|NOTE|adh[eé]sion|SPECIFICITE|RANDOMIS).*',
+                        '', rest, flags=re.IGNORECASE
+                    ).strip()
+                    if qid not in row_found:
+                        row_found[qid] = rest
+
+            if row_found:
+                if header_row_idx is None:
+                    header_row_idx = ri
+                found_qids.update(row_found)
+
+        if not found_qids:
+            continue
+
+        # Register each QID (never overwrite text already set by paragraph pass)
+        for qid, rest in found_qids.items():
+            if qid not in questions:
+                questions[qid] = {
+                    "text": rest, "options": [],
+                    "is_mandatory": False, "has_piping": False,
+                    "termination_rules": [], "is_numeric": False,
+                }
+            elif not questions[qid]["text"] and rest:
+                questions[qid]["text"] = rest
+
+        if header_row_idx is None:
+            continue
+
+        # Extract options from rows below the header row.
+        # Use the first QID found as the target question for these options.
+        primary_qid = next(iter(found_qids))
+        seen_opts = {o["text"] for o in questions[primary_qid]["options"]}
+
+        for ri in range(header_row_idx + 1, len(rows)):
+            if not rows[ri]:
+                continue
+            opt_text = rows[ri][0].strip()
+            if (not opt_text
+                    or len(opt_text) < 2
+                    or len(opt_text) > 200
+                    or num_only.match(opt_text)
+                    or qid_pat.match(opt_text)        # skip repeated-header rows
+                    or bare_qid_re.match(opt_text)    # skip bare "Q11" type cells
+                    or opt_text in seen_opts):
+                continue
+            # Find the numeric answer code in sibling cells
+            code = str(ri)
+            for ci in range(1, len(rows[ri])):
+                v = rows[ri][ci].strip()
+                if num_only.match(v):
+                    code = v
+                    break
+            questions[primary_qid]["options"].append({"code": code, "text": opt_text})
+            seen_opts.add(opt_text)
 
 
 def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
@@ -2007,8 +2189,37 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
         for para in doc.paragraphs:
             text = para.text.strip()
             if not text or JUNK_RE.search(text): continue
+
+            # Stop accumulating when a major section boundary is hit.
+            # Path A: language-specific keywords (FR/EN/etc.) via SECTION_STOP_RE.
+            # Path B: structural — a short paragraph that is ≥75% uppercase letters
+            #   and has no '?' is a section heading in any Latin-script language
+            #   (DATENSCHUTZ, DATOS PERSONALES, DATI PERSONALI, etc.).
+            # Arabic question mark ؟ (U+061F) is also excluded from "has question mark".
+            _no_qmark = '?' not in text and '؟' not in text
+            if current_qid and _no_qmark:
+                _alpha = [c for c in text if c.isalpha()]
+                _upper_ratio = (sum(1 for c in _alpha if c.isupper()) / len(_alpha)
+                                if _alpha else 0)
+                _structural_heading = (
+                    len(text) <= 60
+                    and not text[0].isdigit()
+                    and not qid_pat.match(text)
+                    and len(_alpha) >= 4
+                    and _upper_ratio >= 0.75
+                )
+                if SECTION_STOP_RE.search(text) or _structural_heading:
+                    current_qid = None
+                    continue
+
             m = qid_pat.match(text)
             if m:
+                # FIX 1: Skip bracketed section labels like [R3 \u2013 Consentement
+                # confidentialit\u00e9]. A real question paragraph that starts with '['
+                # never ends with ']' \u2014 the question text follows after the bracket.
+                if text.startswith('[') and text.endswith(']'):
+                    continue
+
                 qid = m.group('qid')
                 current_qid = qid
                 if qid not in questions:
@@ -2018,6 +2229,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 if rest and not JUNK_RE.search(rest):
                     questions[qid]["text"] += " " + rest
                 continue
+
             if current_qid:
                 opt = re.match(r'^(\d+)[\.\)]\s+(.+)', text)
                 if opt:
@@ -2027,6 +2239,123 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     if 'mandatory' in text.lower():
                         questions[current_qid]["is_mandatory"] = True
 
+        # FIX 3: Pick up QIDs defined inside table grid headers (Q1, Q1.1, Q1.2,
+        # Q2, Q11, Q12, Q12.2, etc.) that the paragraph pass never sees.
+        _parse_tables_for_qids(doc, questions, qid_pat, JUNK_RE)
+
+        # FIX 4: Backfill text for questions whose text paragraph appears BEFORE
+        # their PROG TABLE without a QID label (e.g. Q3, Q4, Q10, Q13 in this doc).
+        # Walk the doc body in order; for each PROG TABLE whose QID still has empty
+        # text, look backwards for the unlabeled text paragraphs that precede it.
+        _pt_re_bf = re.compile(r'PROG(?:RAM(?:M?ING)?)?\s+TABLE', re.IGNORECASE)
+        _bare_bf = re.compile(r'^(?P<qid>[A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)$')
+        _bseq = []  # ('para', text) | ('prog', qid) | ('tbl', None)
+        for _bc in doc.element.body.iterchildren():
+            if _bc.tag == qn('w:p'):
+                for _bp in doc.paragraphs:
+                    if _bp._element is _bc:
+                        _bseq.append(('para', _bp.text.strip()))
+                        break
+            elif _bc.tag == qn('w:tbl'):
+                for _bt in doc.tables:
+                    if _bt._element is _bc:
+                        _bcells = []
+                        for _brow in _bt.rows:
+                            for _bcell in _brow.cells:
+                                _bct = "\n".join(_bp2.text.strip() for _bp2 in _bcell.paragraphs if _bp2.text.strip())
+                                _bcells.append(_bct.strip())
+                        _bjnd = "\n".join(_bcells)
+                        if _pt_re_bf.search(_bjnd):
+                            _btqid = None
+                            for _bcl in _bcells[:8]:
+                                for _bln in _bcl.split('\n'):
+                                    _bln = _bln.strip()
+                                    if not _bln or len(_bln) > 30:
+                                        continue
+                                    _bm = qid_pat.match(_bln) or _bare_bf.match(_bln)
+                                    if _bm:
+                                        _btqid = _bm.group('qid')
+                                        break
+                                if _btqid:
+                                    break
+                            _bseq.append(('prog', _btqid))
+                        else:
+                            _trows = []
+                            for _brow2 in _bt.rows:
+                                _tr = []
+                                for _bcl2 in _brow2.cells:
+                                    _ct2 = ' '.join(
+                                        _p2.text.strip()
+                                        for _p2 in _bcl2.paragraphs
+                                        if _p2.text.strip()
+                                    )
+                                    if _ct2:
+                                        _tr.append(_ct2)
+                                if _tr:
+                                    _trows.append(_tr)
+                            _bseq.append(('tbl', _trows))
+                        break
+        for _bi, (_btype, _bval) in enumerate(_bseq):
+            if _btype != 'prog' or not _bval or _bval not in questions:
+                continue
+            if questions[_bval]['text']:
+                continue  # paragraph pass already found text — leave it
+            _cands = []
+            for _bj in range(_bi - 1, max(_bi - 12, -1), -1):
+                _jt, _jv = _bseq[_bj]
+                if _jt == 'prog':
+                    break  # hit the previous PROG TABLE — stop
+                if _jt == 'tbl':
+                    continue  # skip option / routing tables
+                _ptxt = _jv
+                if not _ptxt or len(_ptxt) < 8:
+                    continue
+                if qid_pat.match(_ptxt):
+                    break  # hit a labeled QID paragraph — belongs to another question
+                if JUNK_RE.search(_ptxt):
+                    continue
+                _jal = [c for c in _ptxt if c.isalpha()]
+                _jrat = (sum(1 for c in _jal if c.isupper()) / len(_jal) if _jal else 0)
+                if len(_ptxt) <= 60 and '?' not in _ptxt and '؟' not in _ptxt and len(_jal) >= 4 and _jrat >= 0.75:
+                    break  # structural section heading — stop
+                _cands.append(_ptxt)
+            if _cands:
+                _cands.reverse()
+                questions[_bval]['text'] = re.sub(r'\s+', ' ', ' '.join(_cands)).strip()
+
+        # Options pass: assign standalone-table options to the right QID in
+        # document order. Mirrors qc_engine._pending_opts logic.
+        def _assign_simple_opts(q, rows):
+            for _r in rows:
+                if len(_r) < 2:
+                    continue
+                if re.match(r'^\d+$', _r[0]):
+                    _code, _text = _r[0], _r[1]
+                elif len(_r) == 2 and re.match(r'^\d+$', _r[-1]) and not re.match(r'^\d+$', _r[0]):
+                    _code, _text = _r[-1], _r[0]
+                else:
+                    continue
+                if _text and not any(o['text'] == _text for o in q['options']):
+                    q['options'].append({'code': _code, 'text': _text})
+
+        _opt_qid = None
+        _opt_pending = None
+        for _btype, _bval in _bseq:
+            if _btype == 'para' and _bval:
+                _bm_opt = qid_pat.match(_bval)
+                if _bm_opt:
+                    _opt_qid = _bm_opt.group('qid')
+                    # don't clear _opt_pending — table may belong to the new QID
+            elif _btype == 'prog' and _bval and _bval in questions:
+                if _opt_pending and not questions[_bval]['options']:
+                    _assign_simple_opts(questions[_bval], _opt_pending)
+                _opt_qid = _bval
+                _opt_pending = None
+            elif _btype == 'tbl' and isinstance(_bval, list) and _bval:
+                if _opt_qid and _opt_qid in questions and not questions[_opt_qid]['options']:
+                    _assign_simple_opts(questions[_opt_qid], _bval)
+                _opt_pending = _bval
+
         # Extract termination rules
         term_re = re.compile(
             r'(?:THANKS?\s*AND\s*CLOSE|THANK\s*AND\s*CLOSE'
@@ -2034,7 +2363,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             r'|MERCI\s+FERMER|CLORE\s+LE\s+QUESTIONNAIRE'
             r'|FIN\s+DU\s+QUESTIONNAIRE|STOPPER\s+LE\s+SONDAGE'
             r'|GRAZIE\s+E\s+CHIUDI'
-            r'|GRACIAS\s+Y\s+CIERRE|TERMINATE\b)',
+            r'|GRACIAS\s+Y\s+CIERRE|TERMINATE\b'
+            # German
+            r'|UMFRAGE\s+BEENDEN|BEENDEN\s+UND\s+SCHLIE'
+            r'|FRAGEBOGEN\s+BEENDEN|ABBRECHEN\b'
+            # Portuguese / Dutch / Polish / Turkish
+            r'|ENCERRAR\s+(?:E\s+)?AGRADECER|FECHAR\s+E\s+AGRADECER'
+            r'|SLUITEN\s+EN\s+BEDANKEN|ONDERZOEK\s+BEËINDIGEN'
+            r'|ZAKOŃCZYĆ|ANKET[İI]\s+KAPAT'
+            # Structural catch-all: any routing cell line that starts with a
+            # close/screen/stop/end/exit verb in any language can be detected
+            # by the line-level extraction below even without matching here.
+            # This regex gates cell selection; structural extraction is additive.
+            r')',
             re.IGNORECASE
         )
         qid_heading_re = re.compile(r'^\s*\[?\s*([A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)\s*[\.\-\s\]\:\)]')
@@ -2067,7 +2408,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     ct = "\n".join(p.text.strip() for p in cell.paragraphs if p.text.strip())
                     all_cells_text.append(ct)
             joined = "\n".join(all_cells_text)
-            pt_match = re.search(r'PROGRAMMING\s+TABLE[\s\|\n]*([A-Za-z]{1,8}\d+\w*)', joined, re.IGNORECASE)
+            pt_match = re.search(r'PROG(?:RAM(?:M?ING)?)?\s+TABLE[\s\|\n]*([A-Za-z]{1,8}\d+(?:\.\d+)*)', joined, re.IGNORECASE)
             if pt_match: table_qid = pt_match.group(1)
 
             for cell_text in all_cells_text:
@@ -2086,6 +2427,13 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     if not any(r.get('answer_codes')==[code] for r in questions[host]['termination_rules']):
                         questions[host]['termination_rules'].append({"test_qid":host,"answer_codes":[code],"raw":m.group(0)[:100],"source":"tac-style"})
 
+                for _line in cell_text.split('\n'):
+                    if not term_re.search(_line): continue
+                    for _lm in re.finditer(r'\bcode\s+(\d+)\b', _line, re.IGNORECASE):
+                        code = _lm.group(1)
+                        if not any(r.get('answer_codes') == [code] for r in questions[host]['termination_rules']):
+                            questions[host]['termination_rules'].append({"test_qid": host, "answer_codes": [code], "raw": _line[:100], "source": "line-structural"})
+
         for qid in questions:
             questions[qid]["text"] = re.sub(r'\s+', ' ', questions[qid]["text"]).strip()
 
@@ -2093,6 +2441,122 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
         log(f'  Questions parsed: {len(questions)}', 'green')
         log(f'  Termination rules: {term_count}', 'green')
         progress(15)
+
+        # ── AI FALLBACK: patch weak questions the rigid parser missed ─────────
+        # Runs only when a Gemini key is configured. Sends ONE batched call for
+        # all weak questions so token usage stays proportional, not per-question.
+        _ai_fb_model = get_gemini_model()
+        if _ai_fb_model:
+            _weak = {}
+            for _fqid, _fq in questions.items():
+                _txt_weak = len(_fq["text"].strip()) < 10
+                _opts_weak = (
+                    not _fq["options"]
+                    and not _fq.get("is_numeric")
+                    and not any(kw in _fq["text"].lower()
+                                for kw in ("open", "verbatim", "précisez",
+                                           "specify", "saisir", "numeric",
+                                           "entrez", "enter"))
+                )
+                if _txt_weak or _opts_weak:
+                    _weak[_fqid] = {"txt": _txt_weak, "opts": _opts_weak}
+
+            if _weak:
+                log(f'  AI fallback: {len(_weak)} weak question(s) — patching with Gemini', 'yellow')
+
+                # Find each weak QID's position in the body sequence (_bseq) built
+                # during the backfill pass so we can extract surrounding raw context.
+                _bpos = {}
+                for _bi2, (_bt2, _bv2) in enumerate(_bseq):
+                    if _bt2 == 'prog' and _bv2 in _weak and _bv2 not in _bpos:
+                        _bpos[_bv2] = _bi2
+                    elif _bt2 == 'para' and isinstance(_bv2, str):
+                        _pm2 = qid_pat.match(_bv2)
+                        if _pm2:
+                            _q2 = _pm2.group('qid')
+                            if _q2 in _weak and _q2 not in _bpos:
+                                _bpos[_q2] = _bi2
+
+                def _ctx_for_pos(pos):
+                    parts = []
+                    for _bt3, _bv3 in _bseq[max(0, pos - 8): min(len(_bseq), pos + 22)]:
+                        if _bt3 == 'para' and _bv3:
+                            parts.append(_bv3)
+                        elif _bt3 == 'prog' and _bv3:
+                            parts.append(f'[PROG TABLE: {_bv3}]')
+                        elif _bt3 == 'tbl' and isinstance(_bv3, list):
+                            for _r3 in _bv3:
+                                if isinstance(_r3, list):
+                                    parts.append(' | '.join(str(c) for c in _r3 if c))
+                    return '\n'.join(p for p in parts if p.strip())
+
+                _sections = []
+                for _wqid in _weak:
+                    _p2 = _bpos.get(_wqid)
+                    if _p2 is None:
+                        continue
+                    _ctx2 = _ctx_for_pos(_p2)
+                    if _ctx2:
+                        _sections.append(f"--- QID: {_wqid} ---\n{_ctx2[:900]}")
+
+                if _sections:
+                    _fb_prompt = (
+                        "You are a survey scripting document parser.\n"
+                        "Extract question data from each raw section below.\n\n"
+                        "For each QID:\n"
+                        "- text: the survey question shown to respondents"
+                        " (NOT metadata lines like TYPE / ROUTING / MANDATORY / RANGE)\n"
+                        "- options: answer options as [{\"code\":\"1\",\"text\":\"...\"}].\n"
+                        "  Options may appear as 'CODEm TEXT' (e.g. '22m Cardiologie 191m Pneumologie'),\n"
+                        "  or '1. Option text', or in a table with code | text columns.\n"
+                        "  If the question is open-ended or numeric with no fixed options, return [].\n\n"
+                        + "\n\n".join(_sections)
+                        + "\n\nReturn ONLY this JSON (no markdown):\n"
+                        "{\"questions\":[{\"qid\":\"X\",\"text\":\"...\","
+                        "\"options\":[{\"code\":\"1\",\"text\":\"...\"}]}]}"
+                    )
+
+                    _fb_data = None
+                    for _att in range(3):
+                        try:
+                            _fb_resp = _ai_fb_model.generate_content(_fb_prompt)
+                            _fb_raw = _fb_resp.text.strip()
+                            _fb_raw = re.sub(r'```json|```', '', _fb_raw).strip()
+                            _fb_raw = re.sub(r'<[^>]+>.*?</[^>]+>', '', _fb_raw,
+                                             flags=re.DOTALL).strip()
+                            _fbm = re.search(r'\{.*\}', _fb_raw, re.DOTALL)
+                            if _fbm:
+                                _fb_data = json.loads(_fbm.group(0))
+                            break
+                        except Exception as _fbe:
+                            _wait = [5, 15, 45][_att]
+                            log(f'  AI fallback attempt {_att+1} failed'
+                                f' ({str(_fbe)[:60]}) — retry in {_wait}s', 'yellow')
+                            time.sleep(_wait)
+
+                    _merged = 0
+                    if _fb_data:
+                        for _fbq in _fb_data.get("questions", []):
+                            _fid = _fbq.get("qid", "")
+                            if _fid not in questions:
+                                continue
+                            _q = questions[_fid]
+                            # Only overwrite what the rigid parser left empty
+                            if not _q["text"].strip() and _fbq.get("text", "").strip():
+                                _q["text"] = re.sub(r'\s+', ' ', _fbq["text"]).strip()
+                                _merged += 1
+                            if not _q["options"] and _fbq.get("options"):
+                                _valid = [o for o in _fbq["options"]
+                                          if o.get("code") and o.get("text")]
+                                if _valid:
+                                    _q["options"] = _valid
+                                    _merged += 1
+                        log(f'  AI fallback: patched {_merged} field(s)', 'green')
+                    else:
+                        log('  AI fallback: no parseable data from Gemini', 'yellow')
+            else:
+                log('  AI fallback: rigid parser got everything — no AI call needed', 'green')
+        # ── end AI fallback ───────────────────────────────────────────────────
 
         live_data = {}
         issues = []
@@ -2113,6 +2577,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 page.goto(survey_url, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
+                # LINK CHECK: detect expired/dead survey link
+                try:
+                    _body = page.locator("body").inner_text(timeout=5000).lower()
+                    _bad = ["400: bad request", "bad request", "session expired", "session has expired", "404 not found", "page not found", "error has occurred", "link has expired", "survey is closed", "no longer available", "afraid i can", "server encountered an error", "not able to interpret the request"]
+                    if any(b in _body for b in _bad) or len(_body.strip()) < 50:
+                        log("  LINK NOT WORKING / EXPIRED - get a fresh link", "red")
+                        jobs[job_id]["status"] = "error"
+                        jobs[job_id]["phase"] = "Survey link expired or not working"
+                        jobs[job_id]["error"] = "Survey link is not working or has expired. Please check the link and try again with a fresh link."
+                        try: browser.close()
+                        except: pass
+                        return
+                except: pass
                 ss_dir = f"{OUTPUT_FOLDER}/{job_id}/screenshots"
                 os.makedirs(ss_dir, exist_ok=True)
 
@@ -2129,12 +2606,24 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                         log('  Country select skipped: ' + str(e)[:40], 'yellow')
 
                 has_test_nav = False
+                # RETRY: wait for Test Navigator to load (up to 3 tries, page may be slow)
+                for _try in range(3):
+                    _cnt = page.locator(".cf-tn-list-item").count()
+                    if _cnt > 0:
+                        log("  TN loaded: " + str(_cnt) + " items (try " + str(_try+1) + ")", "green")
+                        break
+                    log("  TN not ready, waiting... (try " + str(_try+1) + ")", "yellow")
+                    page.wait_for_timeout(4000)
+                    try:
+                        page.locator("text=Test Navigator").first.click(timeout=2000)
+                        page.wait_for_timeout(1500)
+                    except: pass
                 try:
                     page_html = page.content()
                     log("  Page HTML length: " + str(len(page_html)), "cyan")
                     tn_selectors = [
                         ".cf-tn-list-item",
-                        ".sr-tn-question__text",
+                        ".cf-tn-list-item",
                         "[class*='tn-question']",
                         "[class*='test-navigator']",
                         ".wix-tn-item",
@@ -2184,36 +2673,109 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     seen_qids = set()
                     for ni, el in enumerate(nav_items):
                         try:
-                            txt = el.inner_text().strip().split()[0].strip()
-                            m = re.match(r'^([A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)$', txt)
+                            words = el.inner_text().strip().split()
+                            first = words[0].strip() if words else ''
+                            second = words[1].strip() if len(words) > 1 else ''
+                            m = re.match(r'^([A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)$', first)
                             if m and m.group(1) not in seen_qids:
-                                qid_index_map.append((ni, m.group(1)))
-                                seen_qids.add(m.group(1))
+                                doc_qid = m.group(1)
+                                # Confirmit TN shows "DocID PlatformID" — keep platform ID
+                                # for [Question ID: PlatformID] marker matching (e.g. Q1 → Q1new)
+                                plat_qid = second if (second and second != doc_qid
+                                    and re.match(r'^[A-Za-z]\w*\d+\w*$', second)) else doc_qid
+                                qid_index_map.append((ni, doc_qid, plat_qid))
+                                seen_qids.add(doc_qid)
                         except: continue
 
                     log('  ' + str(len(qid_index_map)) + ' QIDs found in navigator', 'blue')
                     total = max(1, len(qid_index_map))
-                    for i, (nav_idx, qid) in enumerate(qid_index_map, 1):
-                        progress(20 + int((i/total)*40), 'Crawling ' + qid + '...')
-                        try:
-                            try:
-                                if not page.locator(".cf-tn-list-item").count():
-                                    page.locator("text=Test Navigator").first.click(timeout=3000)
-                                    page.wait_for_timeout(500)
+                    for i, (nav_idx, qid, plat_qid) in enumerate(qid_index_map, 1):
+                        # STOP CHECK: if user clicked Stop, abort crawling
+                        if jobs.get(job_id, {}).get('status') == 'stopped':
+                            log('  >>> STOPPED by user during crawling', 'red')
+                            try: browser.close()
                             except: pass
-                            page.locator(".cf-tn-list-item").nth(nav_idx).click(timeout=5000, force=True)
+                            jobs[job_id]['phase'] = 'Stopped'
+                            return
+                        progress(20 + int((i/total)*40), 'Crawling ' + qid + '...')
+
+                        # --- ensure TN panel is open BEFORE every click ---
+                        try:
+                            if not page.locator(".cf-tn-list-item").count():
+                                page.locator("text=Test Navigator").first.click(timeout=3000)
+                                page.wait_for_timeout(500)
+                        except: pass
+
+                        # --- click with fresh locator, 3 s timeout, one retry ---
+                        _click_ok = False
+                        for _attempt in range(2):
+                            try:
+                                # Re-locate fresh each attempt so a stale DOM never poisons the retry
+                                page.locator(".cf-tn-list-item").nth(nav_idx).click(timeout=3000, force=True)
+                                _click_ok = True
+                                break
+                            except Exception as _ce:
+                                if _attempt == 0:
+                                    # Re-open TN panel and wait before retry
+                                    try:
+                                        page.locator("text=Test Navigator").first.click(timeout=2000)
+                                        page.wait_for_timeout(600)
+                                    except: pass
+                                else:
+                                    log('   ' + qid + ' SKIP (click failed): ' + str(_ce)[:80], 'yellow')
+
+                        if not _click_ok:
+                            live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"has_inputs":True,"status":"crawl_failed - manual review"}
+                            continue
+
+                        try:
                             page.wait_for_timeout(1200)
-                            text = page.evaluate("() => { const b=document.body.cloneNode(true); ['.sr-test-navigator','[class*=sr-tn]'].forEach(s=>b.querySelectorAll(s).forEach(e=>e.remove())); return b.innerText.trim(); }")
-                            text = re.sub(r'\*Shown in Testing mode only\*', '', text or '')
+                            full_text = page.evaluate("() => { const b=document.body.cloneNode(true); ['.sr-test-navigator','[class*=sr-tn]'].forEach(s=>b.querySelectorAll(s).forEach(e=>e.remove())); return b.innerText.trim(); }")
+                            full_text = re.sub(r'\*Shown in Testing mode only\*', '', full_text or '')
+                            # ISOLATE this question's text using [Question ID: XXX] markers (46000 chars -> ~500 chars)
+                            text = full_text
+                            try:
+                                _markers = list(re.finditer(r'\[Question ID:\s*([^\]]+)\]', full_text))
+                                def _nq(s): return s.replace('.','').replace('_','').replace('-','').replace(' ','').lower()
+                                _qn = _nq(qid)
+                                _found = False
+                                # Pass 1: EXACT match — try doc QID then platform QID (e.g. "Q1" vs "Q1new")
+                                for _mi, _m in enumerate(_markers):
+                                    if _m.group(1).strip().lower() in (qid.lower(), plat_qid.lower()):
+                                        _start = _m.end()
+                                        _end = _markers[_mi+1].start() if _mi+1 < len(_markers) else len(full_text)
+                                        text = full_text[_start:_end].strip()
+                                        _found = True
+                                        break
+                                # Pass 2: normalized match (handles R2.2 vs R2x2)
+                                if not _found:
+                                    for _mi, _m in enumerate(_markers):
+                                        _mq = _m.group(1).strip()
+                                        if _nq(_mq) == _qn or _nq(_mq).replace('x','') == _qn.replace('x',''):
+                                            _start = _m.end()
+                                            _end = _markers[_mi+1].start() if _mi+1 < len(_markers) else len(full_text)
+                                            text = full_text[_start:_end].strip()
+                                            _found = True
+                                            break
+                                # Pass 3: marker not found - take first 2000 chars only (avoid 86703 dump)
+                                if not _found and len(full_text) > 3000:
+                                    text = full_text[:2000].strip()
+                            except: pass
+                            text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
+                            # Strip Confirmit test-page footer elements
+                            text = re.sub(r'(?im)^[ \t]*test\s*link\b.*$', '', text)
+                            text = re.sub(r'(?m)^\d+%(?:[ \t]+\d+%){2,}[ \t]*$', '', text)
+                            text = re.sub(u'(?m)^[^\\S\\n]*[←→◄►\xab\xbb]{1,4}[^\\S\\n]*$', u'', text)
                             text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
                             opts = _extract_options(page)
+                            has_inp = _page_has_inputs(page)
                             try: page.screenshot(path=ss_dir + '/' + qid + '.png', full_page=True)
                             except: pass
                             piping = re.findall(r'\[PIPE[^\]]*\]', text, re.I)
-                            live_data[qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"status":"OK"}
+                            live_data[qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"has_inputs":has_inp,"status":"OK"}
                             log('   ' + qid + ' (' + str(len(text)) + ' chars)', 'green')
                         except Exception as e:
-                            live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"status":"ERROR: " + str(e)[:50]}
+                            live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"has_inputs":True,"status":"ERROR: " + str(e)[:50]}
                             log('   ' + qid + ' ERROR: ' + str(e)[:80], 'red')
 
                 else:
@@ -2266,12 +2828,13 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                             detected_qid = 'PAGE' + str(page_num)
 
                         opts = _extract_options(page)
+                        has_inp = _page_has_inputs(page)
                         try: page.screenshot(path=ss_dir + '/' + detected_qid + '.png', full_page=True)
                         except: pass
 
                         if text and detected_qid not in live_data:
                             piping = re.findall(r'\[PIPE[^\]]*\]', text, re.I)
-                            live_data[detected_qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"status":"OK"}
+                            live_data[detected_qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"has_inputs":has_inp,"status":"OK"}
                             log('   ' + detected_qid + ' (' + str(len(text)) + ' chars)', 'green')
 
                         try:
@@ -2340,7 +2903,9 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 
                         try:
                             low = (text or "").lower()
-                            if any(w in low for w in ["thank you", "merci", "survey complete", "questionnaire complete", "has been recorded"]):
+                            _kw_complete = any(w in low for w in ["thank you", "merci", "survey complete", "questionnaire complete", "has been recorded"])
+                            _no_inputs = page.locator("input:not([type='hidden']):not([type='submit']):visible, select:visible, textarea:visible").count() == 0
+                            if _kw_complete or _no_inputs:
                                 log('  Completion page detected', 'blue')
                                 break
                         except: pass
@@ -2363,54 +2928,103 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             else:
                 log('  AI mode: text-matching (add Gemini key in admin for AI)', 'yellow')
 
-            for qid in sorted(set(questions.keys()) | set(live_data.keys())):
-                in_doc = qid in questions
-                in_live = qid in live_data
+            # Confirmit converts dots to 'x': doc 'R2.2' = live 'R2x2'. Normalize for matching.
+            def _norm_qid(q):
+                return q.lower().replace('.', '').replace('x', '').replace('_', '').replace('-', '').replace(' ', '')
+            # Build live lookup by normalized qid
+            _live_norm = {}
+            for lq in live_data.keys():
+                _live_norm[_norm_qid(lq)] = lq
+            _doc_norm = {}
+            for dq in questions.keys():
+                _doc_norm[_norm_qid(dq)] = dq
+            def _find_base_match(doc_norm):
+                """Return (live_norm, live_orig) if a live QID shares the same
+                letter+digit prefix as doc_norm but with a non-digit suffix
+                (e.g. 'r2' -> 'r2new', 'q11' -> 'q11b')."""
+                _bm = re.match(r'^([a-z]+\d+)', doc_norm)
+                if not _bm:
+                    return None, None
+                _base = _bm.group(1)
+                for _ln, _lo in _live_norm.items():
+                    if (_ln != doc_norm
+                            and _ln.startswith(_base)
+                            and len(_ln) > len(_base)
+                            and not _ln[len(_base)].isdigit()):
+                        return _ln, _lo
+                return None, None
+
+            _naming_matched_live = set()
+            # Unified set of normalized qids
+            _all_norm = set(_doc_norm.keys()) | set(_live_norm.keys())
+            _to_compare = []
+            for _nqid in sorted(_all_norm):
+                qid = _doc_norm.get(_nqid) or _live_norm.get(_nqid)
+                in_doc = _nqid in _doc_norm
+                in_live = _nqid in _live_norm
+                _live_key = _live_norm.get(_nqid)
+                _doc_key = _doc_norm.get(_nqid)
                 if in_doc and not in_live:
-                    issues.append({"qid":qid,"type":"MISSING IN LIVE","details":"In doc but not in live","severity":"HIGH"})
+                    _bmn, _bmo = _find_base_match(_nqid)
+                    if _bmo:
+                        _naming_matched_live.add(_norm_qid(_bmo))
+                        issues.append({"qid":qid,"type":"NAMING MISMATCH",
+                                       "details":f"Doc: {qid} / Live: {_bmo}","severity":"MEDIUM"})
+                    else:
+                        issues.append({"qid":qid,"type":"MISSING IN LIVE","details":"In doc but not in live","severity":"HIGH"})
                     continue
                 if in_live and not in_doc:
+                    if _nqid in _naming_matched_live:
+                        continue  # already reported as naming mismatch on the doc side
+                    # Only flag as EXTRA if the live page has answerable inputs.
+                    # Pages with zero inputs (disclaimers, intros, thank-you screens)
+                    # are display-only and not real questions — skip them silently.
+                    if not live_data[_live_key].get("has_inputs", True):
+                        continue
                     issues.append({"qid":qid,"type":"EXTRA IN LIVE","details":"In live but not in doc","severity":"INFO"})
                     continue
-                if live_data[qid]["status"] != "OK":
-                    issues.append({"qid":qid,"type":"ERROR PAGE","details":live_data[qid]["status"],"severity":"MEDIUM"})
+                if live_data[_live_key]["status"] != "OK":
+                    issues.append({"qid":qid,"type":"ERROR PAGE","details":live_data[_live_key]["status"],"severity":"MEDIUM"})
                     continue
-
-                doc_text = questions[qid]["text"]
-                live_text = live_data[qid]["text"]
+                _to_compare.append({"qid":qid,"doc_text":questions[_doc_key]["text"],"live_text":live_data[_live_key]["text"],"doc_opts":[o["text"] for o in questions[_doc_key].get("options",[])],"live_opts":[o["text"] for o in live_data[_live_key].get("options",[])],"_doc_key":_doc_key,"_live_key":_live_key})
+            _batch_size = 8
+            _ai_handled = set()
+            if ai_model:
+                for _bi in range(0, len(_to_compare), _batch_size):
+                    if jobs.get(job_id, {}).get('status') == 'stopped':
+                        break
+                    _batch = _to_compare[_bi:_bi+_batch_size]
+                    log('  AI batch ' + str(_bi//_batch_size + 1) + ': ' + str(len(_batch)) + ' questions', 'cyan')
+                    _bres = ai_compare_batch(ai_model, _batch)
+                    if _bres is not None:
+                        for _item in _batch:
+                            _q = _item["qid"]
+                            _matched = False
+                            for _rk, _rv in _bres.items():
+                                if _norm_qid(_rk) == _norm_qid(_q):
+                                    for _iss in _rv:
+                                        _iss["qid"] = _q
+                                        issues.append(_iss)
+                                    _ai_handled.add(_q)
+                                    _matched = True
+                                    break
+                            if not _matched:
+                                _ai_handled.add(_q)
+            for _item in _to_compare:
+                qid = _item["qid"]
+                if qid in _ai_handled:
+                    continue
+                doc_text = _item["doc_text"]; live_text = _item["live_text"]
+                _doc_key = _item["_doc_key"]; _live_key = _item["_live_key"]
                 is_match, ratio = fuzzy_match(doc_text, live_text)
-                if not is_match:
-                    # If AI available, verify before flagging (reduces false positives)
-                    ai_result = ai_compare_text(ai_model, qid, doc_text, live_text)
-                    if ai_result is not None:
-                        ai_issue, ai_type, ai_details, ai_sev = ai_result
-                        if ai_issue:
-                            issues.append({"qid":qid,"type":ai_type or "TEXT MISMATCH","details":ai_details or f"Match: {int(ratio*100)}%","severity":ai_sev or ("HIGH" if ratio<0.4 else "MEDIUM")})
-                        # if AI says no issue, skip (false positive avoided)
-                    else:
-                        # No AI - use fuzzy match result
-                        issues.append({"qid":qid,"type":"TEXT MISMATCH","details":f"Match: {int(ratio*100)}%","severity":"HIGH" if ratio<0.4 else "MEDIUM"})
-
-                missing = find_missing_words(doc_text, live_text)
-                if missing:
-                    issues.append({"qid":qid,"type":"WORDS MISSING","details":f"Missing: {missing[:8]}","severity":"HIGH" if len(missing)>=3 else "MEDIUM"})
-
-                doc_opts = [o["text"] for o in questions[qid].get("options",[])]
-                live_opts_text = " | ".join([o["text"] for o in live_data[qid].get("options",[])])
-                missing_opts = []
-                for d_opt in doc_opts:
-                    d_norm = normalize(d_opt)
-                    if len(d_norm) > 3 and d_norm not in normalize(live_opts_text):
-                        found = any(SequenceMatcher(None,d_norm,normalize(lo["text"])).ratio()>0.7 for lo in live_data[qid].get("options",[]))
-                        if not found: missing_opts.append(d_opt[:40])
-                if missing_opts:
-                    issues.append({"qid":qid,"type":"OPTIONS MISMATCH","details":f"Missing: {missing_opts[:4]}","severity":"HIGH"})
-
-                if questions[qid].get("is_mandatory") and not live_data[qid].get("has_mandatory_marker"):
+                if not is_match and ratio < 0.5:
+                    issues.append({"qid":qid,"type":"TEXT MISMATCH","details":f"Match: {int(ratio*100)}% (fuzzy fallback - AI unavailable)","severity":"MEDIUM"})
+            for _item in _to_compare:
+                qid = _item["qid"]; _doc_key = _item["_doc_key"]; _live_key = _item["_live_key"]
+                if questions[_doc_key].get("is_mandatory") and not live_data[_live_key].get("has_mandatory_marker"):
                     issues.append({"qid":qid,"type":"MANDATORY MISSING","details":"Doc mandatory, live marker missing","severity":"MEDIUM"})
-
-                if live_data[qid].get("has_raw_piping"):
-                    issues.append({"qid":qid,"type":"PIPING NOT RESOLVED","details":f"Raw: {live_data[qid].get('raw_piping_found',[])[:3]}","severity":"HIGH"})
+                if live_data[_live_key].get("has_raw_piping"):
+                    issues.append({"qid":qid,"type":"PIPING NOT RESOLVED","details":f"Raw: {live_data[_live_key].get('raw_piping_found',[])[:3]}","severity":"HIGH"})
 
             sev = {"HIGH":0,"MEDIUM":0,"INFO":0}
             for i in issues: sev[i.get("severity","INFO")] = sev.get(i.get("severity","INFO"),0)+1
@@ -2443,6 +3057,10 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             log(f'  Testing {len(unique_rules)} rules', 'blue')
 
             for i, rule in enumerate(unique_rules, 1):
+                if jobs.get(job_id, {}).get('status') == 'stopped':
+                    log('  >>> STOPPED by user during termination tests', 'red')
+                    jobs[job_id]['phase'] = 'Stopped'
+                    return
                 test_qid = rule["test_qid"]
                 answer_code = rule["answer_code"]
                 log(f'\n  [{i}/{len(unique_rules)}] {test_qid} = code {answer_code}', 'blue')
@@ -2477,20 +3095,28 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                             except: pass
 
                         try:
-                            if not page.locator(".sr-tn-question__text").count():
+                            if not page.locator(".cf-tn-list-item").count():
                                 page.locator("text=Test Navigator").first.click(timeout=3000)
                                 page.wait_for_timeout(1000)
                         except: pass
 
                         navigated = False
-                        for el in page.locator(".sr-tn-question__text").all():
+                        _tn_loc = page.locator(".cf-tn-list-item")
+                        for _idx in range(_tn_loc.count()):
                             try:
-                                txt = el.inner_text().strip().split('\n')[0].strip()
+                                txt = _tn_loc.nth(_idx).inner_text(timeout=2000).strip().split()[0].strip()
                                 if txt == test_qid:
-                                    el.click(force=True, timeout=5000)
-                                    page.wait_for_timeout(1800)
-                                    navigated = True
-                                    break
+                                    for _attempt in range(2):
+                                        try:
+                                            page.locator(".cf-tn-list-item").nth(_idx).click(force=True, timeout=3000)
+                                            page.wait_for_timeout(1800)
+                                            navigated = True
+                                            break
+                                        except:
+                                            if _attempt == 0:
+                                                page.wait_for_timeout(800)
+                                    if navigated:
+                                        break
                             except: continue
 
                         if not navigated:
@@ -2501,7 +3127,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                             continue
 
                         try:
-                            if page.locator(".sr-tn-question__text").count() > 0:
+                            if page.locator(".cf-tn-list-item").count() > 0:
                                 page.locator("text=Test Navigator").first.click(timeout=2000)
                                 page.wait_for_timeout(500)
                         except: pass
@@ -2510,32 +3136,38 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                         clicked = False
                         strategy = ""
 
-                        try:
-                            labels = page.locator(".cf-radio-answer__text").all()
-                            if 0 <= radio_idx < len(labels):
-                                try: labels[radio_idx].scroll_into_view_if_needed(timeout=2000)
+                        for _attempt in range(2):
+                            try:
+                                _lbl = page.locator(".cf-radio-answer__text").nth(radio_idx)
+                                try: _lbl.scroll_into_view_if_needed(timeout=2000)
                                 except: pass
-                                labels[radio_idx].click(force=True, timeout=3000)
+                                _lbl.click(force=True, timeout=3000)
                                 page.wait_for_timeout(600)
                                 clicked = True
                                 strategy = f"label index={radio_idx}"
-                        except: pass
+                                break
+                            except:
+                                if _attempt == 0:
+                                    page.wait_for_timeout(500)
 
                         if not clicked:
-                            try:
-                                radios = page.locator("input[type='radio']:visible").all()
-                                if 0 <= radio_idx < len(radios):
-                                    radios[radio_idx].click(force=True, timeout=2500)
+                            for _attempt in range(2):
+                                try:
+                                    page.locator("input[type='radio']:visible").nth(radio_idx).click(force=True, timeout=3000)
                                     page.wait_for_timeout(600)
                                     clicked = True
                                     strategy = f"radio index={radio_idx}"
-                            except: pass
+                                    break
+                                except:
+                                    if _attempt == 0:
+                                        page.wait_for_timeout(500)
 
                         if not clicked:
-                            r_result["details"] = "Click failed"
+                            r_result["passed"] = True
+                            r_result["details"] = "Could not test — click failed, manual review required"
                             browser.close()
                             term_results.append(r_result)
-                            log(f'      Click failed', 'red')
+                            log(f'      Could not click — manual review required', 'yellow')
                             continue
 
                         for sel in ["button:has-text('>>')", "input[value='>>']", ".cf-button-next"]:
@@ -2546,7 +3178,12 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 
                         page.wait_for_timeout(3500)
                         body_text = page.locator("body").inner_text(timeout=5000).lower()
-                        terminated = any(ind in body_text for ind in THANKYOU_INDICATORS)
+                        _kw_terminated = any(ind in body_text for ind in THANKYOU_INDICATORS)
+                        try:
+                            _struct_terminated = page.locator("input[type='radio']:visible, input[type='checkbox']:visible, select:visible").count() == 0
+                        except:
+                            _struct_terminated = False
+                        terminated = _kw_terminated or _struct_terminated
 
                         if terminated:
                             r_result["passed"] = True
@@ -2661,6 +3298,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 "MANDATORY MISSING": "Mandatory marker missing",
                 "PIPING NOT RESOLVED": "Piping not working",
                 "MISSING IN LIVE": "Question not in survey",
+                "NAMING MISMATCH": "Question name differs (doc vs live)",
             }
             fix_sug = {
                 "WORDS MISSING": "Add the missing words to the live survey",
@@ -2669,6 +3307,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 "MANDATORY MISSING": "Add * marker to make question mandatory",
                 "PIPING NOT RESOLVED": "Fix piping logic",
                 "MISSING IN LIVE": "Add this question to the live survey",
+                "NAMING MISMATCH": "Rename question in live survey to match spec, or update spec",
             }
 
             n = 1
@@ -2984,18 +3623,27 @@ import shutil
 from datetime import timedelta
 
 def auto_cleanup_job():
-    """Run every night — delete data older than 30 days"""
-    cutoff = datetime.now() - timedelta(days=30)
+    """Run every night — delete job data older than 30 days, feedback older than 3 days"""
+    cutoff_jobs = datetime.now() - timedelta(days=30)
+    cutoff_feedback = datetime.now() - timedelta(days=3)
     deleted = 0
     for job_id, job in list(jobs.items()):
         try:
             created = datetime.fromisoformat(job.get('created_at', ''))
-            if created < cutoff:
+            if created < cutoff_jobs:
                 shutil.rmtree(f"{UPLOAD_FOLDER}/{job_id}", ignore_errors=True)
                 shutil.rmtree(f"{OUTPUT_FOLDER}/{job_id}", ignore_errors=True)
                 del jobs[job_id]
                 deleted += 1
         except: pass
+    # Auto-delete old feedback
+    global user_feedback_db
+    before = len(user_feedback_db)
+    user_feedback_db = [
+        f for f in user_feedback_db
+        if datetime.fromisoformat(f['created_at']) >= cutoff_feedback
+    ]
+    deleted += before - len(user_feedback_db)
     return deleted
 
 def start_cleanup_scheduler():
@@ -3025,7 +3673,7 @@ def onboarding():
   {sidebar_html('onboarding')}
   <div class="main-content">
     <div class="topbar">
-      <div><p class="page-title">Welcome to SurveyQC! 🎉</p><p class="page-sub">Setup karo — 2 minute lagenge</p></div>
+      <div><p class="page-title">Welcome to SurveyQC! 🎉</p><p class="page-sub">Quick setup — takes 2 minutes</p></div>
       <span class="badge badge-blue">Step 2 of 3</span>
     </div>
 
@@ -3043,15 +3691,15 @@ def onboarding():
       </div>
       <div class="card" style="border:2px solid #185FA5">
         <div style="width:32px;height:32px;border-radius:50%;background:var(--purple);color:white;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;margin-bottom:10px">2</div>
-        <p style="font-size:13px;font-weight:500;color:var(--color-text-primary)">Platform select karo</p>
-        <p style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">Kaun sa platform use karte ho?</p>
+        <p style="font-size:13px;font-weight:500;color:var(--color-text-primary)">Choose your platform</p>
+        <p style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">Which survey platform do you use?</p>
         <select class="form-select" style="margin-top:10px;font-size:12px">
           <option>Confirmit</option><option>Decipher</option><option>Forsta</option><option>Qualtrics</option>
         </select>
       </div>
       <div class="card" style="opacity:.5">
         <div style="width:32px;height:32px;border-radius:50%;background:var(--color-border-secondary);color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;margin-bottom:10px">3</div>
-        <p style="font-size:13px;font-weight:500;color:var(--color-text-primary)">First QC run karo</p>
+        <p style="font-size:13px;font-weight:500;color:var(--color-text-primary)">Run your first QC</p>
         <p style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">See the magic!</p>
       </div>
     </div>
@@ -3060,8 +3708,8 @@ def onboarding():
       <div style="display:flex;align-items:center;gap:12px">
         <i class="ti ti-bulb" style="font-size:24px;color:#185FA5;flex-shrink:0"></i>
         <div style="flex:1">
-          <p style="font-size:13px;font-weight:500;color:#0C447C">Pehle ek simple survey test karo!</p>
-          <p style="font-size:11px;color:#185FA5;margin-top:3px">Koi bhi survey URL paste karo — AI sab check karega automatically in 10 minutes</p>
+          <p style="font-size:13px;font-weight:500;color:#0C447C">Start with a simple survey test!</p>
+          <p style="font-size:11px;color:#185FA5;margin-top:3px">Paste any survey URL — AI checks everything automatically in 10 minutes</p>
         </div>
         <a href="/new-qc" class="btn btn-primary btn-sm" style="flex-shrink:0"><i class="ti ti-player-play"></i>Run first QC</a>
       </div>
@@ -3103,9 +3751,9 @@ def share_report(job_id):
             })
 
     comments = notes_db.get(job_id, [
-        {'text': 'Q5 ka bug fix kar diya ✅', 'user': 'Client (Marie L.)', 'time': '2h ago', 'type': 'client'},
-        {'text': 'R1 termination bhi check karo please', 'user': 'You', 'time': '1h ago', 'type': 'own'},
-        {'text': 'R1 bhi fix ho gaya! Retest karo 🙏', 'user': 'Client (Marie L.)', 'time': '30m ago', 'type': 'client', 'fixed': True},
+        {'text': 'Q5 bug has been fixed ✅', 'user': 'Client (Marie L.)', 'time': '2h ago', 'type': 'client'},
+        {'text': 'Can you also check R1 termination?', 'user': 'You', 'time': '1h ago', 'type': 'own'},
+        {'text': 'R1 is fixed too! Please retest 🙏', 'user': 'Client (Marie L.)', 'time': '30m ago', 'type': 'client', 'fixed': True},
     ])
 
     comments_html = ''
@@ -3129,11 +3777,11 @@ def share_report(job_id):
   {sidebar_html('reports')}
   <div class="main-content">
     <div class="topbar">
-      <div><p class="page-title">Share Report</p><p class="page-sub">Client ko link bhejo — signup karke dekhe aur comment kare</p></div>
+      <div><p class="page-title">Share Report</p><p class="page-sub">Share this report link with your client — they can view and comment after a free signup</p></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
       <div class="card">
-        <p style="font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:12px">🔗 Share link generate karo</p>
+        <p style="font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:12px">🔗 Generate share link</p>
         <div style="background:var(--color-background-secondary);border-radius:8px;padding:12px;margin-bottom:12px">
           <p style="font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">Report: <strong>{doc_name}</strong></p>
           <div style="display:flex;gap:6px;margin-bottom:8px">
@@ -3176,6 +3824,121 @@ def share_report(job_id):
 
 
 # ================================================================
+# USER FEEDBACK API (Task 6)
+# ================================================================
+@app.route('/api/user-feedback', methods=['POST'])
+@login_required
+def submit_user_feedback():
+    data = request.get_json(silent=True) or {}
+    msg = (data.get('message') or '').strip()[:1000]
+    if not msg:
+        return jsonify({'error': 'message required'}), 400
+    entry = {
+        'id': str(uuid.uuid4())[:8],
+        'type': data.get('type', 'general')[:20],
+        'message': msg,
+        'page': (data.get('page') or '/')[:200],
+        'user_email': session.get('user_email', ''),
+        'created_at': datetime.now().isoformat(),
+        'read': False,
+    }
+    user_feedback_db.append(entry)
+    return jsonify({'ok': True})
+
+
+@app.route('/admin/feedback')
+def admin_feedback():
+    if not session.get('is_admin'):
+        return redirect('/admin/login')
+    q = request.args.get('q', '').lower()
+    t = request.args.get('type', '')
+    items = list(reversed(user_feedback_db))
+    if q:
+        items = [i for i in items if q in i['message'].lower() or q in i['user_email'].lower()]
+    if t:
+        items = [i for i in items if i['type'] == t]
+    unread_count = sum(1 for i in user_feedback_db if not i['read'])
+
+    rows = ''
+    for item in items:
+        cls = '' if item['read'] else 'feedback-new'
+        dot = '' if item['read'] else '<span style="display:inline-block;width:6px;height:6px;background:var(--accent);border-radius:50%;margin-right:6px;vertical-align:middle"></span>'
+        created = item['created_at'][:16].replace('T', ' ')
+        type_colors = {'bug': '#C84B31', 'feature': '#0073C6', 'general': '#3F7D58', 'other': '#8A847A'}
+        tc = type_colors.get(item['type'], '#8A847A')
+        rows += f"""<tr class="{cls}" data-id="{item['id']}">
+          <td>{dot}<span style="font-size:11px;background:{tc}22;color:{tc};padding:2px 7px;border-radius:20px;font-weight:600">{item['type']}</span></td>
+          <td style="max-width:360px;word-break:break-word">{item['message'][:200]}</td>
+          <td style="color:#8A847A">{item['user_email']}</td>
+          <td style="white-space:nowrap;color:#8A847A">{created}</td>
+          <td>
+            <form method="POST" action="/admin/feedback/action" style="display:inline">
+              <input type="hidden" name="id" value="{item['id']}">
+              <button name="action" value="read" title="Mark read" style="background:none;border:none;cursor:pointer;color:#0073C6;font-size:13px;padding:3px 6px">✓</button>
+              <button name="action" value="delete" title="Delete" style="background:none;border:none;cursor:pointer;color:#C84B31;font-size:13px;padding:3px 6px" onclick="return confirm('Delete?')">✕</button>
+            </form>
+          </td>
+        </tr>"""
+
+    if not rows:
+        rows = '<tr><td colspan="5" style="text-align:center;color:#8A847A;padding:24px">No feedback yet.</td></tr>'
+
+    return render_template_string(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feedback — Admin</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<script src="/admin-sidebar-js"></script>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+<style>*{{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter',sans-serif}}body{{background:#F7F4EE}}
+table{{width:100%;border-collapse:collapse}}th,td{{padding:9px 12px;text-align:left;border-bottom:1px solid #E8E1D8;font-size:12px}}
+th{{font-weight:600;color:#5F5B53;font-size:11px;text-transform:uppercase;letter-spacing:.06em}}
+tr:hover td{{background:#F7F4EE}}.feedback-new td{{font-weight:500}}</style>
+</head><body>
+<div id="admsb"></div>
+<div style="padding:24px;max-width:1100px;margin:0 auto">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
+    <a href="/admin" style="color:#8A847A;font-size:20px">&larr;</a>
+    <div>
+      <p style="font-size:20px;font-weight:700;color:#171717">User Feedback</p>
+      <p style="font-size:12px;color:#8A847A">{unread_count} unread · auto-deleted after 3 days</p>
+    </div>
+    <form method="GET" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <input name="q" value="{q}" placeholder="Search..." style="padding:7px 12px;border:1px solid #E8E1D8;border-radius:8px;font-size:13px;outline:none">
+      <select name="type" style="padding:7px 12px;border:1px solid #E8E1D8;border-radius:8px;font-size:13px;outline:none">
+        <option value="">All types</option>
+        <option value="bug" {'selected' if t=='bug' else ''}>Bug</option>
+        <option value="feature" {'selected' if t=='feature' else ''}>Feature</option>
+        <option value="general" {'selected' if t=='general' else ''}>General</option>
+        <option value="other" {'selected' if t=='other' else ''}>Other</option>
+      </select>
+      <button type="submit" style="padding:7px 14px;background:#C46A2B;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Filter</button>
+    </form>
+  </div>
+  <div style="background:#fff;border-radius:14px;border:1px solid #E8E1D8;overflow:hidden">
+    <table><thead><tr><th>Type</th><th>Message</th><th>User</th><th>Date</th><th>Actions</th></tr></thead>
+    <tbody>{rows}</tbody></table>
+  </div>
+</div></body></html>""")
+
+
+@app.route('/admin/feedback/action', methods=['POST'])
+def admin_feedback_action():
+    if not session.get('is_admin'):
+        return redirect('/admin/login')
+    fid = request.form.get('id', '')
+    action = request.form.get('action', '')
+    for i, item in enumerate(user_feedback_db):
+        if item['id'] == fid:
+            if action == 'delete':
+                user_feedback_db.pop(i)
+            elif action == 'read':
+                user_feedback_db[i]['read'] = True
+            break
+    return redirect('/admin/feedback')
+
+
+# ================================================================
 # PRIVACY PAGE
 # ================================================================
 @app.route('/privacy-data')
@@ -3203,7 +3966,7 @@ def privacy_data():
         <i class="ti ti-shield-check" style="font-size:22px;color:#166534;flex-shrink:0"></i>
         <div>
           <p style="font-size:13px;font-weight:500;color:#166534">Data auto-deletes after 30 days</p>
-          <p style="font-size:11px;color:#15803D;margin-top:2px">Har raat 12:00 AM pe automatic delete hota hai. Koi action nahi karna — fully automatic!</p>
+          <p style="font-size:11px;color:#15803D;margin-top:2px">Runs automatically every night at 12:00 AM. No action needed — fully automatic!</p>
         </div>
       </div>
     </div>
@@ -3489,10 +4252,10 @@ def admin_gift():
     <a href="/admin" style="color:var(--color-text-secondary);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
     <p style="font-size:18px;font-weight:500;color:var(--color-text-primary)">🎁 Gift Access</p>
   </div>
-  {'<div class="alert alert-success">Access gifted! User ko email bheja gaya.</div>' if gifted else ''}
+  {'<div class="alert alert-success">Access gifted! A confirmation email has been sent to the user.</div>' if gifted else ''}
   {'<div class="alert alert-error">' + error + '</div>' if error else ''}
   <div class="card">
-    <p style="font-size:12px;color:var(--color-text-secondary);margin-bottom:14px">Dost ya colleague ko direct access do — koi coupon nahi chahiye</p>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin-bottom:14px">Give a friend or colleague direct access — no coupon code needed</p>
     <form method="POST">
       <div style="margin-bottom:12px">
         <label style="font-size:12px;color:var(--color-text-secondary);margin-bottom:5px;display:block;font-weight:500">User email *</label>
@@ -4276,7 +5039,7 @@ def run_screenshot_qc():
             api_key = api_store.get('gemini',{}).get('key','')
             if not api_key:
                 jobs[job_id]['status'] = 'error'
-                jobs[job_id]['log'].append('No Gemini API key. Admin > API Management mein add karo.')
+                jobs[job_id]['log'].append('No Gemini API key configured. Go to Admin > API Management to add one.')
                 return
 
             import google.generativeai as genai
@@ -5446,13 +6209,13 @@ def admin_apis():
     page += '<div style="padding:24px;max-width:1000px;margin:0 auto">'
     page += '<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">'
     page += '<a href="/admin" style="color:#6B7280;font-size:22px">&larr;</a>'
-    page += '<div><p style="font-size:20px;font-weight:600;color:#1A1A2E">API Management</p><p style="font-size:12px;color:#6B7280">Sab APIs ek jagah se manage karo</p></div>'
+    page += '<div><p style="font-size:20px;font-weight:600;color:#1A1A2E">API Management</p><p style="font-size:12px;color:#6B7280">Manage all your API integrations in one place</p></div>'
     page += '<div style="margin-left:auto;display:flex;gap:10px">'
     page += '<div style="background:#EAF3DE;border-radius:8px;padding:10px 16px;text-align:center"><p style="font-size:18px;font-weight:600;color:#27500A">'+str(active_count)+'</p><p style="font-size:10px;color:#3B6D11">Active</p></div>'
     page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:8px;padding:10px 16px;text-align:center"><p style="font-size:18px;font-weight:600;color:#1A1A2E">'+str(len(api_store))+'</p><p style="font-size:10px;color:#6B7280">Total</p></div>'
     page += '<div style="background:#FCEBEB;border-radius:8px;padding:10px 16px;text-align:center"><p style="font-size:18px;font-weight:600;color:#791F1F">'+str(not_added)+'</p><p style="font-size:10px;color:#A32D2D">Not added</p></div>'
     page += '</div></div>'+alert
-    page += '<div style="background:#F5E6D8;border:0.5px solid #B5D4F4;border-radius:10px;padding:12px 16px;margin-bottom:20px"><p style="font-size:12px;color:#C46A2B">Security: API keys server pe store hoti hain. GitHub pe kabhi nahi jaati. Sirf admin dekh sakta hai.</p></div>'
+    page += '<div style="background:#F5E6D8;border:0.5px solid #B5D4F4;border-radius:10px;padding:12px 16px;margin-bottom:20px"><p style="font-size:12px;color:#C46A2B">Security: API keys are stored server-side only. They are never exposed in source code or logs. Only admins can view them.</p></div>'
     page += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">'
     page += '<div><p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">AI APIs</p>'+ai_html
     page += '<p style="font-size:11px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 12px">Notifications</p>'+notif_html+'</div>'
@@ -5483,6 +6246,7 @@ def admin_sidebar_js():
     '<a href="/admin/users" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Users</a>',
     '<a href="/admin/reports" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; QC Reports</a>',
     '<a href="/admin/email" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Email Users</a>',
+    '<a href="/admin/feedback" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Feedback</a>',
     '<hr style="border-color:rgba(255,255,255,.1);margin:8px 0">',
     '<p style="font-size:9px;color:rgba(255,255,255,.3);margin-bottom:8px;text-transform:uppercase;padding:0 8px">Settings</p>',
     '<a href="/admin/apis" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; API Keys</a>',

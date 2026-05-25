@@ -80,6 +80,24 @@ STOPWORDS = {
 # ============================================================
 # DOCUMENT PARSER
 # ============================================================
+def _extract_table_options(question, rows):
+    """Extract answer options from a doc table row list into a question dict."""
+    for r in rows:
+        if len(r) < 2:
+            continue
+        # Format 1: [code, text, marker?] — first cell is a purely numeric code
+        if re.match(r'^\d+$', r[0]):
+            code, text = r[0], r[1]
+        # Format 2: [text, code] — exactly two cells, last is numeric, first is not
+        elif len(r) == 2 and re.match(r'^\d+$', r[-1]) and not re.match(r'^\d+$', r[0]):
+            code, text = r[-1], r[0]
+        else:
+            continue
+        if text and code not in question["raw_codes"]:
+            question["options"].append({"code": code, "text": text})
+            question["raw_codes"].append(code)
+
+
 def parse_document(doc_path):
     """
     Parse document → extract questions, options, logic tables.
@@ -90,6 +108,7 @@ def parse_document(doc_path):
     logic_tables = []
     current_qid = None
     qid_order = []
+    _pending_opts = None  # last option table seen, for PROG TABLE look-back
 
     # Walk body in order
     for child in doc.element.body.iterchildren():
@@ -159,6 +178,50 @@ def parse_document(doc_path):
                             'flat_text': flat,
                             'rows': rows
                         })
+                        _pending_opts = None
+                    elif rows:
+                        first_cell = rows[0][0] if rows[0] else ''
+                        is_prog = bool(re.match(r'PROGRAMM?ING\s+TABLE', first_cell, re.I))
+
+                        if is_prog:
+                            # Extract QID from second cell of first row
+                            prog_qid = None
+                            if len(rows[0]) >= 2:
+                                m = re.match(
+                                    r'([RSQ]\d+(?:bis|ter|Info|info|Ex)?)',
+                                    rows[0][1].strip(), re.I
+                                )
+                                if m:
+                                    prog_qid = m.group(1)
+                            if prog_qid:
+                                if prog_qid not in questions:
+                                    questions[prog_qid] = {
+                                        "text": "", "options": [],
+                                        "is_mandatory": False, "has_piping": False,
+                                        "piping_found": [], "raw_codes": [],
+                                    }
+                                    qid_order.append(prog_qid)
+                                current_qid = prog_qid
+                                # Check TYPE row for mandatory marker
+                                for r in rows[1:5]:
+                                    if r and r[0].strip().upper() == 'TYPE' and len(r) >= 2:
+                                        if MANDATORY_RE.search(r[1]):
+                                            questions[prog_qid]["is_mandatory"] = True
+                                # Assign buffered options if this question has none yet
+                                if _pending_opts and not questions[prog_qid]["options"]:
+                                    _extract_table_options(questions[prog_qid], _pending_opts)
+                            _pending_opts = None
+                        else:
+                            # Potential answer-option table
+                            if current_qid and current_qid in questions:
+                                # Only assign if the question has no options yet — prevents
+                                # a following question's option table being appended here
+                                # when current_qid hasn't advanced past its own PROG TABLE yet.
+                                if not questions[current_qid]["options"]:
+                                    _extract_table_options(questions[current_qid], rows)
+                            # Always buffer for the next PROG TABLE (handles the case where
+                            # the option table appears before the PROG TABLE that names the QID)
+                            _pending_opts = rows
                     break
 
     # Clean up texts
