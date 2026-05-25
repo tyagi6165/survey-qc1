@@ -971,26 +971,35 @@ def report_detail(job_id):
     verdict_msg = 'Fix required before going live' if verdict == 'FAIL' else ('All good — ready to launch!' if verdict == 'PASS' else 'Review needed before launch')
 
     issues_html = ''
+    _ui_type_names = {
+        'WORDS MISSING': 'Missing words',
+        'TEXT MISMATCH': 'Text mismatch',
+        'OPTIONS MISMATCH': 'Options missing',
+        'MANDATORY MISSING': 'Mandatory marker',
+        'PIPING NOT RESOLVED': 'Piping issue',
+        'MISSING IN LIVE': 'Question missing',
+        'NAMING MISMATCH': 'Naming mismatch',
+        'ERROR PAGE': 'Page error',
+    }
     for i, iss in enumerate(issues[:20]):
         sev = iss.get('severity', 'INFO')
         cls = 'badge-red' if sev == 'HIGH' else ('badge-amber' if sev == 'MEDIUM' else 'badge-blue')
-        type_names = {
-            'WORDS MISSING': 'Missing words',
-            'TEXT MISMATCH': 'Text mismatch',
-            'OPTIONS MISMATCH': 'Options missing',
-            'MANDATORY MISSING': 'Mandatory marker',
-            'PIPING NOT RESOLVED': 'Piping issue',
-            'MISSING IN LIVE': 'Question missing',
-            'NAMING MISMATCH': 'Naming mismatch',
-            'ERROR PAGE': 'Page error',
-        }
-        simple_type = type_names.get(iss.get('type',''), iss.get('type',''))
+        conf_lvl = iss.get('conf_level', '')
+        conf_pct = iss.get('confidence', '')
+        if conf_lvl == 'HIGH':
+            conf_cls = 'badge-green'
+        elif conf_lvl == 'MEDIUM':
+            conf_cls = 'badge-amber'
+        else:
+            conf_cls = 'badge-blue'
+        conf_badge = f'<span class="badge {conf_cls}" title="Confidence">{conf_pct}%</span>' if conf_pct != '' else ''
+        simple_type = _ui_type_names.get(iss.get('type',''), iss.get('type',''))
         detail = iss.get('details','')[:120]
         issues_html += f"""
         <tr>
           <td class="primary">{iss.get('qid','')}</td>
           <td>{simple_type}</td>
-          <td><span class="badge {cls}">{sev}</span></td>
+          <td><span class="badge {cls}">{sev}</span>&nbsp;{conf_badge}</td>
           <td style="font-size:11px;color:var(--text3)">{detail}</td>
         </tr>"""
 
@@ -1967,6 +1976,48 @@ def ai_compare_full(model, qid, doc_text, doc_opts, live_text, live_opts):
         return out
     except Exception:
         return None
+
+
+def _assign_confidence(issue):
+    """Return (confidence 0-100, conf_level HIGH/MEDIUM/LOW) for an issue dict.
+    Called as a post-processing pass after all issues are collected so that
+    existing issue-creation code is not touched."""
+    t = issue.get("type", "")
+    sev = issue.get("severity", "MEDIUM")
+    details = issue.get("details", "")
+
+    if t == "MISSING IN LIVE":
+        return 95, "HIGH"
+    if t == "PIPING NOT RESOLVED":
+        return 90, "HIGH"
+    if t == "EXTRA IN LIVE":
+        return 88, "HIGH"
+    if t == "NAMING MISMATCH":
+        # Soft heuristic prefix match — inherently ambiguous
+        return 55, "LOW"
+    if t == "MANDATORY MISSING":
+        # Depends on parser correctly identifying the mandatory marker
+        return 68, "MEDIUM"
+    if t == "ERROR PAGE":
+        # Could be a transient crawl error
+        return 65, "MEDIUM"
+    if t == "TEXT MISMATCH":
+        # Extract match ratio from details string if present
+        import re as _re
+        m = _re.search(r'(\d+)%', details)
+        ratio = int(m.group(1)) if m else 40
+        if ratio < 30:
+            return 82, "HIGH"
+        if ratio < 50:
+            return 50, "LOW"
+        return 65, "MEDIUM"
+    # AI-generated issues: trust the severity Gemini assigned, but cap LOW
+    if sev == "HIGH":
+        return 88, "HIGH"
+    if sev == "MEDIUM":
+        return 72, "MEDIUM"
+    # LOW severity from AI, or anything else unrecognised
+    return 48, "LOW"
 
 
 def ai_generate_summary(model, questions, live_data, issues):
@@ -3031,6 +3082,15 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             for i in issues: sev[i.get("severity","INFO")] = sev.get(i.get("severity","INFO"),0)+1
             log(f'  Total issues: {len(issues)} (HIGH:{sev["HIGH"]} MEDIUM:{sev["MEDIUM"]} INFO:{sev["INFO"]})', 'yellow')
 
+            # Assign confidence to every issue in one pass — does not touch
+            # any of the creation sites above.
+            for _ci in issues:
+                _ci["confidence"], _ci["conf_level"] = _assign_confidence(_ci)
+            _chigh  = sum(1 for i in issues if i.get("conf_level") == "HIGH")
+            _cmed   = sum(1 for i in issues if i.get("conf_level") == "MEDIUM")
+            _clow   = sum(1 for i in issues if i.get("conf_level") == "LOW")
+            log(f'  Confidence: {_chigh} high, {_cmed} medium, {_clow} need manual review', 'cyan')
+
         # PHASE 4: TERMINATION
         if mode in ('full', 'logic'):
             progress(75, 'Testing termination rules...')
@@ -3273,11 +3333,15 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             sr.font.size = Pt(11); sr.italic = True; sr.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
             report.add_paragraph()
 
+        _rpt_chigh = sum(1 for i in issues if i.get("conf_level") == "HIGH")
+        _rpt_cmed  = sum(1 for i in issues if i.get("conf_level") == "MEDIUM")
+        _rpt_clow  = sum(1 for i in issues if i.get("conf_level") == "LOW")
         for line in [
             f"Questions checked: {len(questions)}",
             f"Pages crawled: {len(live_data)}",
             f"Termination tests: {term_passed}/{len(term_results)} passed" if term_results else None,
             f"Total issues found: {total_issues}",
+            f"Confidence breakdown: {_rpt_chigh} high-confidence, {_rpt_cmed} medium, {_rpt_clow} need manual review",
             f"Time saved: ~8 hours vs manual QC",
         ]:
             if not line: continue
@@ -3286,30 +3350,33 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 
         report.add_paragraph()
 
-        if issues or term_failed:
+        type_names = {
+            "WORDS MISSING": "Missing words",
+            "TEXT MISMATCH": "Text doesn't match",
+            "OPTIONS MISMATCH": "Answer options missing",
+            "MANDATORY MISSING": "Mandatory marker missing",
+            "PIPING NOT RESOLVED": "Piping not working",
+            "MISSING IN LIVE": "Question not in survey",
+            "NAMING MISMATCH": "Question name differs (doc vs live)",
+        }
+        fix_sug = {
+            "WORDS MISSING": "Add the missing words to the live survey",
+            "TEXT MISMATCH": "Update live survey text to match the doc",
+            "OPTIONS MISMATCH": "Add missing answer options to live survey",
+            "MANDATORY MISSING": "Add * marker to make question mandatory",
+            "PIPING NOT RESOLVED": "Fix piping logic",
+            "MISSING IN LIVE": "Add this question to the live survey",
+            "NAMING MISMATCH": "Rename question in live survey to match spec, or update spec",
+        }
+
+        _fix_issues    = [i for i in issues if i.get("conf_level") in ("HIGH", "MEDIUM")]
+        _review_issues = [i for i in issues if i.get("conf_level") == "LOW"]
+
+        if _fix_issues or term_failed:
             h = report.add_paragraph()
             hr = h.add_run("Issues to Fix")
             hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0xC0, 0x00, 0x00)
             report.add_paragraph()
-
-            type_names = {
-                "WORDS MISSING": "Missing words",
-                "TEXT MISMATCH": "Text doesn't match",
-                "OPTIONS MISMATCH": "Answer options missing",
-                "MANDATORY MISSING": "Mandatory marker missing",
-                "PIPING NOT RESOLVED": "Piping not working",
-                "MISSING IN LIVE": "Question not in survey",
-                "NAMING MISMATCH": "Question name differs (doc vs live)",
-            }
-            fix_sug = {
-                "WORDS MISSING": "Add the missing words to the live survey",
-                "TEXT MISMATCH": "Update live survey text to match the doc",
-                "OPTIONS MISMATCH": "Add missing answer options to live survey",
-                "MANDATORY MISSING": "Add * marker to make question mandatory",
-                "PIPING NOT RESOLVED": "Fix piping logic",
-                "MISSING IN LIVE": "Add this question to the live survey",
-                "NAMING MISMATCH": "Rename question in live survey to match spec, or update spec",
-            }
 
             n = 1
             for r in term_results:
@@ -3324,12 +3391,13 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     p2r.font.size = Pt(11); p2r.font.italic = True; p2r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
                     report.add_paragraph(); n += 1
 
-            for issue in issues:
-                if issue.get("severity") not in ("HIGH", "MEDIUM"): continue
-                color = (0xC0, 0x00, 0x00) if issue.get("severity") == "HIGH" else (0xBA, 0x75, 0x17)
+            for issue in _fix_issues:
+                conf_pct = issue.get("confidence", "")
+                conf_lvl = issue.get("conf_level", "")
+                color = (0xC0, 0x00, 0x00) if conf_lvl == "HIGH" else (0xBA, 0x75, 0x17)
                 simple = type_names.get(issue['type'], issue['type'])
                 p = report.add_paragraph()
-                pr = p.add_run(f"Issue {n}: {simple}")
+                pr = p.add_run(f"Issue {n}: {simple}  [{conf_pct}% confidence — {conf_lvl}]")
                 pr.font.size = Pt(12); pr.font.bold = True; pr.font.color.rgb = RGBColor(*color)
                 report.add_paragraph().add_run(f"   Where: {issue['qid']}").font.size = Pt(11)
                 detail = issue['details'][:200]
@@ -3339,6 +3407,29 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 p2r = p2.add_run(f"   Fix: {fix}")
                 p2r.font.size = Pt(11); p2r.font.italic = True; p2r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
                 report.add_paragraph(); n += 1
+
+        if _review_issues:
+            report.add_paragraph()
+            h = report.add_paragraph()
+            hr = h.add_run("Needs Manual Review — tool not certain")
+            hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0xBA, 0x75, 0x17)
+            sub_p = report.add_paragraph()
+            sub_p.add_run(
+                "The following items could not be confidently classified. "
+                "Review each one manually before going live."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+
+            for issue in _review_issues:
+                conf_pct = issue.get("confidence", "")
+                simple = type_names.get(issue['type'], issue['type'])
+                p = report.add_paragraph()
+                pr = p.add_run(f"?  {issue['qid']}  —  {simple}  [{conf_pct}% — UNSURE]")
+                pr.font.size = Pt(11); pr.font.bold = True
+                pr.font.color.rgb = RGBColor(0xBA, 0x75, 0x17)
+                detail = issue['details'][:200]
+                report.add_paragraph().add_run(f"   {detail}").font.size = Pt(10)
+                report.add_paragraph()
 
         if term_results:
             report.add_paragraph()
