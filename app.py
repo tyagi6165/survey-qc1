@@ -2980,6 +2980,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                     # Pages with zero inputs (disclaimers, intros, thank-you screens)
                     # are display-only and not real questions — skip them silently.
                     if not live_data[_live_key].get("has_inputs", True):
+                        log(f'  Skipping display-only screen: {qid} (no inputs)', 'grey')
                         continue
                     issues.append({"qid":qid,"type":"EXTRA IN LIVE","details":"In live but not in doc","severity":"INFO"})
                     continue
