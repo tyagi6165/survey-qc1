@@ -3,3 +3,4 @@ playwright
 python-docx
 werkzeug
 gunicorn
+beautifulsoup4

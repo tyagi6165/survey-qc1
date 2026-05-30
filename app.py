@@ -182,6 +182,7 @@ def sidebar_html(active='dashboard'):
         ('dashboard', 'ti-home', 'Dashboard', '/dashboard'),
         ('new-qc', 'ti-plus', 'New QC', '/new-qc'),
         ('reports', 'ti-file-report', 'Reports', '/reports'),
+        ('retest', 'ti-refresh', 'Re-test', '/retest'),
         ('templates', 'ti-copy', 'Templates', '/templates'),
     ]
     nav_html = ''
@@ -194,7 +195,7 @@ def sidebar_html(active='dashboard'):
         ('dashboard', 'ti-home', 'Home', '/dashboard'),
         ('new-qc', 'ti-plus', 'New QC', '/new-qc'),
         ('reports', 'ti-file-report', 'Reports', '/reports'),
-        ('settings', 'ti-settings', 'Settings', '/settings'),
+        ('retest', 'ti-refresh', 'Re-test', '/retest'),
     ]
     mob_nav = ''
     for key, icon, label, href in mob_items:
@@ -890,16 +891,17 @@ function poll() {{
       document.getElementById('phase-text').textContent = data.phase || 'Running...';
 
       var box = document.getElementById('log-box');
-      var logs = data.logs || [];
-      var newLogs = logs.slice(logCount);
-      newLogs.forEach(function(l) {{
-        var d = document.createElement('div');
-        d.className = 'log-' + (l.color||'white');
-        d.textContent = l.msg;
-        box.appendChild(d);
-      }});
-      logCount = logs.length;
-      box.scrollTop = box.scrollHeight;
+      if (data.logs) {{
+        var newLogs = data.logs.slice(logCount);
+        newLogs.forEach(function(l) {{
+          var d = document.createElement('div');
+          d.className = 'log-' + (l.color||'white');
+          d.textContent = l.msg;
+          box.appendChild(d);
+        }});
+        logCount = data.logs.length;
+        box.scrollTop = box.scrollHeight;
+      }}
 
       if (data.status === 'done') {{
         document.getElementById('status-badge').textContent = 'Complete';
@@ -962,6 +964,7 @@ def report_detail(job_id):
     doc_qids = j.get('doc_qids', 0)
     live_qids = j.get('live_qids', 0)
     term_passed = j.get('term_passed', 0)
+    term_review = j.get('term_review', 0)
     term_total = j.get('term_total', 0)
     total_issues = j.get('total_issues', 0)
     created = j.get('created_at', '')[:16]
@@ -1005,9 +1008,12 @@ def report_detail(job_id):
 
     term_html = ''
     for r in term_results:
-        passed = r.get('passed', False)
-        cls = 'badge-green' if passed else 'badge-red'
-        label = 'PASS' if passed else 'FAIL'
+        if r.get('needs_review'):
+            cls, label = 'badge-amber', 'NEEDS REVIEW'
+        elif r.get('passed'):
+            cls, label = 'badge-green', 'PASS'
+        else:
+            cls, label = 'badge-red', 'FAIL'
         term_html += f"""
         <tr>
           <td><span class="badge {cls}">{label}</span></td>
@@ -1052,7 +1058,7 @@ def report_detail(job_id):
       <i class="ti {verdict_icon}" style="font-size:18px"></i>
       <div>
         <p style="font-weight:500">{verdict_msg}</p>
-        <p style="font-size:12px;opacity:.8">{total_issues} structural issues · {term_total - term_passed} termination failures</p>
+        <p style="font-size:12px;opacity:.8">{total_issues} structural issues · {term_total - term_passed - term_review} term. failed · {term_review} need manual review</p>
       </div>
     </div>
 
@@ -1064,7 +1070,7 @@ def report_detail(job_id):
         {"<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No structural issues found!</p>"}
       </div>
       <div class="card">
-        <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">Termination tests ({term_passed}/{term_total} passed)</p>
+        <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">Termination tests ({term_passed}/{term_total - term_review} validated · {term_review} need review)</p>
         {"<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No termination rules found in doc</p>"}
       </div>
     </div>
@@ -1117,8 +1123,7 @@ def reports_list():
     user_jobs = [(jid, j) for jid, j in jobs.items() if j.get('user_email') == email]
     user_jobs.sort(key=lambda x: x[1].get('created_at', ''), reverse=True)
 
-    rows = ''
-    for jid, j in user_jobs:
+    def _build_row(jid, j, is_child=False):
         status = j.get('status', 'running')
         doc_name = j.get('doc_name', 'Unknown')
         platform = j.get('platform', '-')
@@ -1144,15 +1149,45 @@ def reports_list():
         share_btn = f'<button data-share-url="{share_url}" data-share-title="{share_title}" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:13px;padding:0 4px" title="Share"><i class="ti ti-share"></i></button>' if status == 'done' else ''
         plat_lower = platform.lower().replace(' ', '')
 
-        rows += f"""
-        <tr>
-          <td class="primary"><i class="ti ti-file-text" style="color:var(--purple);margin-right:8px"></i>{doc_name[:35]}</td>
+        if is_child:
+            name_cell = (
+                '<span style="display:inline-block;width:16px;border-bottom:2px solid var(--border);'
+                'margin-right:6px;vertical-align:middle"></span>'
+                '<i class="ti ti-refresh" style="color:#1D9E75;margin-right:6px;font-size:13px"></i>'
+                f'<span style="font-size:12px">{doc_name[:32]}</span>'
+                ' <span style="background:#E6F7F1;color:#0F7A50;font-size:10px;font-weight:600;'
+                'padding:2px 6px;border-radius:10px;margin-left:4px">Re-test</span>'
+            )
+            row_style = ' style="background:rgba(29,158,117,.03)"'
+        else:
+            name_cell = f'<i class="ti ti-file-text" style="color:var(--purple);margin-right:8px"></i>{doc_name[:35]}'
+            row_style = ''
+
+        return f"""
+        <tr{row_style}>
+          <td class="primary">{name_cell}</td>
           <td data-platform="{plat_lower}">{platform}</td>
           <td>{mode.title()}</td>
           <td><span class="badge {badge_cls}">{badge_txt}</span></td>
           <td style="color:var(--text3)">{created}</td>
           <td style="white-space:nowrap">{link} &nbsp; {download} &nbsp; {share_btn}</td>
         </tr>"""
+
+    # Separate top-level jobs from re-test children
+    children_by_parent = {}
+    parents = []
+    for jid, j in user_jobs:
+        parent_id = j.get('retest_of')
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append((jid, j))
+        else:
+            parents.append((jid, j))
+
+    rows = ''
+    for jid, j in parents:
+        rows += _build_row(jid, j, is_child=False)
+        for cjid, cj in children_by_parent.get(jid, []):
+            rows += _build_row(cjid, cj, is_child=True)
 
     if not rows:
         rows = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">No reports yet. <a href="/new-qc" style="color:var(--purple)">Run your first QC!</a></td></tr>'
@@ -1223,6 +1258,259 @@ function filterReports(){{
 }}
 </script>
 </body></html>""")
+
+# ================================================================
+# PAGE: RE-TEST
+# ================================================================
+@app.route('/retest')
+@login_required
+def retest_page():
+    email = session.get('user_email')
+    all_jobs = [(jid, j) for jid, j in jobs.items()
+                if j.get('user_email') == email and j.get('status') == 'done'
+                and not j.get('retest_of')]  # only top-level completed
+    all_jobs.sort(key=lambda x: x[1].get('created_at', ''), reverse=True)
+    top20 = all_jobs[:20]
+
+    options_html = '<option value="">-- Select a completed report --</option>'
+    for jid, j in top20:
+        doc_name = j.get('doc_name', 'Unknown')[:50]
+        date = j.get('created_at', '')[:10]
+        issues = j.get('total_issues', 0)
+        issue_label = f"{issues} issue{'s' if issues != 1 else ''}"
+        options_html += f'<option value="{jid}">{doc_name} &middot; {date} &middot; {issue_label}</option>'
+
+    RETEST_PAGE = SHARED_CSS + """
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>Re-test Report — SurveyQC</title>
+  <style>
+    .retest-card{background:white;border-radius:16px;padding:28px;border:1px solid var(--border);margin-bottom:20px}
+    .retest-section-label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+    .retest-select{width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;background:white;outline:none;color:var(--text)}
+    .retest-select:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(139,92,246,.15)}
+    .retest-textarea{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;resize:vertical;outline:none;color:var(--text);min-height:140px;box-sizing:border-box}
+    .retest-textarea:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(139,92,246,.15)}
+    .qid-preview{margin-top:10px;padding:10px 14px;background:rgba(139,92,246,.06);border-radius:8px;border:1px solid rgba(139,92,246,.15);display:none}
+    .qid-chip{display:inline-block;background:var(--purple);color:white;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;margin:2px 3px 2px 0}
+    .qid-preview-label{font-size:11px;color:var(--purple);font-weight:600;margin-bottom:6px}
+    .submit-btn{background:var(--purple);color:white;border:none;padding:13px 28px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .2s}
+    .submit-btn:disabled{opacity:.4;cursor:not-allowed}
+    .submit-btn:hover:not(:disabled){opacity:.88}
+    .info-box{background:rgba(139,92,246,.05);border:1px solid rgba(139,92,246,.15);border-radius:10px;padding:14px 16px;margin-bottom:20px}
+  </style>
+</head>
+<body>
+<div class="app-layout">
+  """ + sidebar_html('retest') + """
+  <div class="main-content">
+    <div class="topbar">
+      <div>
+        <p class="page-title">Re-test Report</p>
+        <p class="page-sub">Re-run QC on specific questions after client feedback</p>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <p style="font-size:13px;color:var(--purple);font-weight:600;margin-bottom:4px"><i class="ti ti-info-circle"></i> How it works</p>
+      <p style="font-size:13px;color:var(--text2)">Select a completed report, paste client feedback or list QIDs, and SurveyQC re-runs QC filtered to only those questions. A new linked report is created.</p>
+    </div>
+
+    <form id="retestForm" method="POST" action="/retest/submit" enctype="multipart/form-data">
+
+      <!-- SECTION 1: Select report -->
+      <div class="retest-card">
+        <p class="retest-section-label"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Step 1 — Select original report</p>
+        <select name="original_job_id" id="reportSelect" class="retest-select" required onchange="checkReady()">
+          """ + options_html + """
+        </select>
+      </div>
+
+      <!-- SECTION 2: Feedback / QID list -->
+      <div class="retest-card">
+        <p class="retest-section-label"><i class="ti ti-message-circle" style="margin-right:5px"></i>Step 2 — What to re-check?</p>
+        <textarea
+          name="feedback_text"
+          id="feedbackText"
+          class="retest-textarea"
+          placeholder="Example: 'Please re-check Q15bis, Q21, P3' &#10;&#10;Or paste an email / comment containing QIDs."
+          oninput="onFeedbackChange()"
+          required
+        ></textarea>
+        <div class="qid-preview" id="qidPreview">
+          <p class="qid-preview-label"><i class="ti ti-scan"></i> Detected QIDs</p>
+          <div id="qidChips"></div>
+        </div>
+        <p style="font-size:11px;color:var(--text3);margin-top:8px">
+          <i class="ti ti-info-circle"></i>
+          Accepts comma/newline lists or natural language. Optionally upload an annotated screenshot below.
+        </p>
+        <div style="margin-top:14px">
+          <label style="font-size:12px;color:var(--text2);font-weight:500;display:block;margin-bottom:6px">
+            <i class="ti ti-photo" style="margin-right:4px"></i>Annotated screenshot (optional)
+          </label>
+          <input type="file" name="screenshot" accept="image/*"
+            style="font-size:13px;color:var(--text2);font-family:inherit">
+        </div>
+      </div>
+
+      <!-- SECTION 3: Submit -->
+      <div class="retest-card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <button type="submit" class="submit-btn" id="submitBtn" disabled>
+          <i class="ti ti-refresh"></i> Re-run QC on selected QIDs only
+        </button>
+        <p id="submitHint" style="font-size:12px;color:var(--text3)">Fill both fields above to enable</p>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<script>
+// Live QID detection regex — mirrors export_parser.py
+var QID_RE = /\\b([A-Za-z]{1,6}\\d+(?:bis|ter|[a-z]{1,3}\\d*)?)\\b/gi;
+
+function extractQids(text) {
+  var matches = [], seen = {}, m;
+  QID_RE.lastIndex = 0;
+  while ((m = QID_RE.exec(text)) !== null) {
+    var norm = m[1].toUpperCase();
+    if (!seen[norm]) { seen[norm] = true; matches.push(norm); }
+  }
+  return matches;
+}
+
+function onFeedbackChange() {
+  var text = document.getElementById('feedbackText').value;
+  var qids = extractQids(text);
+  var preview = document.getElementById('qidPreview');
+  var chips = document.getElementById('qidChips');
+  if (qids.length > 0) {
+    chips.innerHTML = qids.map(function(q) {
+      return '<span class="qid-chip">' + q + '</span>';
+    }).join('');
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
+  checkReady();
+}
+
+function checkReady() {
+  var reportOk = document.getElementById('reportSelect').value !== '';
+  var feedbackOk = document.getElementById('feedbackText').value.trim() !== '';
+  var btn = document.getElementById('submitBtn');
+  var hint = document.getElementById('submitHint');
+  btn.disabled = !(reportOk && feedbackOk);
+  if (reportOk && feedbackOk) {
+    var qids = extractQids(document.getElementById('feedbackText').value);
+    hint.textContent = qids.length > 0
+      ? qids.length + ' QID' + (qids.length === 1 ? '' : 's') + ' detected — ready to submit'
+      : 'No QIDs detected yet (will use AI to extract)';
+    hint.style.color = qids.length > 0 ? 'var(--green)' : 'var(--amber)';
+  } else {
+    hint.textContent = 'Fill both fields above to enable';
+    hint.style.color = 'var(--text3)';
+  }
+}
+
+// Prevent double-submit
+document.getElementById('retestForm').addEventListener('submit', function() {
+  var btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2"></i> Submitting...';
+});
+</script>
+</body></html>"""
+
+    return render_template_string(RETEST_PAGE)
+
+
+@app.route('/retest/submit', methods=['POST'])
+@login_required
+def retest_submit():
+    import threading
+    from export_parser import parse_qid_list
+
+    original_job_id = request.form.get('original_job_id', '').strip()
+    feedback_text = request.form.get('feedback_text', '').strip()
+
+    if not original_job_id or original_job_id not in jobs:
+        return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html><body>
+<div style="padding:40px;text-align:center">
+  <p style="color:red;font-size:16px">Report not found. <a href="/retest">Go back</a></p>
+</div></body></html>"""), 400
+
+    if not feedback_text:
+        return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html><body>
+<div style="padding:40px;text-align:center">
+  <p style="color:red;font-size:16px">Please enter feedback text or QIDs. <a href="/retest">Go back</a></p>
+</div></body></html>"""), 400
+
+    qid_list = parse_qid_list(feedback_text)
+
+    if not qid_list:
+        return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html><body>
+<div style="padding:40px;text-align:center">
+  <p style="color:red;font-size:16px">No QIDs found in feedback. Please list specific QIDs (e.g. Q15, Q21). <a href="/retest">Go back</a></p>
+</div></body></html>"""), 400
+
+    original = jobs[original_job_id]
+    doc_path = original.get('doc_path', '')
+    survey_url = original.get('survey_url', '')
+
+    if not doc_path or not survey_url:
+        return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html><body>
+<div style="padding:40px;text-align:center">
+  <p style="color:red;font-size:16px">Original report files not available. <a href="/reports">View reports</a></p>
+</div></body></html>"""), 400
+
+    new_job_id = str(uuid.uuid4())[:8]
+    jobs[new_job_id] = {
+        'status': 'running',
+        'progress': 0,
+        'phase': 'Starting re-test...',
+        'logs': [{'msg': f'Re-test started — filtering to {len(qid_list)} QID(s): {", ".join(qid_list)}', 'color': 'cyan'}],
+        'doc_name': f"Re-test: {original.get('doc_name', 'Unknown')}",
+        'doc_path': doc_path,
+        'survey_url': survey_url,
+        'platform': original.get('platform', 'Confirmit'),
+        'country': original.get('country', ''),
+        'mode': original.get('mode', 'full'),
+        'user_email': session['user_email'],
+        'created_at': datetime.now().isoformat(),
+        'retest_of': original_job_id,
+        'retest_qids': qid_list,
+        'verdict': None,
+        'issues': [],
+        'term_results': [],
+        'report_file': None,
+        'doc_qids': 0,
+        'live_qids': 0,
+        'total_issues': 0,
+        'term_passed': 0,
+        'term_total': 0,
+    }
+
+    t = threading.Thread(
+        target=run_qc_engine,
+        args=(new_job_id, doc_path, survey_url,
+              original.get('country', ''),
+              original.get('mode', 'full'),
+              []),
+        kwargs={'filter_qids': qid_list},
+        daemon=True
+    )
+    t.start()
+
+    return redirect(f'/progress/{new_job_id}')
+
 
 # ================================================================
 # PAGE: AI TESTER
@@ -1811,18 +2099,169 @@ def _extract_options(page):
 
 
 def _page_has_inputs(page):
-    """Return True if the page has at least one answerable input element.
-    Used to distinguish real questions from pure display/info screens."""
+    """Return True if the page has at least one VISIBLE answerable input.
+    Hidden/invisible inputs (display:none, visibility:hidden, opacity:0) that
+    Confirmit uses for internal state on display-only screens are excluded so
+    that intro/article/consent screens correctly return False."""
     try:
-        return bool(page.evaluate(
-            "() => document.querySelectorAll("
-            "'input[type=\"radio\"],input[type=\"checkbox\"],select,"
-            "input[type=\"text\"],input[type=\"number\"],"
-            "input[type=\"range\"],textarea'"
-            ").length > 0"
-        ))
+        return bool(page.evaluate("""
+            () => {
+                const sel = 'input[type="radio"],input[type="checkbox"],select,' +
+                            'input[type="text"],input[type="number"],' +
+                            'input[type="range"],textarea';
+                return Array.from(document.querySelectorAll(sel)).some(function(el) {
+                    if (el.offsetParent === null) return false;
+                    const s = window.getComputedStyle(el);
+                    return s.display !== 'none' &&
+                           s.visibility !== 'hidden' &&
+                           parseFloat(s.opacity || '1') > 0;
+                });
+            }
+        """))
     except Exception:
         return True  # safe default: assume inputs exist if DOM check fails
+
+
+def _parse_tn_items_from_html(html, tn_css_selectors, qid_re):
+    """
+    Extract the ordered TN item list from static HTML — replaces per-item
+    Playwright get_attribute / inner_text calls. Returns the same
+    [(nav_index, doc_qid, plat_qid), ...] list the Playwright loop produced.
+    Works for any platform whose TN renders in the initial HTML.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        import re as _re
+        soup = BeautifulSoup(html, "html.parser")
+        elements = []
+        for sel in tn_css_selectors:
+            found = soup.select(sel.replace("'", '"'))
+            if found:
+                elements = found
+                break
+        if not elements:
+            return []
+        seen_qids = set()
+        result = []
+        for ni, el in enumerate(elements):
+            try:
+                doc_qid = None
+                # Strategy 1: data attributes
+                for attr in ("data-qid", "data-question-id", "data-id"):
+                    v = el.get(attr) or ""
+                    if v and qid_re.match(v.strip()):
+                        doc_qid = qid_re.match(v.strip()).group(1); break
+                # Strategy 2: id attribute
+                if not doc_qid:
+                    v = el.get("id") or ""
+                    m = qid_re.search(v)
+                    if m: doc_qid = m.group(1)
+                # Strategy 3: class attribute
+                if not doc_qid:
+                    cls = " ".join(el.get("class") or [])
+                    m = _re.search(r'question[-_]?id[-_]?([A-Za-z]\w*\d+\w*)', cls, _re.IGNORECASE)
+                    if m: doc_qid = m.group(1)
+                # Strategy 4: inner text — first 3 words
+                if not doc_qid:
+                    words = el.get_text().strip().split()
+                    for w in words[:3]:
+                        m = _re.match(r'^([A-Za-z]{1,8}\d+(?:[a-zA-Z]\d+|[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?))\s*$', w.strip())
+                        if m: doc_qid = m.group(1); break
+                # Strategy 5: nested input/select name
+                if not doc_qid:
+                    inp = el.find(["input", "select"])
+                    if inp:
+                        v = inp.get("name") or ""
+                        m = qid_re.search(v)
+                        if m: doc_qid = m.group(1)
+                if not doc_qid or doc_qid in seen_qids:
+                    continue
+                words = el.get_text().strip().split()
+                second = words[1].strip() if len(words) > 1 else ''
+                plat_qid = second if (second and second != doc_qid
+                    and _re.match(r'^[A-Za-z]\w*\d+\w*$', second)) else doc_qid
+                result.append((ni, doc_qid, plat_qid))
+                seen_qids.add(doc_qid)
+            except: continue
+        return result
+    except Exception:
+        return []
+
+
+def _parse_question_texts_from_html(html):
+    """
+    Extract all question text blocks from static HTML in one pass.
+    Removes TN sidebar, splits full page text by [Question ID: XXX] markers,
+    and attempts BS4-based option extraction from question containers.
+    Returns {normalised_qid: {"text": str, "options": list, "has_inputs": bool}}.
+    Works for any platform that renders all questions in the initial HTML.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        import re as _re
+        def _nq(s): return s.replace('.','').replace('_','').replace('-','').replace(' ','').lower()
+        soup = BeautifulSoup(html, "html.parser")
+        # Remove TN sidebar (mirrors the Playwright evaluate removal)
+        for sel in ['.sr-test-navigator', '[class*="sr-tn"]',
+                    '.cf-test-navigator', '[class*="cf-tn-"]']:
+            try:
+                for el in soup.select(sel): el.decompose()
+            except: pass
+        body = soup.body or soup
+        full_text = body.get_text(separator='\n')
+        full_text = _re.sub(r'\*Shown in Testing mode only\*', '', full_text)
+        full_text = _re.sub(r'\n{3,}', '\n\n', full_text).strip()
+        markers = list(_re.finditer(r'\[Question ID:\s*([^\]]+)\]', full_text))
+        if not markers:
+            return {}
+        _noise = [
+            (r'(?im)^[ \t]*test\s*link\b.*$', ''),
+            (r'(?m)^\d+%(?:[ \t]+\d+%){2,}[ \t]*$', ''),
+            (r'(?m)^[^\S\n]*[←→◄►«»\xab\xbb]{1,4}[^\S\n]*$', ''),
+        ]
+        result = {}
+        for mi, m in enumerate(markers):
+            raw_qid = m.group(1).strip()
+            start = m.end()
+            end = markers[mi + 1].start() if mi + 1 < len(markers) else len(full_text)
+            block = full_text[start:end].strip()
+            for pat, repl in _noise:
+                block = _re.sub(pat, repl, block)
+            block = _re.sub(r'\n{3,}', '\n\n', block).strip()
+            result[_nq(raw_qid)] = {"text": block, "options": [], "has_inputs": True}
+        # Best-effort: extract options from data-qid containers
+        _opt_sels = [
+            ".cf-radio-answer__text", ".cf-checkbox-answer__text",
+            "label.cf-answer", ".answer-text", ".option-text",
+            ".sv-item__control-label", ".response-option",
+        ]
+        _skip_types = {"hidden", "submit", "button", "image", "reset"}
+        for container in soup.find_all(attrs={"data-qid": True}):
+            qid_val = (container.get("data-qid") or "").strip()
+            nkey = _nq(qid_val)
+            if nkey not in result:
+                continue
+            opts = []
+            seen_o = set()
+            for sel in _opt_sels:
+                try:
+                    found = container.select(sel)
+                    if found:
+                        for o in found:
+                            t = o.get_text(strip=True)
+                            if t and len(t) < 200 and t not in seen_o:
+                                seen_o.add(t); opts.append({"text": t})
+                        if opts: break
+                except: pass
+            if opts:
+                result[nkey]["options"] = opts
+            inp = container.find(["input", "select", "textarea"],
+                attrs={"type": lambda t: (t or "text") not in _skip_types})
+            result[nkey]["has_inputs"] = inp is not None
+        return result
+    except Exception:
+        return {}
+
 
 
 def get_gemini_model():
@@ -1893,12 +2332,17 @@ def ai_compare_batch(model, batch):
         + "\n\n".join(blocks) + "\n\n"
         "RULES:\n"
         "1. IGNORE: whitespace, punctuation, capitalization, HTML artifacts, bracket instructions "
-        "like [ALL COUNTRIES], translation notes, formatting.\n"
+        "like [ALL COUNTRIES], translation notes, formatting, question order or position in the "
+        "survey, and interviewer-only notes like '(ne pas poser)', '(do not ask)', '(ne pas lire)', "
+        "'(do not read)' or any equivalent in any language — these are conditional skip instructions "
+        "for the interviewer, NOT errors in the live survey.\n"
         "2. LIVE may have EXTRA surrounding text - that is OK. Only check if SPEC question's MEANING "
-        "is present in LIVE.\n"
-        "3. Flag REAL issues only: meaning changed/missing, options missing/different, instruction "
-        "like '(ne pas poser)' violated, wrong wording changing meaning, truncated text.\n"
-        "4. If SPEC content IS present in LIVE (even with extra text), report NO issue for it.\n\n"
+        "is present SOMEWHERE in LIVE.\n"
+        "3. Flag REAL issues only: question text meaning genuinely changed or completely absent, "
+        "answer options with different meaning or completely missing, wrong wording that changes "
+        "meaning, truncated text.\n"
+        "4. If SPEC content IS present in LIVE (even with extra text or in a different position), "
+        "report NO issue for it.\n\n"
         "Respond ONLY with valid JSON object. Key = question id, value = array of issues "
         "(empty array if no issue). Example:\n"
         '{"A1": [{"type":"MISSING TEXT","details":"...","severity":"HIGH"}], "A2": []}'
@@ -1952,13 +2396,17 @@ def ai_compare_full(model, qid, doc_text, doc_opts, live_text, live_opts):
             "Answer options:\n" + live_opts_str + "\n\n"
             "RULES:\n"
             "1. IGNORE: whitespace, punctuation, capitalization, HTML artifacts, programming instructions "
-            "in brackets like [ALL COUNTRIES], translation notes, formatting differences.\n"
+            "in brackets like [ALL COUNTRIES], translation notes, formatting differences, question order "
+            "or position in the survey, and interviewer-only notes like '(ne pas poser)', '(do not ask)', "
+            "'(ne pas lire)', '(do not read)' or any equivalent in any language — these are conditional "
+            "skip instructions for the interviewer, NOT errors in the live survey.\n"
             "2. The LIVE text may contain EXTRA surrounding content from the page - that is OK, only check "
-            "if the SPEC question's MEANING is present in LIVE.\n"
-            "3. Flag REAL issues only: (a) question meaning changed or missing, (b) answer options missing "
-            "or different, (c) instruction like '(ne pas poser)'/'do not ask' violated, (d) wrong wording "
-            "that changes meaning.\n"
-            "4. If the SPEC question content IS present in LIVE (even with extra text around it), report NO issue.\n\n"
+            "if the SPEC question's MEANING is present SOMEWHERE in LIVE.\n"
+            "3. Flag REAL issues only: (a) question text meaning genuinely changed or completely absent, "
+            "(b) answer options with different meaning or completely missing, "
+            "(c) wrong wording that changes meaning.\n"
+            "4. If the SPEC question content IS present in LIVE (even with extra text or in a different "
+            "position), report NO issue.\n\n"
             "Respond ONLY with valid JSON array, nothing else. Empty array if no issues:\n"
             '[{"type": "SHORT TYPE", "details": "one short sentence", "severity": "HIGH/MEDIUM/LOW"}]'
         )
@@ -1978,6 +2426,75 @@ def ai_compare_full(model, qid, doc_text, doc_opts, live_text, live_opts):
         return None
 
 
+def ai_semantic_match_batch(model, unmatched_items, live_data, doc_questions):
+    """One Gemini call: for each doc question that failed ALL regex/content strategies,
+    find the semantically closest live QID (any language, any survey).
+    unmatched_items: list of {nqid, qid, doc_key}
+    live_data: full live dict {live_qid: {text, options, ...}}
+    doc_questions: the questions dict from the parsed doc
+    Returns dict {doc_qid: live_qid_or_NONE}
+    """
+    if not model or not unmatched_items or not live_data:
+        return {}
+    import json, re as _re
+
+    doc_blocks = []
+    for u in unmatched_items:
+        dq = doc_questions.get(u["doc_key"], {}) if u.get("doc_key") else {}
+        opts = [o.get("text", "")[:60] for o in dq.get("options", [])[:5]]
+        doc_blocks.append({
+            "qid": u["qid"],
+            "text": dq.get("text", "")[:150],
+            "options": opts,
+        })
+
+    live_blocks = []
+    for lk, ld in live_data.items():
+        if ld.get("status") != "OK":
+            continue
+        opts = [o.get("text", "")[:60] for o in ld.get("options", [])[:5]]
+        live_blocks.append({
+            "qid": lk,
+            "text": ld.get("text", "")[:150],
+            "options": opts,
+        })
+
+    prompt = (
+        "You are a survey QC expert. Some doc questions could not be matched to live questions "
+        "by ID alone. Using SEMANTIC meaning (not QID), find the best live match for each doc question. "
+        "Language may be ANY — compare by meaning, not exact words.\n\n"
+        "DOC QUESTIONS (unmatched):\n"
+        + json.dumps(doc_blocks, ensure_ascii=False) + "\n\n"
+        "LIVE QUESTIONS (all available):\n"
+        + json.dumps(live_blocks, ensure_ascii=False) + "\n\n"
+        "RULES:\n"
+        "1. Match by TOPIC and MEANING — the live QID may differ due to platform renaming.\n"
+        "2. Only match if you are confident the questions are about the same thing.\n"
+        "3. If no live question matches, return NONE for that doc QID.\n"
+        "4. Return ONLY a JSON object mapping each doc QID to a live QID or NONE.\n"
+        "Example: {\"R3\": \"R3new\", \"S5\": \"NONE\"}\n"
+        "Return ONLY the JSON object, nothing else."
+    )
+
+    for attempt in range(3):
+        try:
+            resp = model.generate_content(prompt)
+            raw = resp.text.strip()
+            raw = _re.sub(r'```json|```', '', raw).strip()
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            if m:
+                result = json.loads(m.group(0))
+                if isinstance(result, dict):
+                    return result
+            return {}
+        except Exception as e:
+            is_rate_limit = "429" in str(e) or "quota" in str(e).lower()
+            if attempt < 2:
+                time.sleep(20 if is_rate_limit else 4)
+                continue
+    return {}
+
+
 def _assign_confidence(issue):
     """Return (confidence 0-100, conf_level HIGH/MEDIUM/LOW) for an issue dict.
     Called as a post-processing pass after all issues are collected so that
@@ -1990,8 +2507,11 @@ def _assign_confidence(issue):
         return 95, "HIGH"
     if t == "PIPING NOT RESOLVED":
         return 90, "HIGH"
-    if t == "EXTRA IN LIVE":
-        return 88, "HIGH"
+    # EXTRA IN LIVE check disabled — not actionable for clients
+    # if t == "EXTRA IN LIVE":
+    #     if not issue.get("_has_inputs", False):
+    #         return 0, "LOW"
+    #     return 88, "HIGH"
     if t == "NAMING MISMATCH":
         # Soft heuristic prefix match — inherently ambiguous
         return 55, "LOW"
@@ -2115,6 +2635,8 @@ def _parse_tables_for_qids(doc, questions, qid_pat, junk_re):
                                     "is_mandatory": False, "has_piping": False,
                                     "termination_rules": [], "is_numeric": False,
                                 }
+                            if re.search(r'\bNUMERIC\b', full_text, re.IGNORECASE):
+                                questions[_hqid]["is_numeric"] = True
                             _found_prog_qid = True
                             break
             continue
@@ -2202,7 +2724,7 @@ def _parse_tables_for_qids(doc, questions, qid_pat, junk_re):
             seen_opts.add(opt_text)
 
 
-def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
+def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_qids=None):
     try:
         from playwright.sync_api import sync_playwright
         from docx import Document
@@ -2468,22 +2990,23 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 if host not in questions:
                     questions[host] = {"text":"","options":[],"is_mandatory":False,"has_piping":False,"termination_rules":[],"is_numeric":False}
 
-                for m in re.finditer(r'if\s+code\s+(\d+)[^:]{0,80}:\s*(?:thanks?\s+and\s+close|merci\s+et\s+fermer|terminate)', cell_text, re.IGNORECASE):
-                    code = m.group(1)
-                    if not any(r.get('answer_codes')==[code] for r in questions[host]['termination_rules']):
-                        questions[host]['termination_rules'].append({"test_qid":host,"answer_codes":[code],"raw":m.group(0)[:100],"source":"simple-if-code"})
-
-                for m in re.finditer(r'thanks?\s+and\s+close\s+if\s+(?:the\s+)?code\s+(\d+)', cell_text, re.IGNORECASE):
-                    code = m.group(1)
-                    if not any(r.get('answer_codes')==[code] for r in questions[host]['termination_rules']):
-                        questions[host]['termination_rules'].append({"test_qid":host,"answer_codes":[code],"raw":m.group(0)[:100],"source":"tac-style"})
-
                 for _line in cell_text.split('\n'):
-                    if not term_re.search(_line): continue
-                    for _lm in re.finditer(r'\bcode\s+(\d+)\b', _line, re.IGNORECASE):
-                        code = _lm.group(1)
-                        if not any(r.get('answer_codes') == [code] for r in questions[host]['termination_rules']):
-                            questions[host]['termination_rules'].append({"test_qid": host, "answer_codes": [code], "raw": _line[:100], "source": "line-structural"})
+                    _line = _line.strip()
+                    if not _line: continue
+                    _tm = term_re.search(_line)
+                    if not _tm: continue
+                    _condition = _line[:_tm.start()].strip()
+                    # Extract numeric answer codes: matches "= N", "≠ N", "code N"
+                    _codes = [_cm.group(1) for _cm in re.finditer(
+                        r'(?:=\s*|≠\s*|!=\s*|code\s+)(\d{1,3})\b', _condition, re.IGNORECASE)]
+                    if _codes:
+                        for _code in _codes:
+                            if not any(r.get('answer_codes') == [_code] for r in questions[host]['termination_rules']):
+                                questions[host]['termination_rules'].append({"test_qid": host, "answer_codes": [_code], "raw": _line[:100], "source": "generic"})
+                    else:
+                        # Complex condition (IF NO, IF S2 < 2, IF SUM..., etc.) — store for manual check
+                        if not any(r.get('raw', '')[:60] == _line[:60] for r in questions[host]['termination_rules']):
+                            questions[host]['termination_rules'].append({"test_qid": host, "answer_codes": ["?"], "raw": _line[:100], "source": "generic-manual"})
 
         for qid in questions:
             questions[qid]["text"] = re.sub(r'\s+', ' ', questions[qid]["text"]).strip()
@@ -2593,7 +3116,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                                 continue
                             _q = questions[_fid]
                             # Only overwrite what the rigid parser left empty
-                            if not _q["text"].strip() and _fbq.get("text", "").strip():
+                            if not _q["text"].strip() and (_fbq.get("text") or "").strip():
                                 _q["text"] = re.sub(r'\s+', ' ', _fbq["text"]).strip()
                                 _merged += 1
                             if not _q["options"] and _fbq.get("options"):
@@ -2609,9 +3132,66 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 log('  AI fallback: rigid parser got everything — no AI call needed', 'green')
         # ── end AI fallback ───────────────────────────────────────────────────
 
+        # Strip h-prefix hidden/programming variables from doc before comparison.
+        # These are scripting-only (hAge, hQ1, HidS8 etc.) — never shown to
+        # respondents, so they will never appear in live and should not be
+        # reported as MISSING IN LIVE.
+        _hidden_qid_re = re.compile(r'^h[A-Z]|^Hid')
+        _hidden_qids = [q for q in questions if _hidden_qid_re.match(q)]
+        if _hidden_qids:
+            log(f'  Hidden QIDs skipped ({len(_hidden_qids)}): '
+                + ', '.join(sorted(_hidden_qids)[:15])
+                + ('…' if len(_hidden_qids) > 15 else ''), 'grey')
+            for _hq in _hidden_qids:
+                del questions[_hq]
+
+        # Drop ghost QIDs: any ID extracted from a table cell label or section
+        # header that has no question text.  Empty text is the definitive signal
+        # — spurious options (routing codes, answer codes from a nearby table)
+        # can be attached to a ghost label by the parser, so we intentionally
+        # do NOT require options to also be empty.
+        _ghost_qids = [
+            q for q, v in questions.items()
+            if not v["text"].strip()
+        ]
+        if _ghost_qids:
+            log(f'  Ghost QIDs removed ({len(_ghost_qids)}): '
+                + ', '.join(sorted(_ghost_qids)[:15])
+                + ('…' if len(_ghost_qids) > 15 else ''), 'grey')
+            for _gq in _ghost_qids:
+                del questions[_gq]
+
         live_data = {}
         issues = []
         term_results = []
+
+        # Strip only known page-navigation params so the crawler starts from
+        # page 1. Everything else (auth tokens, session keys, language params,
+        # any __* param not on the nav list) is preserved untouched.
+        # Rule: explicit allowlist of nav params only — never strip by prefix.
+        try:
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            _NAV_PARAMS = {
+                # Confirmit / Forsta navigation
+                '__goto', '__next', '__page', '__jumpid', '__gotopage', '__target',
+                '__jump', '__startpage', '__currentpage',
+                # Qualtrics navigation
+                'q_jfe', 'q_jfo',
+                # Generic platform navigation
+                'pageid', 'page_id', 'page', 'goto', 'jump',
+            }
+            _pu = urlparse(survey_url)
+            _qs = parse_qs(_pu.query, keep_blank_values=True)
+            # Only drop params whose lowercase name is an exact nav-param match.
+            # Auth/session/token params (__etk, __auth, __token, __key, __sid,
+            # l=, lang=, etc.) are never touched regardless of prefix.
+            _clean = {k: v for k, v in _qs.items() if k.lower() not in _NAV_PARAMS}
+            if len(_clean) < len(_qs):
+                _removed = sorted(set(_qs.keys()) - set(_clean.keys()))
+                survey_url = urlunparse(_pu._replace(query=urlencode(_clean, doseq=True)))
+                log(f'  URL: stripped nav param(s) {_removed} — crawl starts from page 1', 'yellow')
+        except Exception as _ue:
+            log(f'  URL param strip skipped: {str(_ue)[:60]}', 'grey')
 
         # PHASE 2: CRAWL
         if mode in ('full', 'quick'):
@@ -2622,17 +3202,97 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             log('════════════════════════════════════', 'cyan')
 
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, slow_mo=150)
-                context = browser.new_context(viewport={"width":1400,"height":900})
+                _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0.0.0 Safari/537.36")
+                browser = p.chromium.launch(
+                    headless=True,
+                    slow_mo=150,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                    ]
+                )
+                context = browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    user_agent=_UA,
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                    extra_http_headers={
+                        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "Sec-Fetch-Dest":  "document",
+                        "Sec-Fetch-Mode":  "navigate",
+                        "Sec-Fetch-Site":  "none",
+                        "Sec-Fetch-User":  "?1",
+                        "Upgrade-Insecure-Requests": "1",
+                    }
+                )
                 page = context.new_page()
-                page.goto(survey_url, wait_until="domcontentloaded", timeout=60000)
+                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                _nav_resp = page.goto(survey_url, wait_until="domcontentloaded", timeout=60000)
+                _nav_status = _nav_resp.status if _nav_resp else "?"
+                log(f"  URL loaded: {survey_url}", "cyan")
+                log(f"  HTTP status: {_nav_status}", "cyan")
                 page.wait_for_timeout(3000)
 
                 # LINK CHECK: detect expired/dead survey link
                 try:
                     _body = page.locator("body").inner_text(timeout=5000).lower()
-                    _bad = ["400: bad request", "bad request", "session expired", "session has expired", "404 not found", "page not found", "error has occurred", "link has expired", "survey is closed", "no longer available", "afraid i can", "server encountered an error", "not able to interpret the request"]
-                    if any(b in _body for b in _bad) or len(_body.strip()) < 50:
+                    if len(_body.strip()) < 100:
+                        page.wait_for_timeout(5000)
+                        _body = page.locator("body").inner_text(timeout=5000).lower()
+
+                    # Transient server errors — retry the URL, these resolve on reload
+                    _transient = [
+                        "server encountered an error", "technical error",
+                        "afraid i can", "internal server error",
+                        "service unavailable", "temporarily unavailable",
+                        "error has occurred", " 500 ", " 502 ", " 503 ",
+                        "400: bad request", "bad request",
+                    ]
+                    # Genuine expiry — link is permanently dead, no retry
+                    _expired = [
+                        "survey is closed", "survey closed", "link has expired",
+                        "link expired", "no longer available", "already completed",
+                        "quota full", "this survey is no longer",
+                    ]
+                    # Hard errors — wrong session or URL, declare dead immediately
+                    _hard = [
+                        "session expired", "session has expired",
+                        "page not found", "404 not found",
+                        "not able to interpret the request",
+                    ]
+
+                    _link_dead = False
+                    for _try in range(3):
+                        log(f"  [Link check {_try+1}/3] HTTP {_nav_status} | {len(_body.strip())} chars | FULL BODY: {_body.strip()!r}", "cyan")
+
+                        if any(p in _body for p in _expired) or any(p in _body for p in _hard):
+                            _link_dead = True
+                            break
+
+                        if any(p in _body for p in _transient):
+                            if _try < 2:
+                                log(f"  Transient error on attempt {_try+1} — retrying in 5s", "yellow")
+                                page.wait_for_timeout(5000)
+                                page.goto(survey_url, wait_until="domcontentloaded", timeout=60000)
+                                page.wait_for_timeout(4000)
+                                _body = page.locator("body").inner_text(timeout=5000).lower()
+                                if len(_body.strip()) < 100:
+                                    page.wait_for_timeout(5000)
+                                    _body = page.locator("body").inner_text(timeout=5000).lower()
+                                continue
+                            else:
+                                log("  Still failing after 3 attempts", "yellow")
+                                _link_dead = True
+                                break
+                        else:
+                            break  # no error pattern — page looks OK
+
+                    if _link_dead:
                         log("  LINK NOT WORKING / EXPIRED - get a fresh link", "red")
                         jobs[job_id]["status"] = "error"
                         jobs[job_id]["phase"] = "Survey link expired or not working"
@@ -2657,34 +3317,42 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                         log('  Country select skipped: ' + str(e)[:40], 'yellow')
 
                 has_test_nav = False
-                # RETRY: wait for Test Navigator to load (up to 3 tries, page may be slow)
-                for _try in range(3):
-                    _cnt = page.locator(".cf-tn-list-item").count()
-                    if _cnt > 0:
-                        log("  TN loaded: " + str(_cnt) + " items (try " + str(_try+1) + ")", "green")
+                _active_tn_sel = None
+                page_html = ""
+                _tn_selectors = [
+                    ".cf-tn-list-item",
+                    "[class*='tn-question']",
+                    "[class*='test-navigator']",
+                    ".wix-tn-item",
+                    "[class*='tn-item']",
+                ]
+                # RETRY: wait for Test Navigator to load (up to 15 tries × 2s = 30s budget)
+                # Tries all known selectors each round so non-Confirmit platforms aren't penalised.
+                for _try in range(15):
+                    for _sel in _tn_selectors:
+                        _cnt = page.locator(_sel).count()
+                        if _cnt > 0:
+                            _active_tn_sel = _sel
+                            log("  TN loaded: " + str(_cnt) + " items (try " + str(_try+1) + "/15) with: " + _sel, "green")
+                            break
+                    if _active_tn_sel:
                         break
-                    log("  TN not ready, waiting... (try " + str(_try+1) + ")", "yellow")
-                    page.wait_for_timeout(4000)
+                    log("  TN not ready, waiting... (try " + str(_try+1) + "/15) — trying: " + ", ".join(_tn_selectors), "yellow")
+                    page.wait_for_timeout(2000)
                     try:
                         page.locator("text=Test Navigator").first.click(timeout=2000)
-                        page.wait_for_timeout(1500)
+                        page.wait_for_timeout(500)
                     except: pass
                 try:
                     page_html = page.content()
                     log("  Page HTML length: " + str(len(page_html)), "cyan")
-                    tn_selectors = [
-                        ".cf-tn-list-item",
-                        ".cf-tn-list-item",
-                        "[class*='tn-question']",
-                        "[class*='test-navigator']",
-                        ".wix-tn-item",
-                        "[class*='tn-item']",
-                    ]
-                    for tn_sel in tn_selectors:
+                    for tn_sel in _tn_selectors:
                         count = page.locator(tn_sel).count()
                         log("  TN selector " + tn_sel + " count: " + str(count), "yellow")
                         if count > 0:
                             has_test_nav = True
+                            if not _active_tn_sel:
+                                _active_tn_sel = tn_sel
                             log("  Found TN with: " + tn_sel, "green")
                             break
                     if not has_test_nav:
@@ -2692,9 +3360,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                             try:
                                 page.locator(f"text={btn_text}").first.click(timeout=3000)
                                 page.wait_for_timeout(1000)
-                                for tn_sel in tn_selectors:
+                                for tn_sel in _tn_selectors:
                                     if page.locator(tn_sel).count() > 0:
                                         has_test_nav = True
+                                        if not _active_tn_sel:
+                                            _active_tn_sel = tn_sel
                                         log("  TN found: " + tn_sel, "green")
                                         break
                                 if has_test_nav:
@@ -2718,27 +3388,66 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 except: pass
 
                 if has_test_nav:
-                    log('  Mode: Test Navigator (Confirmit)', 'blue')
-                    nav_items = page.locator(".cf-tn-list-item").all()
-                    qid_index_map = []
-                    seen_qids = set()
-                    for ni, el in enumerate(nav_items):
-                        try:
-                            words = el.inner_text().strip().split()
-                            first = words[0].strip() if words else ''
-                            second = words[1].strip() if len(words) > 1 else ''
-                            m = re.match(r'^([A-Za-z]{1,8}\d+[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?)$', first)
-                            if m and m.group(1) not in seen_qids:
-                                doc_qid = m.group(1)
-                                # Confirmit TN shows "DocID PlatformID" — keep platform ID
-                                # for [Question ID: PlatformID] marker matching (e.g. Q1 → Q1new)
+                    log('  Mode: Test Navigator (Generic)', 'blue')
+                    _qid_re = re.compile(r'^([A-Za-z]{1,8}\d+(?:[a-zA-Z]\d+|[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?))')
+
+                    # --- Phase A: build QID list from static HTML (no per-item Playwright calls) ---
+                    qid_index_map = _parse_tn_items_from_html(page_html, _tn_selectors, _qid_re)
+                    if not qid_index_map:
+                        log('  Static HTML parse found no TN items — falling back to Playwright DOM walk', 'yellow')
+                        nav_items = page.locator(_active_tn_sel).all()
+                        seen_qids = set()
+                        for ni, el in enumerate(nav_items):
+                            try:
+                                doc_qid = None
+                                for _attr in ("data-qid", "data-question-id", "data-id"):
+                                    _v = el.get_attribute(_attr)
+                                    if _v and _qid_re.match(_v.strip()):
+                                        doc_qid = _qid_re.match(_v.strip()).group(1); break
+                                if not doc_qid:
+                                    _v = el.get_attribute("id") or ""
+                                    _m = _qid_re.search(_v)
+                                    if _m: doc_qid = _m.group(1)
+                                if not doc_qid:
+                                    _v = el.get_attribute("class") or ""
+                                    _m = re.search(r'question[-_]?id[-_]?([A-Za-z]\w*\d+\w*)', _v, re.IGNORECASE)
+                                    if _m: doc_qid = _m.group(1)
+                                if not doc_qid:
+                                    words = el.inner_text().strip().split()
+                                    for _w in words[:3]:
+                                        _m = re.match(r'^([A-Za-z]{1,8}\d+(?:[a-zA-Z]\d+|[a-zA-Z]?(?:bis|ter|Info|info|Ex|_\d+|\.\d+)?))\s*$', _w.strip())
+                                        if _m: doc_qid = _m.group(1); break
+                                if not doc_qid:
+                                    try:
+                                        _v = el.locator("input, select").first.get_attribute("name") or ""
+                                        _m = _qid_re.search(_v)
+                                        if _m: doc_qid = _m.group(1)
+                                    except: pass
+                                if not doc_qid or doc_qid in seen_qids:
+                                    continue
+                                words = el.inner_text().strip().split()
+                                second = words[1].strip() if len(words) > 1 else ''
                                 plat_qid = second if (second and second != doc_qid
                                     and re.match(r'^[A-Za-z]\w*\d+\w*$', second)) else doc_qid
                                 qid_index_map.append((ni, doc_qid, plat_qid))
                                 seen_qids.add(doc_qid)
-                        except: continue
+                            except: continue
 
                     log('  ' + str(len(qid_index_map)) + ' QIDs found in navigator', 'blue')
+
+                    # Re-test filter: only crawl requested QIDs
+                    if filter_qids:
+                        _fset = set(q.upper() for q in filter_qids)
+                        qid_index_map = [(ni, qid, pq) for ni, qid, pq in qid_index_map
+                                         if qid.upper() in _fset]
+                        log(f'  Re-test filter applied: crawling {len(qid_index_map)} of {len(filter_qids)} requested QIDs', 'cyan')
+
+                    # --- Phase B: parse all question texts from static HTML in one pass ---
+                    _static_qtext = _parse_question_texts_from_html(page_html)
+                    _static_hits = sum(1 for v in _static_qtext.values() if v.get("text"))
+                    log(f'  Static text parse: {_static_hits}/{len(_static_qtext)} question blocks with text', 'blue')
+                    def _nq(s): return s.replace('.','').replace('_','').replace('-','').replace(' ','').lower()
+
                     total = max(1, len(qid_index_map))
                     for i, (nav_idx, qid, plat_qid) in enumerate(qid_index_map, 1):
                         # STOP CHECK: if user clicked Stop, abort crawling
@@ -2749,85 +3458,84 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                             jobs[job_id]['phase'] = 'Stopped'
                             return
                         progress(20 + int((i/total)*40), 'Crawling ' + qid + '...')
+                        if i % 50 == 0:
+                            log(f'  Crawling item {i}/{total}...', 'blue')
 
-                        # --- ensure TN panel is open BEFORE every click ---
-                        try:
-                            if not page.locator(".cf-tn-list-item").count():
-                                page.locator("text=Test Navigator").first.click(timeout=3000)
-                                page.wait_for_timeout(500)
-                        except: pass
+                        # --- Phase C: use static text; Playwright click only if empty ---
+                        _q_data = (_static_qtext.get(_nq(qid)) or
+                                   _static_qtext.get(_nq(plat_qid)))
+                        text = (_q_data or {}).get("text", "")
+                        opts = (_q_data or {}).get("options", [])
+                        has_inp = (_q_data or {}).get("has_inputs", True)
 
-                        # --- click with fresh locator, 3 s timeout, one retry ---
-                        _click_ok = False
-                        for _attempt in range(2):
+                        if not text:
+                            # Fallback: single Playwright click for this QID
                             try:
-                                # Re-locate fresh each attempt so a stale DOM never poisons the retry
-                                page.locator(".cf-tn-list-item").nth(nav_idx).click(timeout=3000, force=True)
-                                _click_ok = True
-                                break
-                            except Exception as _ce:
-                                if _attempt == 0:
-                                    # Re-open TN panel and wait before retry
-                                    try:
-                                        page.locator("text=Test Navigator").first.click(timeout=2000)
-                                        page.wait_for_timeout(600)
-                                    except: pass
-                                else:
-                                    log('   ' + qid + ' SKIP (click failed): ' + str(_ce)[:80], 'yellow')
-
-                        if not _click_ok:
-                            live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"has_inputs":True,"status":"crawl_failed - manual review"}
-                            continue
-
-                        try:
-                            page.wait_for_timeout(1200)
-                            full_text = page.evaluate("() => { const b=document.body.cloneNode(true); ['.sr-test-navigator','[class*=sr-tn]'].forEach(s=>b.querySelectorAll(s).forEach(e=>e.remove())); return b.innerText.trim(); }")
-                            full_text = re.sub(r'\*Shown in Testing mode only\*', '', full_text or '')
-                            # ISOLATE this question's text using [Question ID: XXX] markers (46000 chars -> ~500 chars)
-                            text = full_text
+                                if not page.locator(_active_tn_sel).count():
+                                    page.locator("text=Test Navigator").first.click(timeout=3000)
+                                    page.wait_for_timeout(500)
+                            except: pass
+                            _click_ok = False
+                            for _attempt in range(2):
+                                try:
+                                    page.locator(_active_tn_sel).nth(nav_idx).click(timeout=3000, force=True)
+                                    _click_ok = True
+                                    break
+                                except Exception as _ce:
+                                    if _attempt == 0:
+                                        try:
+                                            page.locator("text=Test Navigator").first.click(timeout=2000)
+                                            page.wait_for_timeout(600)
+                                        except: pass
+                                    else:
+                                        log('   ' + qid + ' SKIP (click failed): ' + str(_ce)[:80], 'yellow')
+                            if not _click_ok:
+                                live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"has_inputs":True,"status":"crawl_failed - manual review"}
+                                continue
                             try:
-                                _markers = list(re.finditer(r'\[Question ID:\s*([^\]]+)\]', full_text))
-                                def _nq(s): return s.replace('.','').replace('_','').replace('-','').replace(' ','').lower()
-                                _qn = _nq(qid)
-                                _found = False
-                                # Pass 1: EXACT match — try doc QID then platform QID (e.g. "Q1" vs "Q1new")
-                                for _mi, _m in enumerate(_markers):
-                                    if _m.group(1).strip().lower() in (qid.lower(), plat_qid.lower()):
-                                        _start = _m.end()
-                                        _end = _markers[_mi+1].start() if _mi+1 < len(_markers) else len(full_text)
-                                        text = full_text[_start:_end].strip()
-                                        _found = True
-                                        break
-                                # Pass 2: normalized match (handles R2.2 vs R2x2)
-                                if not _found:
+                                page.wait_for_timeout(1200)
+                                full_text = page.evaluate("() => { const b=document.body.cloneNode(true); ['.sr-test-navigator','[class*=sr-tn]'].forEach(s=>b.querySelectorAll(s).forEach(e=>e.remove())); return b.innerText.trim(); }")
+                                full_text = re.sub(r'\*Shown in Testing mode only\*', '', full_text or '')
+                                text = full_text
+                                try:
+                                    _markers = list(re.finditer(r'\[Question ID:\s*([^\]]+)\]', full_text))
+                                    _qn = _nq(qid)
+                                    _found = False
                                     for _mi, _m in enumerate(_markers):
-                                        _mq = _m.group(1).strip()
-                                        if _nq(_mq) == _qn or _nq(_mq).replace('x','') == _qn.replace('x',''):
+                                        if _m.group(1).strip().lower() in (qid.lower(), plat_qid.lower()):
                                             _start = _m.end()
                                             _end = _markers[_mi+1].start() if _mi+1 < len(_markers) else len(full_text)
                                             text = full_text[_start:_end].strip()
                                             _found = True
                                             break
-                                # Pass 3: marker not found - take first 2000 chars only (avoid 86703 dump)
-                                if not _found and len(full_text) > 3000:
-                                    text = full_text[:2000].strip()
-                            except: pass
-                            text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
-                            # Strip Confirmit test-page footer elements
-                            text = re.sub(r'(?im)^[ \t]*test\s*link\b.*$', '', text)
-                            text = re.sub(r'(?m)^\d+%(?:[ \t]+\d+%){2,}[ \t]*$', '', text)
-                            text = re.sub(u'(?m)^[^\\S\\n]*[←→◄►\xab\xbb]{1,4}[^\\S\\n]*$', u'', text)
-                            text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
-                            opts = _extract_options(page)
-                            has_inp = _page_has_inputs(page)
-                            try: page.screenshot(path=ss_dir + '/' + qid + '.png', full_page=True)
-                            except: pass
-                            piping = re.findall(r'\[PIPE[^\]]*\]', text, re.I)
-                            live_data[qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"has_inputs":has_inp,"status":"OK"}
-                            log('   ' + qid + ' (' + str(len(text)) + ' chars)', 'green')
-                        except Exception as e:
-                            live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"has_inputs":True,"status":"ERROR: " + str(e)[:50]}
-                            log('   ' + qid + ' ERROR: ' + str(e)[:80], 'red')
+                                    if not _found:
+                                        for _mi, _m in enumerate(_markers):
+                                            _mq = _m.group(1).strip()
+                                            if _nq(_mq) == _qn or _nq(_mq).replace('x','') == _qn.replace('x',''):
+                                                _start = _m.end()
+                                                _end = _markers[_mi+1].start() if _mi+1 < len(_markers) else len(full_text)
+                                                text = full_text[_start:_end].strip()
+                                                _found = True
+                                                break
+                                    if not _found and len(full_text) > 3000:
+                                        text = full_text[:2000].strip()
+                                except: pass
+                                text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
+                                text = re.sub(r'(?im)^[ \t]*test\s*link\b.*$', '', text)
+                                text = re.sub(r'(?m)^\d+%(?:[ \t]+\d+%){2,}[ \t]*$', '', text)
+                                text = re.sub(u'(?m)^[^\\S\\n]*[←→◄►\xab\xbb]{1,4}[^\\S\\n]*$', u'', text)
+                                text = re.sub(r'\n{3,}', chr(10)+chr(10), text).strip()
+                                opts = _extract_options(page)
+                                has_inp = _page_has_inputs(page)
+                            except Exception as e:
+                                live_data[qid] = {"text":"","options":[],"has_mandatory_marker":False,"has_raw_piping":False,"raw_piping_found":[],"has_inputs":True,"status":"ERROR: " + str(e)[:50]}
+                                log('   ' + qid + ' ERROR (fallback): ' + str(e)[:80], 'red')
+                                continue
+
+                        piping = re.findall(r'\[PIPE[^\]]*\]', text, re.I)
+                        live_data[qid] = {"text":text,"options":opts,"has_mandatory_marker":(" *" in text or "*"+chr(10) in text),"has_raw_piping":len(piping)>0,"raw_piping_found":piping,"has_inputs":has_inp,"status":"OK"}
+                        src = "static" if _q_data else "playwright"
+                        log('   ' + qid + ' (' + str(len(text)) + ' chars) [' + src + ']', 'green')
 
                 else:
                     log('  Mode: Respondent flow (auto-navigate)', 'blue')
@@ -2964,6 +3672,17 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 browser.close()
             log(chr(10) + '  Crawled ' + str(len(live_data)) + ' pages', 'green')
 
+            if len(live_data) == 0:
+                log('  ERROR: 0 pages crawled — live survey did not render.', 'red')
+                log('  Possible causes: slow platform, bot detection, or session timeout.', 'red')
+                log('  Retry the QC, or verify the survey link opens in a browser.', 'red')
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['phase'] = 'Crawl failed — 0 pages loaded'
+                jobs[job_id]['error'] = ('Crawl failed — 0 pages loaded. The live survey did not render in time. '
+                                         'Possible causes: slow platform, bot detection, or session timeout. '
+                                         'Retry the QC or check the link.')
+                return
+
         # PHASE 3: COMPARE
         if mode in ('full', 'quick') and live_data:
             progress(65, 'Comparing doc vs live...')
@@ -2990,25 +3709,109 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             for dq in questions.keys():
                 _doc_norm[_norm_qid(dq)] = dq
             def _find_base_match(doc_norm):
-                """Return (live_norm, live_orig) if a live QID shares the same
-                letter+digit prefix as doc_norm but with a non-digit suffix
-                (e.g. 'r2' -> 'r2new', 'q11' -> 'q11b')."""
-                _bm = re.match(r'^([a-z]+\d+)', doc_norm)
-                if not _bm:
-                    return None, None
-                _base = _bm.group(1)
+                """Return (live_norm_key, live_orig) for the best live QID
+                that is a naming variant of doc_norm.  Strategies in order:
+
+                0. Dot-to-x (safety net): doc 'R2.2' → live 'R2x2'.
+                   Usually handled by _norm_qid stripping both '.' and 'x',
+                   but kept as an explicit fallback for edge cases.
+                1. Suffix-strip: 'r2new'→'r2' (known rename suffixes).
+                2. Prefix non-digit suffix: 'q11'→'q11a'.
+                3. Container: doc 'Q16' is prefix of live 'Q16x1'/'Q16.1'
+                   (doc is the matrix parent; live split into sub-questions).
+                4. Component: doc 'Q12' is a complete component inside merged
+                   live 'Q11Q12' (boundary = end-of-string or next alpha char).
+                   Min len 3 to avoid 'Q1' false-matching 'Q11'.
+                5. Parent-component: for dot-QIDs, strip sub-suffix and try
+                   the parent question via strategies 3/4.
+                   e.g. 'Q12.2'→parent 'Q12' inside live 'Q11Q12'.
+                """
+                _doc_orig = _doc_norm.get(doc_norm, '')
+                _doc_orig_lower = _doc_orig.lower()
+
+                def _component_in(needle, haystack):
+                    """True if needle appears in haystack at a component
+                    boundary: followed by end-of-string or an alpha char
+                    (the start of the next QID component)."""
+                    idx = 0
+                    while True:
+                        pos = haystack.find(needle, idx)
+                        if pos == -1:
+                            return False
+                        after = haystack[pos + len(needle):]
+                        if not after or after[0].isalpha():
+                            return True
+                        idx = pos + 1
+
+                # Strategy 0: explicit dot-to-x safety net
+                if '.' in _doc_orig:
+                    _dotx_lower = _doc_orig_lower.replace('.', 'x')
+                    for _ln, _lo in _live_norm.items():
+                        if _lo.lower() == _dotx_lower:
+                            return _ln, _lo
+
+                # Strategy 1: explicit suffix stripping
+                _sfx_re = re.compile(r'(?:new|bis|ter)$')
                 for _ln, _lo in _live_norm.items():
-                    if (_ln != doc_norm
-                            and _ln.startswith(_base)
-                            and len(_ln) > len(_base)
-                            and not _ln[len(_base)].isdigit()):
+                    if _ln == doc_norm:
+                        continue
+                    if _sfx_re.sub('', _ln) == doc_norm:
                         return _ln, _lo
+
+                # Strategy 2: same letter+digit prefix, non-digit suffix
+                _bm = re.match(r'^([a-z]+\d+)', doc_norm)
+                if _bm:
+                    _base = _bm.group(1)
+                    for _ln, _lo in _live_norm.items():
+                        if (_ln != doc_norm
+                                and _ln.startswith(_base)
+                                and len(_ln) > len(_base)
+                                and not _ln[len(_base)].isdigit()):
+                            return _ln, _lo
+
+                # Strategy 3: container — doc is the parent; live has x/dot
+                # sub-questions.  e.g. doc 'Q16' → live 'Q16x1', 'Q16x2'.
+                for _ln, _lo in _live_norm.items():
+                    _lo_l = _lo.lower()
+                    if (_lo_l.startswith(_doc_orig_lower + 'x') or
+                            _lo_l.startswith(_doc_orig_lower + '.')):
+                        return _ln, _lo
+
+                # Strategy 4: component — doc_norm is a complete component
+                # inside a merged live QID.  e.g. doc 'Q12' in live 'Q11Q12'.
+                if len(doc_norm) >= 3:
+                    for _ln, _lo in _live_norm.items():
+                        if len(_ln) > len(doc_norm) and _component_in(doc_norm, _ln):
+                            return _ln, _lo
+
+                # Strategy 5: parent-component — for dot-QIDs, resolve via
+                # the parent question.  e.g. 'Q12.2'→parent 'Q12' in 'Q11Q12'.
+                if '.' in _doc_orig:
+                    _par_orig = _doc_orig.split('.')[0]
+                    _par_n = _norm_qid(_par_orig)
+                    if _par_n and _par_n != doc_norm:
+                        if _par_n in _live_norm:
+                            return _par_n, _live_norm[_par_n]
+                        if len(_par_n) >= 3:
+                            for _ln, _lo in _live_norm.items():
+                                if (len(_ln) > len(_par_n) and
+                                        _component_in(_par_n, _ln)):
+                                    return _ln, _lo
+
                 return None, None
 
             _naming_matched_live = set()
             # Unified set of normalized qids
             _all_norm = set(_doc_norm.keys()) | set(_live_norm.keys())
+
+            # Re-test filter: restrict comparison to requested QIDs only
+            if filter_qids:
+                _fset_norm = set(_norm_qid(q) for q in filter_qids)
+                _all_norm = {n for n in _all_norm if n in _fset_norm}
+                log(f'  Re-test filter: comparing {len(_all_norm)} QID(s)', 'cyan')
+
             _to_compare = []
+            _ai_unmatched = []  # doc questions that survived all regex/content strategies
             for _nqid in sorted(_all_norm):
                 qid = _doc_norm.get(_nqid) or _live_norm.get(_nqid)
                 in_doc = _nqid in _doc_norm
@@ -3021,24 +3824,134 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                         _naming_matched_live.add(_norm_qid(_bmo))
                         issues.append({"qid":qid,"type":"NAMING MISMATCH",
                                        "details":f"Doc: {qid} / Live: {_bmo}","severity":"MEDIUM"})
+                        # Schedule text comparison against the matched live QID.
+                        # Without this the comparison is skipped and the matched
+                        # live content (e.g. R2x2) is never checked against doc.
+                        if (_doc_key
+                                and not questions.get(_doc_key, {}).get("is_numeric")
+                                and _bmo in live_data
+                                and live_data[_bmo].get("status") == "OK"):
+                            _to_compare.append({
+                                "qid": qid,
+                                "doc_text": questions[_doc_key]["text"],
+                                "live_text": live_data[_bmo]["text"],
+                                "doc_opts": [o["text"] for o in questions[_doc_key].get("options", [])],
+                                "live_opts": [o["text"] for o in live_data[_bmo].get("options", [])],
+                                "_doc_key": _doc_key,
+                                "_live_key": _bmo,
+                            })
                     else:
-                        issues.append({"qid":qid,"type":"MISSING IN LIVE","details":"In doc but not in live","severity":"HIGH"})
+                        # Content-fallback: before declaring MISSING IN LIVE, scan every
+                        # live page for the doc question's text. A question may exist under
+                        # a renamed QID, at a different position, or on a combined page —
+                        # content match overrides a pure QID-name miss. Works for all
+                        # surveys and languages because fuzzy_match normalises (lowercase +
+                        # whitespace collapse) and uses both substring and SequenceMatcher.
+                        _doc_q_text = questions.get(_doc_key, {}).get("text", "") if _doc_key else ""
+                        _content_found_live = None
+                        if _doc_q_text and len(_doc_q_text.strip()) >= 20:
+                            for _lk, _ld in live_data.items():
+                                if _ld.get("status") != "OK":
+                                    continue
+                                _is_match, _ = fuzzy_match(_doc_q_text, _ld["text"], threshold=0.60)
+                                if _is_match:
+                                    _content_found_live = _lk
+                                    break
+                        if _content_found_live:
+                            if (_doc_key
+                                    and not questions.get(_doc_key, {}).get("is_numeric")
+                                    and live_data[_content_found_live].get("status") == "OK"):
+                                _to_compare.append({
+                                    "qid": qid,
+                                    "doc_text": questions[_doc_key]["text"],
+                                    "live_text": live_data[_content_found_live]["text"],
+                                    "doc_opts": [o["text"] for o in questions[_doc_key].get("options", [])],
+                                    "live_opts": [o["text"] for o in live_data[_content_found_live].get("options", [])],
+                                    "_doc_key": _doc_key,
+                                    "_live_key": _content_found_live,
+                                })
+                        else:
+                            # All regex + content strategies failed — defer to AI semantic match
+                            _ai_unmatched.append({"nqid": _nqid, "qid": qid, "doc_key": _doc_key})
                     continue
                 if in_live and not in_doc:
-                    if _nqid in _naming_matched_live:
-                        continue  # already reported as naming mismatch on the doc side
-                    # Only flag as EXTRA if the live page has answerable inputs.
-                    # Pages with zero inputs (disclaimers, intros, thank-you screens)
-                    # are display-only and not real questions — skip them silently.
-                    if not live_data[_live_key].get("has_inputs", True):
-                        log(f'  Skipping display-only screen: {qid} (no inputs)', 'grey')
-                        continue
-                    issues.append({"qid":qid,"type":"EXTRA IN LIVE","details":"In live but not in doc","severity":"INFO"})
+                    # EXTRA IN LIVE check disabled — not actionable for clients
                     continue
                 if live_data[_live_key]["status"] != "OK":
                     issues.append({"qid":qid,"type":"ERROR PAGE","details":live_data[_live_key]["status"],"severity":"MEDIUM"})
                     continue
+                # Emit naming variant warning when doc and live use different QID
+                # forms (e.g. doc='R2.2', live='R2x2') even though they normalized
+                # to the same key.  Dot-to-x is a Confirmit platform conversion.
+                if _doc_key and _live_key and _doc_key != _live_key:
+                    if _doc_key.lower().replace('.', 'x') == _live_key.lower():
+                        issues.append({"qid": _doc_key, "type": "NAMING MISMATCH",
+                                       "details": f"Doc: {_doc_key} / Live: {_live_key} (dot-to-x)",
+                                       "severity": "MEDIUM"})
+                if questions[_doc_key].get("is_numeric"):
+                    continue
                 _to_compare.append({"qid":qid,"doc_text":questions[_doc_key]["text"],"live_text":live_data[_live_key]["text"],"doc_opts":[o["text"] for o in questions[_doc_key].get("options",[])],"live_opts":[o["text"] for o in live_data[_live_key].get("options",[])],"_doc_key":_doc_key,"_live_key":_live_key})
+            # AI SEMANTIC MATCHING: one batched Gemini call for all questions that
+            # survived every regex/content strategy.  Generic — works for any survey
+            # and any language.  Only runs if AI model is available.
+            if _ai_unmatched:
+                if ai_model:
+                    log(f'  AI semantic matching: {len(_ai_unmatched)} unmatched doc question(s)', 'cyan')
+                    _ai_match_result = ai_semantic_match_batch(ai_model, _ai_unmatched, live_data, questions)
+                    for _u in _ai_unmatched:
+                        _ai_live = _ai_match_result.get(_u["qid"], "NONE")
+                        if _ai_live and _ai_live != "NONE" and _ai_live in live_data:
+                            log(f'    AI matched {_u["qid"]} → {_ai_live}', 'green')
+                            issues.append({"qid": _u["qid"], "type": "NAMING MISMATCH",
+                                           "details": f"Doc: {_u['qid']} / Live: {_ai_live} (AI semantic match)",
+                                           "severity": "MEDIUM"})
+                            if (_u["doc_key"]
+                                    and not questions.get(_u["doc_key"], {}).get("is_numeric")
+                                    and live_data[_ai_live].get("status") == "OK"):
+                                _to_compare.append({
+                                    "qid": _u["qid"],
+                                    "doc_text": questions[_u["doc_key"]]["text"],
+                                    "live_text": live_data[_ai_live]["text"],
+                                    "doc_opts": [o["text"] for o in questions[_u["doc_key"]].get("options", [])],
+                                    "live_opts": [o["text"] for o in live_data[_ai_live].get("options", [])],
+                                    "_doc_key": _u["doc_key"],
+                                    "_live_key": _ai_live,
+                                })
+                        else:
+                            log(f'    AI: {_u["qid"]} → NONE (MISSING IN LIVE)', 'yellow')
+                            issues.append({"qid": _u["qid"], "type": "MISSING IN LIVE",
+                                           "details": "In doc but not in live", "severity": "HIGH"})
+                else:
+                    # No AI model — emit MISSING IN LIVE directly (existing behaviour)
+                    for _u in _ai_unmatched:
+                        issues.append({"qid": _u["qid"], "type": "MISSING IN LIVE",
+                                       "details": "In doc but not in live", "severity": "HIGH"})
+
+            # Detect merged/matrix live screens: when multiple doc QIDs all
+            # resolve to the same live QID, a 1-to-1 text comparison is
+            # meaningless (they share one combined screen).  Replace those
+            # comparison pairs with a single MERGED IN LIVE advisory and
+            # remove them from the comparison queue.  Generic — works for any
+            # survey where the live platform collapses several doc questions
+            # into one page (e.g. doc R2 + R2.2 + R2.3 all → live R2x2).
+            _live_key_groups = {}
+            for _ci in _to_compare:
+                _ck = _ci.get('_live_key')
+                if _ck:
+                    _live_key_groups.setdefault(_ck, []).append(_ci['qid'])
+            _merged_live_keys = {k for k, v in _live_key_groups.items() if len(v) > 1}
+            if _merged_live_keys:
+                for _mlk in sorted(_merged_live_keys):
+                    _dqids = ', '.join(_live_key_groups[_mlk])
+                    issues.append({
+                        "qid": _live_key_groups[_mlk][0],
+                        "type": "MERGED IN LIVE",
+                        "details": f"Doc [{_dqids}] → live {_mlk} — merged/matrix screen, manual review needed",
+                        "severity": "MEDIUM",
+                    })
+                _to_compare = [i for i in _to_compare
+                               if i.get('_live_key') not in _merged_live_keys]
+
             _batch_size = 8
             _ai_handled = set()
             if ai_model:
@@ -3091,8 +4004,8 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             _clow   = sum(1 for i in issues if i.get("conf_level") == "LOW")
             log(f'  Confidence: {_chigh} high, {_cmed} medium, {_clow} need manual review', 'cyan')
 
-        # PHASE 4: TERMINATION
-        if mode in ('full', 'logic'):
+        # PHASE 4: TERMINATION — skipped for re-tests (filter_qids set)
+        if mode in ('full', 'logic') and not filter_qids:
             progress(75, 'Testing termination rules...')
             log('', 'white')
             log('════════════════════════════════════', 'cyan')
@@ -3128,18 +4041,48 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                 progress(75 + int((i/max(1,len(unique_rules)))*15))
 
                 raw_upper = rule.get("raw_rule","").upper()
-                is_compound = any(w in raw_upper for w in ["NOT SELECTED","AND CODE","OR CODE"]) or test_qid in ["S7","S9"]
+                is_compound = (answer_code == "?" or
+                    any(w in raw_upper for w in ["NOT SELECTED","AND CODE","OR CODE"]) or
+                    test_qid in ["S7","S9"])
                 if is_compound:
-                    term_results.append({"test_qid":test_qid,"answer_code":answer_code,"passed":True,"details":"MANUAL CHECK — compound logic","source":rule.get("source","")})
-                    log(f'      MANUAL CHECK — compound logic', 'yellow')
+                    _manual_detail = "MANUAL CHECK — " + (rule.get("raw_rule","")[:60] if answer_code == "?" else "compound logic")
+                    term_results.append({"test_qid":test_qid,"answer_code":answer_code,"passed":False,"needs_review":True,"details":_manual_detail,"source":rule.get("source","")})
+                    log(f'      MANUAL CHECK — {rule.get("raw_rule","")[:60]}', 'yellow')
                     continue
 
                 r_result = {"test_qid":test_qid,"answer_code":answer_code,"passed":False,"details":"","source":rule.get("source","")}
                 try:
                     with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True, slow_mo=200)
-                        context = browser.new_context(viewport={"width":1400,"height":900})
+                        _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/124.0.0.0 Safari/537.36")
+                        browser = p.chromium.launch(
+                            headless=True,
+                            slow_mo=200,
+                            args=[
+                                "--disable-blink-features=AutomationControlled",
+                                "--no-sandbox",
+                                "--disable-dev-shm-usage",
+                            ]
+                        )
+                        context = browser.new_context(
+                            viewport={"width": 1366, "height": 768},
+                            user_agent=_UA,
+                            locale="en-US",
+                            timezone_id="America/New_York",
+                            extra_http_headers={
+                                "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                                "Accept-Language": "en-US,en;q=0.9",
+                                "Accept-Encoding": "gzip, deflate, br",
+                                "Sec-Fetch-Dest":  "document",
+                                "Sec-Fetch-Mode":  "navigate",
+                                "Sec-Fetch-Site":  "none",
+                                "Sec-Fetch-User":  "?1",
+                                "Upgrade-Insecure-Requests": "1",
+                            }
+                        )
                         page = context.new_page()
+                        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                         page.goto(survey_url, wait_until="domcontentloaded", timeout=60000)
                         page.wait_for_timeout(2500)
 
@@ -3155,21 +4098,37 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                                 page.wait_for_timeout(2500)
                             except: pass
 
+                        # Detect which TN selector is active on this platform
+                        _term_tn_sel = None
+                        for _s in [".cf-tn-list-item", "[class*='tn-question']", "[class*='test-navigator']", ".wix-tn-item", "[class*='tn-item']"]:
+                            if page.locator(_s).count() > 0:
+                                _term_tn_sel = _s; break
+                        if not _term_tn_sel:
+                            try:
+                                for _btn in ["Test Navigator", "Navigator", "Navigateur"]:
+                                    page.locator(f"text={_btn}").first.click(timeout=3000)
+                                    page.wait_for_timeout(1000)
+                                    for _s in [".cf-tn-list-item", "[class*='tn-question']", "[class*='test-navigator']", ".wix-tn-item", "[class*='tn-item']"]:
+                                        if page.locator(_s).count() > 0:
+                                            _term_tn_sel = _s; break
+                                    if _term_tn_sel: break
+                            except: pass
+
                         try:
-                            if not page.locator(".cf-tn-list-item").count():
+                            if _term_tn_sel and not page.locator(_term_tn_sel).count():
                                 page.locator("text=Test Navigator").first.click(timeout=3000)
                                 page.wait_for_timeout(1000)
                         except: pass
 
                         navigated = False
-                        _tn_loc = page.locator(".cf-tn-list-item")
+                        _tn_loc = page.locator(_term_tn_sel) if _term_tn_sel else page.locator(".cf-tn-list-item")
                         for _idx in range(_tn_loc.count()):
                             try:
                                 txt = _tn_loc.nth(_idx).inner_text(timeout=2000).strip().split()[0].strip()
                                 if txt == test_qid:
                                     for _attempt in range(2):
                                         try:
-                                            page.locator(".cf-tn-list-item").nth(_idx).click(force=True, timeout=3000)
+                                            _tn_loc.nth(_idx).click(force=True, timeout=3000)
                                             page.wait_for_timeout(1800)
                                             navigated = True
                                             break
@@ -3188,7 +4147,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
                             continue
 
                         try:
-                            if page.locator(".cf-tn-list-item").count() > 0:
+                            if _term_tn_sel and page.locator(_term_tn_sel).count() > 0:
                                 page.locator("text=Test Navigator").first.click(timeout=2000)
                                 page.wait_for_timeout(500)
                         except: pass
@@ -3289,7 +4248,8 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
 
         title = report.add_paragraph()
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        tr = title.add_run("Survey QC Report")
+        _report_title = "RE-TEST REPORT" if filter_qids else "Survey QC Report"
+        tr = title.add_run(_report_title)
         tr.font.size = Pt(22); tr.font.bold = True
         tr.font.color.rgb = RGBColor(0x7C, 0x65, 0xFF)
 
@@ -3299,13 +4259,29 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
         sr.font.size = Pt(11); sr.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
         report.add_paragraph()
 
+        if filter_qids:
+            _rt_banner = report.add_paragraph()
+            _rt_banner.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _rt_run = _rt_banner.add_run(
+                f"RE-TEST REPORT — Filtered to {len(filter_qids)} QID(s): {', '.join(filter_qids)}"
+            )
+            _rt_run.font.size = Pt(10); _rt_run.font.bold = True
+            _rt_run.font.color.rgb = RGBColor(0x13, 0x8D, 0x5A)
+            report.add_paragraph()
+
         sev = {"HIGH":0,"MEDIUM":0,"INFO":0}
         for i in issues: sev[i.get("severity","INFO")] = sev.get(i.get("severity","INFO"),0)+1
-        term_passed = sum(1 for r in term_results if r["passed"])
-        term_failed = len(term_results) - term_passed
+        term_passed = sum(1 for r in term_results if r.get("passed") and not r.get("needs_review"))
+        term_review = sum(1 for r in term_results if r.get("needs_review"))
+        term_failed = len(term_results) - term_passed - term_review
         total_issues = sev['HIGH'] + sev['MEDIUM']
 
-        if total_issues == 0 and term_failed == 0:
+        if len(live_data) == 0:
+            vt = ("CRAWL FAILED — 0 pages loaded. The live survey did not render in time. "
+                  "Possible causes: slow platform, bot detection, session expired, or network issue. "
+                  "Please retry the QC or verify the survey link is accessible.")
+            vc = (0xC0, 0x00, 0x00)
+        elif total_issues == 0 and term_failed == 0:
             vt = "ALL GOOD — Survey ready to go live!"; vc = (0x00, 0x70, 0x00)
         elif sev['HIGH'] > 0 or term_failed > 0:
             vt = f"NEEDS FIX — {total_issues + term_failed} issues found"; vc = (0xC0, 0x00, 0x00)
@@ -3339,7 +4315,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
         for line in [
             f"Questions checked: {len(questions)}",
             f"Pages crawled: {len(live_data)}",
-            f"Termination tests: {term_passed}/{len(term_results)} passed" if term_results else None,
+            f"Termination tests: {term_passed}/{len(term_results) - term_review} validated · {term_review} need manual review" if term_results else None,
             f"Total issues found: {total_issues}",
             f"Confidence breakdown: {_rpt_chigh} high-confidence, {_rpt_cmed} medium, {_rpt_clow} need manual review",
             f"Time saved: ~8 hours vs manual QC",
@@ -3437,11 +4413,18 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
             hr = h.add_run("Termination Tests")
             hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0x7C, 0x65, 0xFF)
             p = report.add_paragraph()
-            p.add_run(f"{term_passed} out of {len(term_results)} passed").font.size = Pt(11)
+            p.add_run(f"{term_passed}/{len(term_results) - term_review} validated · {term_review} need manual review").font.size = Pt(11)
             report.add_paragraph()
             for r in term_results:
-                status = "PASS" if r["passed"] else "FAIL"
-                color = (0x00, 0x70, 0x00) if r["passed"] else (0xC0, 0x00, 0x00)
+                if r.get("needs_review"):
+                    status = "NEEDS REVIEW"
+                    color = (0xD9, 0x77, 0x06)
+                elif r.get("passed"):
+                    status = "PASS"
+                    color = (0x00, 0x70, 0x00)
+                else:
+                    status = "FAIL"
+                    color = (0xC0, 0x00, 0x00)
                 p = report.add_paragraph()
                 pr = p.add_run(f"  {status}  {r['test_qid']} = code {r['answer_code']}")
                 pr.font.size = Pt(11); pr.font.color.rgb = RGBColor(*color)
@@ -3455,7 +4438,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
         report.save(report_path)
         log(f'  Report saved', 'green')
 
-        verdict = 'PASS' if (sev['HIGH']==0 and term_failed==0) else ('FAIL' if (sev['HIGH']>0 or term_failed>0) else 'REVIEW')
+        verdict = 'PASS' if (sev['HIGH']==0 and term_failed==0 and term_review==0) else ('FAIL' if (sev['HIGH']>0 or term_failed>0) else 'REVIEW')
 
         progress(100, 'Complete!')
         log('', 'white')
@@ -3475,6 +4458,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths):
         job['live_qids'] = len(live_data)
         job['total_issues'] = len(issues)
         job['term_passed'] = term_passed
+        job['term_review'] = term_review
         job['term_total'] = len(term_results)
         job['term_results'] = term_results
         job['issues'] = issues
@@ -3520,7 +4504,7 @@ site_content = {
     'feature6_desc': 'Fix the bugs, retest only the failed paths in seconds. No need to run full QC again from scratch.',
     # Footer / site
     'site_name': 'SurveyQC',
-    'tagline': 'The worlds first AI-powered survey QC tool',
+    'tagline': 'AI-powered survey QC built for market research professionals',
     'support_email': 'support@surveyqc.online',
     'footer_text': '2026 SurveyQC -- Built for QC professionals worldwide',
     'linkedin_url': 'https://linkedin.com/company/surveyqc',
@@ -3536,27 +4520,35 @@ site_content = {
     'plan_free_period': '/month',
     'plan_free_desc': 'For solo testers',
     'plan_free_yearly': '0',
-    'plan_free_features': '5 reports per month||All 15+ QC checks||Word report download||20K tokens per report||Any language||Community support',
+    'plan_free_features': '3 reports per month||All 15+ QC checks||Word report download||20K tokens per report||Any language||Community support',
     'plan_free_cta': 'Get started',
     'plan_pro_name': 'Pro',
     'plan_pro_price': '29',
     'plan_pro_period': '/month',
     'plan_pro_desc': 'For QC professionals',
     'plan_pro_yearly': '290',
-    'plan_pro_features': '50 reports per month||Everything in Free||Screenshot QC (WhatsApp)||Share reports with clients||100K tokens per report||Priority support||AI auto tester||Custom templates',
+    'plan_pro_features': '25 reports per month||Everything in Free||Screenshot QC (WhatsApp)||Share reports with clients||100K tokens per report||Priority support||AI auto tester||Custom templates',
     'plan_pro_cta': 'Start Pro trial',
     'plan_pro_badge': 'Most Popular',
     'plan_pro_featured': '1',
     'plan_biz_name': 'Business',
-    'plan_biz_price': '99',
+    'plan_biz_price': '299',
     'plan_biz_period': '/month',
     'plan_biz_desc': 'For agencies & teams',
-    'plan_biz_yearly': '990',
-    'plan_biz_features': 'Unlimited reports||Everything in Pro||Team collaboration||Own API key||White-label reports||150K tokens per report||Dedicated account manager||SLA guarantee',
+    'plan_biz_yearly': '2990',
+    'plan_biz_features': 'Unlimited reports||Everything in Pro||Team collaboration (up to 5 users)||White-label reports||200K tokens per report||Dedicated account manager||SLA guarantee||API access',
     'plan_biz_cta': 'Get Business',
+    'plan_ent_name': 'Enterprise',
+    'plan_ent_price': 'Custom',
+    'plan_ent_period': 'pricing',
+    'plan_ent_desc': 'For large organisations',
+    'plan_ent_yearly': 'Custom',
+    'plan_ent_features': 'Everything in Business||Unlimited users||Custom features||On-premise option||SSO/SAML||Custom SLA',
+    'plan_ent_cta': 'Contact Sales',
+    'plan_ent_cta_link': 'mailto:support@surveyqc.online?subject=Enterprise%20Inquiry',
     # Pricing FAQ
     'pfaq1_q': 'Can I cancel anytime?',
-    'pfaq1_a': 'Yes -- no contracts, no cancellation fees. Cancel anytime from Billing settings.',
+    'pfaq1_a': 'Yes, cancel anytime. No contracts.',
     'pfaq2_q': 'Is there a free trial?',
     'pfaq2_a': 'Pro and Business plans come with a 14-day free trial. Free plan is free forever.',
     'pfaq3_q': 'What payment methods do you accept?',
@@ -3565,6 +4557,12 @@ site_content = {
     'pfaq4_a': 'Yes, upgrade or downgrade anytime. Pro-rated billing applied automatically.',
     'pfaq5_q': 'Do you offer team/enterprise pricing?',
     'pfaq5_a': 'Yes, Business plan supports teams. Contact us for enterprise pricing (10+ users).',
+    'pfaq6_q': 'Do you offer a refund?',
+    'pfaq6_a': 'Yes, 7-day money-back guarantee.',
+    'pfaq7_q': 'Is my data secure?',
+    'pfaq7_a': 'Yes. Encrypted, GDPR compliant, auto-deleted after 90 days.',
+    'pfaq8_q': 'Can I cancel anytime?',
+    'pfaq8_a': 'Yes, cancel anytime. No contracts.',
     # Features Page - 25 features grouped
     'features_heading': 'Everything you need for perfect survey QC',
     'features_sub': '25+ specialized checks and tools, built by QC professionals for QC professionals.',
@@ -4536,7 +5534,7 @@ start_cleanup_scheduler()
 def pricing_page():
     c = site_content
     plans = []
-    for slug in ['free','pro','biz']:
+    for slug in ['free','pro','biz','ent']:
         feats_str = c.get(f'plan_{slug}_features', '')
         features = [f.strip() for f in feats_str.split('||') if f.strip()]
         plans.append({
@@ -4547,6 +5545,7 @@ def pricing_page():
             'desc': c.get(f'plan_{slug}_desc', ''),
             'features': features,
             'cta': c.get(f'plan_{slug}_cta', 'Get started'),
+            'cta_link': c.get(f'plan_{slug}_cta_link', '/signup'),
             'badge': c.get(f'plan_{slug}_badge', ''),
             'featured': c.get(f'plan_{slug}_featured', '0') == '1',
         })
@@ -4562,14 +5561,14 @@ def pricing_page():
         plan_cards += f"""<div class="{card_class}">{badge_html}
 <div class="price-name">{p['name']}</div>
 <div class="price-desc">{p['desc']}</div>
-<div class="price-amt-wrap"><span class="price-amt monthly">${p['price']}</span><span class="price-amt yearly" style="display:none">${p['yearly']}</span><span class="price-amt-sub">{p['period']}</span></div>
+<div class="price-amt-wrap"><span class="price-amt monthly">{'' if p['price'] in ('Custom',) else '$'}{p['price']}</span><span class="price-amt yearly" style="display:none">{'' if p['yearly'] in ('Custom',) else '$'}{p['yearly']}</span><span class="price-amt-sub">{p['period']}</span></div>
 <div class="price-features">{feat_html}</div>
-<a href="/signup" class="{btn_class}">{p['cta']}</a>
+<a href="{p['cta_link']}" class="{btn_class}">{p['cta']}</a>
 </div>"""
 
     # FAQ
     faqs = []
-    for i in range(1, 6):
+    for i in range(1, 9):
         if f'pfaq{i}_q' in c:
             faqs.append((c[f'pfaq{i}_q'], c[f'pfaq{i}_a']))
     faq_html = ''
@@ -4608,7 +5607,7 @@ a{text-decoration:none;color:inherit}
 .toggle-btn{background:none;border:none;padding:8px 20px;border-radius:100px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text2)}
 .toggle-btn.active{background:var(--dark);color:#F7F4EE}
 .save-pill{background:#E5F0E9;color:var(--success);font-size:10px;font-weight:700;padding:3px 8px;border-radius:100px;margin-left:4px}
-.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1080px;margin:30px auto 0;padding:0 24px}
+.price-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;max-width:1380px;margin:30px auto 0;padding:0 24px}
 .price-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:36px 30px;position:relative;transition:all .3s}
 .price-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
 .price-card.featured{background:var(--dark);color:#F7F4EE;border:none}
@@ -4643,6 +5642,7 @@ a{text-decoration:none;color:inherit}
 .faq-item.open .faq-a{padding:0 24px 20px;max-height:300px}
 .footer{background:var(--dark);color:#9A8C7B;padding:50px 24px 25px;text-align:center;margin-top:60px}
 .footer p{font-size:13px}
+@media(max-width:1100px){.price-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:768px){
   .nav{padding:0 18px}.nav-links{display:none}
   .price-grid{grid-template-columns:1fr;gap:16px}
@@ -5520,8 +6520,8 @@ img{max-width:100%}
   <div class="nav-links">
     <a href="/features" class="nav-link">Features</a>
     <a href="/pricing" class="nav-link">Pricing</a>
+    <a href="#security" class="nav-link">Security</a>
     <a href="#how" class="nav-link">How it works</a>
-    <a href="#testimonials" class="nav-link">Testimonials</a>
     <a href="/docs" class="nav-link">Docs</a>
     <a href="/blog" class="nav-link">Blog</a>
   </div>
@@ -5536,8 +6536,8 @@ img{max-width:100%}
   <button class="mobile-menu-close" onclick="document.getElementById('mm').classList.remove('open')"><i class="ti ti-x"></i></button>
   <a href="/features">Features</a>
   <a href="/pricing">Pricing</a>
+  <a href="#security">Security</a>
   <a href="#how">How it works</a>
-  <a href="#testimonials">Testimonials</a>
   <a href="/docs">Docs</a>
   <a href="/blog">Blog</a>
   <a href="/login">Sign in</a>
@@ -5558,14 +6558,14 @@ img{max-width:100%}
     </div>
     <div class="hero-meta">
       <span class="hero-meta-item"><i class="ti ti-check"></i>No credit card</span>
-      <span class="hero-meta-item"><i class="ti ti-check"></i>5 free reports/month</span>
+      <span class="hero-meta-item"><i class="ti ti-check"></i>3 free reports/month</span>
       <span class="hero-meta-item"><i class="ti ti-check"></i>Cancel anytime</span>
     </div>
   </div>
 </section>
 
 <section class="trusted">
-  <div class="trusted-l">Trusted by QC teams at leading research agencies</div>
+  <div class="trusted-l">Compatible with surveys built for leading agencies</div>
   <div class="trusted-row">
     <div class="trusted-logo">IPSOS</div>
     <div class="trusted-logo">Kantar</div>
@@ -5638,10 +6638,26 @@ img{max-width:100%}
   </div>
 </section>
 
+<section class="section" id="security" style="background:var(--bg2)">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">Security</span>
+      <h2 class="sec-title">Security &amp; Compliance</h2>
+    </div>
+    <div style="max-width:720px;margin:0 auto">
+      <ul style="list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-shield-check" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">GDPR compliant</span></li>
+        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-lock" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">Data encrypted (TLS 1.3 in transit, AES-256 at rest)</span></li>
+        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-clock" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">Reports auto-deleted after 90 days</span></li>
+        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-eye-off" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">No data shared with third parties</span></li>
+        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-certificate" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">SOC 2 Type II: in progress</span></li>
+        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-hospital" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">HIPAA-ready: Enterprise plan</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
 
-
-
-<section class="section" id="how" style="background:var(--bg2)">
+<section class="section" id="how" style="background:var(--card)">
   <div class="container">
     <div class="sec-head">
       <span class="sec-tag">How it works</span>
@@ -5668,14 +6684,12 @@ img{max-width:100%}
   </div>
 </section>
 
-<section class="section" id="testimonials">
+<section class="section" id="credibility" style="text-align:center">
   <div class="container">
     <div class="sec-head">
-      <span class="sec-tag">Testimonials</span>
-      <h2 class="sec-title">Loved by QC teams<br>around the world.</h2>
-      <p class="sec-sub">From market research agencies to in-house teams worldwide.</p>
+      <h2 class="sec-title">Built for survey QC professionals</h2>
+      <p class="sec-sub">Every survey has hidden bugs. SurveyQC catches them automatically — in any language, on any platform.</p>
     </div>
-    <div class="test-grid">""" + test_cards + """</div>
   </div>
 </section>
 
@@ -5684,7 +6698,7 @@ img{max-width:100%}
 <section class="cta-banner">
   <div class="cta-inner">
     <h2>Save 8 hours per survey<br>starting today.</h2>
-    <p>Join 500+ QC professionals worldwide. Free forever. No credit card needed.</p>
+    <p>Free forever tier. No credit card needed.</p>
     <a href="/signup" class="btn-primary">Start free — no card required <i class="ti ti-arrow-right"></i></a>
   </div>
 </section>
@@ -5727,6 +6741,9 @@ img{max-width:100%}
         <div class="footer-title">Legal</div>
         <a href="/privacy-policy" class="footer-link">Privacy</a>
         <a href="/terms" class="footer-link">Terms</a>
+        <a href="/refund-policy" class="footer-link">Refund Policy</a>
+        <a href="/cookie-policy" class="footer-link">Cookie Policy</a>
+        <a href="/dpa" class="footer-link">DPA</a>
       </div>
     </div>
     <div class="footer-bottom">
@@ -5803,6 +6820,61 @@ def terms_page():
   <div class="card">
     <h2 style="font-size:16px;font-weight:600;color:var(--color-text-primary);margin-bottom:10px">4. Plans and billing</h2>
     <p style="font-size:13px;color:var(--color-text-secondary);line-height:1.8">Free plan includes 5 reports per month. Paid plans are billed monthly. You can cancel at any time. No refunds for partial months.</p>
+  </div>
+</div>
+</body></html>""")
+
+
+
+@app.route('/refund-policy')
+def refund_policy_page():
+    return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Refund Policy — SurveyQC</title></head><body>
+<div style="max-width:700px;margin:0 auto;padding:40px 20px">
+  <a href="/home" style="color:var(--color-text-secondary);text-decoration:none;font-size:13px"><i class="ti ti-arrow-left"></i> Back to home</a>
+  <h1 style="font-size:28px;font-weight:600;color:var(--color-text-primary);margin:20px 0 8px">Refund Policy</h1>
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:30px">Last updated: May 2026</p>
+  <div class="card">
+    <p style="font-size:14px;color:var(--color-text-secondary);line-height:1.8">7-day money-back guarantee on all paid plans. If you are not satisfied within 7 days of your first payment, contact us at <a href="mailto:support@surveyqc.online">support@surveyqc.online</a> for a full refund. No questions asked.</p>
+  </div>
+</div>
+</body></html>""")
+
+
+@app.route('/cookie-policy')
+def cookie_policy_page():
+    return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Cookie Policy — SurveyQC</title></head><body>
+<div style="max-width:700px;margin:0 auto;padding:40px 20px">
+  <a href="/home" style="color:var(--color-text-secondary);text-decoration:none;font-size:13px"><i class="ti ti-arrow-left"></i> Back to home</a>
+  <h1 style="font-size:28px;font-weight:600;color:var(--color-text-primary);margin:20px 0 8px">Cookie Policy</h1>
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:30px">Last updated: May 2026</p>
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:600;color:var(--color-text-primary);margin-bottom:10px">What cookies we use</h2>
+    <p style="font-size:13px;color:var(--color-text-secondary);line-height:1.8">We use strictly necessary session cookies to keep you logged in. We do not use advertising or tracking cookies.</p>
+  </div>
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:600;color:var(--color-text-primary);margin-bottom:10px">Third-party cookies</h2>
+    <p style="font-size:13px;color:var(--color-text-secondary);line-height:1.8">Our payment provider (Stripe) may set cookies during checkout. These are governed by Stripe's cookie policy.</p>
+  </div>
+  <div class="card">
+    <h2 style="font-size:16px;font-weight:600;color:var(--color-text-primary);margin-bottom:10px">Managing cookies</h2>
+    <p style="font-size:13px;color:var(--color-text-secondary);line-height:1.8">You can disable cookies in your browser settings. Note that disabling session cookies will prevent you from logging in.</p>
+  </div>
+</div>
+</body></html>""")
+
+
+@app.route('/dpa')
+def dpa_page():
+    return render_template_string(SHARED_CSS + """
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Data Processing Agreement — SurveyQC</title></head><body>
+<div style="max-width:700px;margin:0 auto;padding:40px 20px">
+  <a href="/home" style="color:var(--color-text-secondary);text-decoration:none;font-size:13px"><i class="ti ti-arrow-left"></i> Back to home</a>
+  <h1 style="font-size:28px;font-weight:600;color:var(--color-text-primary);margin:20px 0 8px">Data Processing Agreement</h1>
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:30px">Last updated: May 2026</p>
+  <div class="card">
+    <p style="font-size:14px;color:var(--color-text-secondary);line-height:1.8">A Data Processing Agreement (DPA) is available for Enterprise customers to satisfy GDPR Article 28 requirements. To request a signed DPA, please contact <a href="mailto:support@surveyqc.online">support@surveyqc.online</a> with the subject line "DPA Request".</p>
   </div>
 </div>
 </body></html>""")

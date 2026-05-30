@@ -127,6 +127,7 @@ def parse_document(doc_path):
                                 "text": "", "options": [],
                                 "is_mandatory": False, "has_piping": False,
                                 "piping_found": [], "raw_codes": [],
+                                "question_type": "",
                             }
                             qid_order.append(qid)
                         rest = text[m.end():].strip()
@@ -199,14 +200,16 @@ def parse_document(doc_path):
                                         "text": "", "options": [],
                                         "is_mandatory": False, "has_piping": False,
                                         "piping_found": [], "raw_codes": [],
+                                        "question_type": "",
                                     }
                                     qid_order.append(prog_qid)
                                 current_qid = prog_qid
-                                # Check TYPE row for mandatory marker
+                                # Check TYPE row for mandatory marker and question type
                                 for r in rows[1:5]:
                                     if r and r[0].strip().upper() == 'TYPE' and len(r) >= 2:
                                         if MANDATORY_RE.search(r[1]):
                                             questions[prog_qid]["is_mandatory"] = True
+                                        questions[prog_qid]["question_type"] = r[1].strip().upper()
                                 # Assign buffered options if this question has none yet
                                 if _pending_opts and not questions[prog_qid]["options"]:
                                     _extract_table_options(questions[prog_qid], _pending_opts)
@@ -336,6 +339,28 @@ def check_missing_words(doc_questions, live_questions):
 # ============================================================
 # CHECK 3: QUESTION TEXT MATCH
 # ============================================================
+def _find_base_match(doc_qid, live_qids):
+    """
+    Startswith fallback: doc='R2', live='R2new' → match; doc='R2', live='R20' → no match.
+    Suffix must be non-empty and start with a non-digit character.
+    Dot-to-x: doc='R2.2' also tries 'R2x2' against live QIDs.
+    """
+    doc_lower = doc_qid.lower()
+    for live_qid in live_qids:
+        if live_qid.lower().startswith(doc_lower):
+            suffix = live_qid[len(doc_qid):]
+            if suffix and re.match(r'^[^0-9]', suffix, re.IGNORECASE):
+                return live_qid
+
+    if '.' in doc_qid:
+        dot_as_x = doc_qid.replace('.', 'x')
+        for live_qid in live_qids:
+            if live_qid.lower() == dot_as_x.lower():
+                return live_qid
+
+    return None
+
+
 def check_question_text(doc_questions, live_questions, threshold=0.65):
     """
     Fuzzy match question text between doc and live.
@@ -344,16 +369,29 @@ def check_question_text(doc_questions, live_questions, threshold=0.65):
 
     for qid, doc_q in doc_questions.items():
         if qid not in live_questions:
-            issues.append({
-                "qid": qid,
-                "check": "QUESTION_MISSING_IN_LIVE",
-                "severity": "HIGH",
-                "details": f"Question {qid} found in doc but NOT in live survey",
-            })
-            continue
+            matched = _find_base_match(qid, live_questions)
+            if matched:
+                issues.append({
+                    "qid": qid,
+                    "check": "QID_NAMING_VARIANT",
+                    "severity": "MEDIUM",
+                    "details": f"Doc QID '{qid}' matched live as '{matched}' (naming variant)",
+                    "live_qid": matched,
+                })
+                live_key = matched
+            else:
+                issues.append({
+                    "qid": qid,
+                    "check": "QUESTION_MISSING_IN_LIVE",
+                    "severity": "HIGH",
+                    "details": f"Question {qid} found in doc but NOT in live survey",
+                })
+                continue
+        else:
+            live_key = qid
 
         doc_text = doc_q["text"]
-        live_text = live_questions[qid].get("text", "")
+        live_text = live_questions[live_key].get("text", "")
 
         if not doc_text or len(doc_text) < 10:
             continue
@@ -386,6 +424,8 @@ def check_options(doc_questions, live_questions):
     issues = []
 
     for qid, doc_q in doc_questions.items():
+        if "NUMERIC" in doc_q.get("question_type", "").upper():
+            continue
         doc_opts = doc_q.get("options", [])
         if not doc_opts:
             continue
