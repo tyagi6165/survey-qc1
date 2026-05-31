@@ -7076,7 +7076,7 @@ img{max-width:100%}
 .platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:880px;margin:0 auto}
 .platform-pill{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;transition:all .2s}
 .platform-pill:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}
-.platform-pill-mark{width:42px;height:42px;border-radius:11px;background:var(--dark);color:var(--accent);display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:18px;flex-shrink:0}
+.platform-pill-mark{width:42px;height:42px;border-radius:11px;background:var(--dark);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:18px;flex-shrink:0}
 .platform-pill-name{font-size:15px;font-weight:700;color:var(--text)}
 .platform-pill-status{font-size:11px;font-weight:600;margin-top:2px}
 .platform-pill-status.live{color:var(--success)}
@@ -7193,13 +7193,14 @@ img{max-width:100%}
       <h2 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-1px;margin-top:12px">Works with every major platform</h2>
     </div>
     <div class="platform-grid">
-      <div class="platform-pill"><div class="platform-pill-mark">C</div><div><div class="platform-pill-name">Confirmit</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark">D</div><div><div class="platform-pill-name">Decipher</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark">F</div><div><div class="platform-pill-name">Forsta</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark">Q</div><div><div class="platform-pill-name">Qualtrics</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark">S</div><div><div class="platform-pill-name">SurveyMonkey</div><div class="platform-pill-status soon">Coming soon</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark">A</div><div><div class="platform-pill-name">Alchemer</div><div class="platform-pill-status soon">Coming soon</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#FF6B35">C</div><div><div class="platform-pill-name">Confirmit</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#0066CC">D</div><div><div class="platform-pill-name">Decipher</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#1F2937">F</div><div><div class="platform-pill-name">Forsta</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#00B4F0">Q</div><div><div class="platform-pill-name">Qualtrics</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#00BF6F">S</div><div><div class="platform-pill-name">SurveyMonkey</div><div class="platform-pill-status soon">Coming soon</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#E91E63">A</div><div><div class="platform-pill-name">Alchemer</div><div class="platform-pill-status soon">Coming soon</div></div></div>
     </div>
+    <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:20px">All trademarks belong to their respective owners. SurveyQC is not affiliated with these platforms &mdash; compatibility only.</p>
   </div>
 </section>
 
