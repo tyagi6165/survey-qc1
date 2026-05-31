@@ -635,7 +635,7 @@ def new_qc():
 
     page = SHARED_CSS + '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>New QC - SurveyQC</title></head><body>'
     page += '<div class="app-layout">' + sb + '<div class="main-content">'
-    page += '<div class="topbar"><div><p class="page-title">New QC</p><p class="page-sub">Upload doc + URL. AI handles everything automatically.</p></div></div>'
+    page += '<div class="topbar"><div><p class="page-title">New QC</p><p class="page-sub">Upload doc + URL + XML export. AI handles everything automatically.</p></div></div>'
 
     # Info strip
     page += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">'
@@ -657,12 +657,23 @@ def new_qc():
     page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:28px;max-width:680px">'
     page += '<form action="/run-qc" method="POST" enctype="multipart/form-data">'
 
+    # Section header: Required Inputs
+    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">'
+    page += '<span style="font-size:11px;font-weight:700;color:#042C53;text-transform:uppercase;letter-spacing:.06em">Required Inputs</span>'
+    page += '<div style="flex:1;height:1px;background:#EEF0F3"></div>'
+    page += '<span style="font-size:10px;color:#E24B4A;font-weight:600">All 3 required</span>'
+    page += '</div>'
+
     # Step 1 - Doc
     page += '<div style="margin-bottom:22px">'
     page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
     page += '<div style="width:26px;height:26px;border-radius:50%;background:#042C53;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">1</div>'
     page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Upload Spec Document <span style="color:#E24B4A">*</span></p></div>'
-    page += '<input type="file" name="doc" accept=".docx" required style="width:100%;padding:10px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:#FAFAFA;cursor:pointer">'
+    page += '<input type="file" name="doc" id="docInput" accept=".docx" required style="width:100%;padding:10px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:#FAFAFA;cursor:pointer" onchange="previewFile(this,\'docPreview\')">'
+    page += '<div id="docPreview" style="display:none;margin-top:8px;padding:8px 12px;background:#F0FAF4;border:0.5px solid #A7D7B8;border-radius:7px;display:flex;align-items:center;gap:8px">'
+    page += '<i class="ti ti-circle-check" style="font-size:16px;color:#16A34A;flex-shrink:0"></i>'
+    page += '<div style="flex:1;min-width:0"><p id="docPreviewName" style="font-size:12px;font-weight:600;color:#1A1A2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>'
+    page += '<p id="docPreviewSize" style="font-size:11px;color:#6B7280;margin-top:1px"></p></div></div>'
     page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">Screener / spec .docx file. Required.</p>'
     page += '</div>'
 
@@ -671,7 +682,7 @@ def new_qc():
     page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
     page += '<div style="width:26px;height:26px;border-radius:50%;background:#042C53;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">2</div>'
     page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Live Survey URL <span style="color:#E24B4A">*</span></p></div>'
-    page += '<input type="url" name="url" placeholder="https://survey.confirmit.com/..." required class="form-input">'
+    page += '<input type="url" name="url" id="urlInput" placeholder="https://survey.confirmit.com/..." required class="form-input" oninput="updateBtn()">'
     page += '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
     for plat in ['Confirmit','Decipher','Forsta','Qualtrics']:
         page += '<span style="font-size:11px;background:#F0F2F5;color:#6B7280;padding:3px 10px;border-radius:6px;font-weight:500">'+plat+'</span>'
@@ -694,8 +705,19 @@ def new_qc():
     page += '<li><b>Forsta:</b> Survey settings → Export XML</li>'
     page += '<li><b>Qualtrics:</b> Tools → Import/Export → Export QSF</li>'
     page += '</ul></div>'
-    page += '<input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required style="width:100%;padding:10px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:#FAFAFA;cursor:pointer">'
+    page += '<input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required style="width:100%;padding:10px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:#FAFAFA;cursor:pointer" onchange="previewFile(this,\'xmlPreview\');updateBtn()">'
+    page += '<div id="xmlPreview" style="display:none;margin-top:8px;padding:8px 12px;background:#F0FAF4;border:0.5px solid #A7D7B8;border-radius:7px;display:flex;align-items:center;gap:8px">'
+    page += '<i class="ti ti-circle-check" style="font-size:16px;color:#16A34A;flex-shrink:0"></i>'
+    page += '<div style="flex:1;min-width:0"><p id="xmlPreviewName" style="font-size:12px;font-weight:600;color:#1A1A2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>'
+    page += '<p id="xmlPreviewSize" style="font-size:11px;color:#6B7280;margin-top:1px"></p></div></div>'
     page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">Get this from Confirmit/Decipher/Forsta/Qualtrics admin panel. Boosts accuracy from ~75% to ~91%.</p>'
+    page += '</div>'
+
+    # Section header: Optional Helpers
+    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;margin-top:8px">'
+    page += '<span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Optional Helpers</span>'
+    page += '<div style="flex:1;height:1px;background:#EEF0F3"></div>'
+    page += '<span style="font-size:10px;color:#9CA3AF;font-weight:500">Skip if not needed</span>'
     page += '</div>'
 
     # Step 4 - Screenshots (OPTIONAL)
@@ -723,7 +745,7 @@ def new_qc():
     page += '<input type="text" name="country" placeholder="e.g. United Kingdom" class="form-input"></div>'
     page += '<div class="form-group"><label class="form-label">Specific questions only (optional)</label>'
     page += '<input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12 (blank = all questions)" class="form-input">'
-    page += '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">Blank rakho = full survey QC</p></div>'
+    page += '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">Leave blank for full survey QC</p></div>'
     page += '<div><label class="form-label">Checks to run</label>'
     page += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">'
     chk_items = [
@@ -741,9 +763,9 @@ def new_qc():
     page += '</div></div></div></div>'
 
     # Submit
-    page += '<button type="submit" class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;font-weight:600;border-radius:10px">'
-    page += '<i class="ti ti-player-play" style="font-size:16px"></i> Run QC — AI handles everything</button>'
-    page += '<p style="font-size:12px;color:#9CA3AF;text-align:center;margin-top:10px">Takes 3-5 min &middot; You\'ll get a Word report</p>'
+    page += '<button type="submit" id="runBtn" class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;font-weight:600;border-radius:10px">'
+    page += '<i class="ti ti-player-play" style="font-size:16px"></i> <span id="runBtnText">Run QC — Takes 3-5 minutes</span></button>'
+    page += '<p id="runBtnSub" style="font-size:12px;color:#9CA3AF;text-align:center;margin-top:10px">You\'ll get a Word report</p>'
     page += '</form></div>'
 
     # Recent reports mini list
@@ -787,6 +809,44 @@ function toggleXmlTip(){
     var t=document.getElementById("xmlTip");
     t.style.display=t.style.display==="none"?"block":"none";
 }
+function previewFile(input, previewId){
+    var el=document.getElementById(previewId);
+    if(!el) return;
+    if(!input.files||!input.files[0]){el.style.display="none";return;}
+    var f=input.files[0];
+    var sz=f.size<1024*1024?(Math.round(f.size/1024)+"KB"):(Math.round(f.size/1024/1024*10)/10+"MB");
+    el.querySelector("[id$='Name']").textContent=f.name;
+    el.querySelector("[id$='Size']").textContent=sz+" · Ready to process";
+    el.style.display="flex";
+}
+function updateBtn(){
+    var hasDoc=document.getElementById("docInput")&&document.getElementById("docInput").files.length>0;
+    var hasXml=document.getElementById("xmlInput")&&document.getElementById("xmlInput").files.length>0;
+    var urlVal=document.getElementById("urlInput")&&document.getElementById("urlInput").value.trim();
+    var btn=document.getElementById("runBtnText");
+    var sub=document.getElementById("runBtnSub");
+    var runBtn=document.getElementById("runBtn");
+    if(!btn) return;
+    if(hasDoc&&hasXml&&urlVal){
+        btn.textContent="Run QC — Enhanced accuracy (~91%)";
+        if(sub) sub.textContent="With XML: 3-5 min \xb7 Word report";
+        if(runBtn){runBtn.style.background="";runBtn.style.background="#042C53";}
+    } else if(hasDoc&&urlVal){
+        btn.textContent="Run QC — Standard accuracy (~75%)";
+        if(sub) sub.textContent="Without XML: 5-10 min \xb7 Word report";
+        if(runBtn){runBtn.style.background="#C46A2B";}
+    } else {
+        btn.textContent="Run QC — Takes 3-5 minutes";
+        if(sub) sub.textContent="You\'ll get a Word report";
+        if(runBtn){runBtn.style.background="";}
+    }
+}
+document.addEventListener("DOMContentLoaded",function(){
+    var urlEl=document.getElementById("urlInput");
+    var docEl=document.getElementById("docInput");
+    if(urlEl) urlEl.addEventListener("input",updateBtn);
+    if(docEl) docEl.addEventListener("change",function(){previewFile(docEl,"docPreview");updateBtn();});
+});
 </script>'''
     page += '</body></html>'
     return render_template_string(page)
@@ -797,8 +857,28 @@ function toggleXmlTip(){
 def run_qc_submit():
     doc_file = request.files.get('doc')
     survey_url = request.form.get('url', '').strip()
-    if not doc_file or not survey_url:
-        return redirect('/new-qc')
+
+    def _validation_error(msg):
+        return render_template_string(SHARED_CSS + f"""
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Validation Error — SurveyQC</title></head><body>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F8F9FA">
+  <div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:36px;max-width:460px;text-align:center">
+    <div style="width:48px;height:48px;background:#FCEBEB;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+      <i class="ti ti-alert-circle" style="font-size:24px;color:#DC2626"></i>
+    </div>
+    <p style="font-size:16px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Missing required field</p>
+    <p style="font-size:14px;color:#6B7280;margin-bottom:24px">{msg}</p>
+    <a href="/new-qc" style="display:inline-flex;align-items:center;gap:6px;background:#042C53;color:white;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none">
+      <i class="ti ti-arrow-left" style="font-size:14px"></i> Go back and fix
+    </a>
+  </div>
+</div>
+</body></html>"""), 400
+
+    if not doc_file or not doc_file.filename:
+        return _validation_error("Please upload a .docx spec document.")
+    if not survey_url:
+        return _validation_error("Please enter the live survey URL.")
 
     job_id = str(uuid.uuid4())[:8]
     job_dir = f"{UPLOAD_FOLDER}/{job_id}"
@@ -817,11 +897,7 @@ def run_qc_submit():
 
     xml_file = request.files.get('xml_export')
     if not xml_file or not xml_file.filename:
-        return render_template_string(SHARED_CSS + """
-<!DOCTYPE html><html><body>
-<div style="padding:40px;text-align:center">
-  <p style="color:red;font-size:16px">Survey export file is required. Please upload an XML/QSF/ZIP export. <a href="/new-qc">Go back</a></p>
-</div></body></html>"""), 400
+        return _validation_error("Please upload the survey export file (XML/QSF/ZIP). Get this from your survey platform admin panel.")
     xml_ext = os.path.splitext(secure_filename(xml_file.filename))[1].lower() or '.xml'
     xml_path = f"{job_dir}/survey_export{xml_ext}"
     xml_file.save(xml_path)
@@ -1228,7 +1304,27 @@ def reports_list():
             rows += _build_row(cjid, cj, is_child=True)
 
     if not rows:
-        rows = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">No reports yet. <a href="/new-qc" style="color:var(--purple)">Run your first QC!</a></td></tr>'
+        rows = '''<tr><td colspan="6" style="padding:56px 24px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center">
+            <div style="width:60px;height:60px;background:#F0F2F5;border-radius:14px;display:flex;align-items:center;justify-content:center">
+              <i class="ti ti-clipboard-list" style="font-size:30px;color:#9CA3AF"></i>
+            </div>
+            <div>
+              <p style="font-size:16px;font-weight:600;color:#374151;margin-bottom:6px">No reports yet</p>
+              <p style="font-size:13px;color:#9CA3AF">Upload your first survey doc to get started</p>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6B7280;background:#F8F9FA;padding:10px 18px;border-radius:8px;flex-wrap:wrap;justify-content:center">
+              <span><b style="color:#042C53">1.</b> Upload spec doc</span>
+              <span style="color:#DDE1E7">→</span>
+              <span><b style="color:#042C53">2.</b> Add live URL</span>
+              <span style="color:#DDE1E7">→</span>
+              <span><b style="color:#042C53">3.</b> Get Word report</span>
+            </div>
+            <a href="/new-qc" style="display:inline-flex;align-items:center;gap:6px;background:#042C53;color:white;padding:12px 24px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none">
+              <i class="ti ti-plus" style="font-size:14px"></i> Create your first QC &rarr;
+            </a>
+          </div>
+        </td></tr>'''
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Reports — SurveyQC</title></head><body>
@@ -1688,13 +1784,68 @@ def billing():
     limit = user.get('reports_limit', 5)
     pct = int((used/limit)*100) if limit > 0 else 0
     c = site_content  # use admin-editable content for prices
+    email = session.get('user_email', '')
+    is_demo = (email == 'demo@surveyqc.com')
 
     free_price = c.get('plan_free_price', '0')
     pro_price  = c.get('plan_pro_price', '29')
-    biz_price  = c.get('plan_biz_price', '99')
-    free_feats = (c.get('plan_free_features', '5 reports per month')).split('||')[0]
-    pro_feats  = (c.get('plan_pro_features', '50 reports per month')).split('||')[0]
+    biz_price  = c.get('plan_biz_price', '299')
+    ent_price  = c.get('plan_ent_price', 'Custom')
+    free_feats = (c.get('plan_free_features', '3 reports per month')).split('||')[0]
+    pro_feats  = (c.get('plan_pro_features', '25 reports per month')).split('||')[0]
     biz_feats  = (c.get('plan_biz_features', 'Unlimited reports')).split('||')[0]
+    ent_feats  = (c.get('plan_ent_features', 'Everything in Business')).split('||')[0]
+
+    # Compute reset date: 1st of next month
+    _today = datetime.now()
+    if _today.month == 12:
+        _reset = datetime(_today.year + 1, 1, 1)
+    else:
+        _reset = datetime(_today.year, _today.month + 1, 1)
+    reset_date_str = _reset.strftime('%b %d')
+
+    # Payment method card content
+    if is_demo:
+        _payment_html = '''
+          <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <i class="ti ti-shield-off" style="font-size:20px;color:#9CA3AF"></i>
+            <div><p style="font-size:12px;color:white">Demo Account</p><p style="font-size:11px;color:var(--text3)">Billing is disabled for demo accounts</p></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" disabled style="width:100%;justify-content:center;opacity:.4">Not available in demo</button>'''
+    elif plan == 'Free':
+        _payment_html = '''
+          <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <i class="ti ti-credit-card" style="font-size:20px;color:#9CA3AF"></i>
+            <div><p style="font-size:12px;color:white">No card added</p><p style="font-size:11px;color:var(--text3)">Free plan — no card needed</p></div>
+          </div>
+          <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center"><i class="ti ti-plus"></i>Add payment method</button>'''
+    else:
+        _payment_html = '''
+          <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <i class="ti ti-credit-card" style="font-size:20px;color:var(--purple)"></i>
+            <div><p style="font-size:12px;color:white">Manage payment method</p><p style="font-size:11px;color:var(--text3)">Billing via Stripe</p></div>
+          </div>
+          <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center"><i class="ti ti-credit-card"></i>Add / update card</button>'''
+
+    def _plan_card(name, price, feats, btn_label, is_current, is_ent=False):
+        border = 'border:2px solid var(--purple)' if is_current else ''
+        badge = '<span class="badge badge-purple" style="margin-bottom:8px;display:inline-block">Current plan</span>' if is_current else ''
+        price_html = f'Custom<span style="font-size:13px;color:var(--text3)"> — contact sales</span>' if is_ent else f'${price}<span style="font-size:13px;color:var(--text3)">/mo</span>'
+        btn_cls = 'btn-primary' if is_current else ('btn-ghost' if name in ('Free','Enterprise') else 'btn-ghost')
+        btn_href = f'mailto:support@surveyqc.online?subject=Enterprise%20Inquiry' if is_ent else '#'
+        btn_tag = f'<a href="{btn_href}" class="btn {btn_cls} btn-sm" style="width:100%;justify-content:center;text-decoration:none">{btn_label}</a>' if is_ent else f'<button class="btn {btn_cls} btn-sm" style="width:100%;justify-content:center">{btn_label}</button>'
+        return f'''<div class="card" style="{border}">
+          {badge}
+          <p style="font-size:13px;font-weight:600;color:var(--text)">{name}</p>
+          <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">{price_html}</p>
+          <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{feats}</p>
+          {btn_tag}
+        </div>'''
+
+    cards_html = _plan_card('Free',     free_price, free_feats, 'Current plan' if plan=='Free' else 'Downgrade',         plan=='Free')
+    cards_html += _plan_card('Pro',     pro_price,  pro_feats,  'Current plan' if plan=='Pro'  else 'Upgrade to Pro',    plan=='Pro')
+    cards_html += _plan_card('Business',biz_price,  biz_feats,  'Current plan' if plan=='Business' else 'Upgrade',       plan=='Business')
+    cards_html += _plan_card('Enterprise', ent_price, ent_feats, 'Contact Sales', plan=='Enterprise', is_ent=True)
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Billing — SurveyQC</title></head><body>
@@ -1708,49 +1859,25 @@ def billing():
       <a href="/billing" class="tab active">Billing</a>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
-      <div class="card {'featured' if plan=='Free' else ''}">
-        <p style="font-size:13px;font-weight:600;color:var(--text)">Free</p>
-        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">${free_price}<span style="font-size:13px;color:var(--text3)">/mo</span></p>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{free_feats}</p>
-        <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center">{'Current plan' if plan=='Free' else 'Downgrade'}</button>
-      </div>
-      <div class="card" style="{'border:2px solid var(--purple)' if plan=='Pro' else ''}">
-        {'<span class="badge badge-purple" style="margin-bottom:8px;display:inline-block">Current plan</span>' if plan=='Pro' else ''}
-        <p style="font-size:13px;font-weight:600;color:var(--text)">Pro</p>
-        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">${pro_price}<span style="font-size:13px;color:var(--text3)">/mo</span></p>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{pro_feats}</p>
-        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center">{'Current plan' if plan=='Pro' else 'Upgrade to Pro'}</button>
-      </div>
-      <div class="card">
-        <p style="font-size:13px;font-weight:600;color:var(--text)">Business</p>
-        <p style="font-size:24px;font-weight:700;color:var(--text);margin:8px 0 4px">${biz_price}<span style="font-size:13px;color:var(--text3)">/mo</span></p>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">{biz_feats}</p>
-        <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center">Upgrade to Business</button>
-      </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+      {cards_html}
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
       <div class="card">
         <p style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Usage this month</p>
-        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-          <span style="font-size:12px;color:var(--text3)">Reports used</span>
-          <span style="font-size:12px;font-weight:500;color:white">{used} / {limit}</span>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <span style="font-size:13px;font-weight:600;color:var(--text)">{used} / {limit} reports used</span>
+          <span style="font-size:11px;color:var(--text3)">{pct}%</span>
         </div>
         <div class="progress-bar" style="height:8px;margin-bottom:8px">
           <div class="progress-fill progress-purple" style="width:{pct}%"></div>
         </div>
-        <p style="font-size:11px;color:var(--text3)">Resets on 1st of next month</p>
+        <p style="font-size:11px;color:var(--text3)">Resets on {reset_date_str}</p>
       </div>
       <div class="card">
         <p style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Payment method</p>
-        <div style="background:rgba(255,255,255,.06);border-radius:8px;padding:12px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <i class="ti ti-credit-card" style="font-size:20px;color:var(--purple)"></i>
-            <div><p style="font-size:12px;color:white">No card added</p><p style="font-size:11px;color:var(--text3)">Free plan — no card needed</p></div>
-          </div>
-        </div>
-        <button class="btn btn-primary btn-sm"><i class="ti ti-plus"></i>Add payment method</button>
+        {_payment_html}
       </div>
     </div>
   </div>
@@ -5230,7 +5357,7 @@ def privacy_data():
         </div>
         <div style="background:#E6F1FB;border:0.5px solid #B5D4F4;border-radius:10px;padding:12px">
           <p style="font-size:11px;font-weight:500;color:#0C447C;margin-bottom:5px">🕛 Auto-delete schedule</p>
-          <p style="font-size:11px;color:#185FA5;line-height:1.7">Har raat <strong>12:00 AM</strong> pe 30 din purana data automatically delete. Koi action nahi karna! ✅</p>
+          <p style="font-size:11px;color:#185FA5;line-height:1.7">Auto-deletes 30-day-old data nightly at <strong>12:00 AM</strong>. Fully automatic. ✅</p>
         </div>
       </div>
     </div>
