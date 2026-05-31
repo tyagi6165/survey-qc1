@@ -5528,6 +5528,124 @@ def delete_reports():
 
 
 # ================================================================
+# ADMIN: PRICING
+# ================================================================
+
+@app.route('/admin/pricing', methods=['GET', 'POST'])
+@admin_required
+def admin_pricing():
+    saved = False
+    pricing_keys = [
+        'plan_free_name', 'plan_free_price', 'plan_free_yearly', 'plan_free_period', 'plan_free_desc',
+        'plan_pro_name', 'plan_pro_price', 'plan_pro_yearly', 'plan_pro_period', 'plan_pro_desc',
+        'plan_biz_name', 'plan_biz_price', 'plan_biz_yearly', 'plan_biz_period', 'plan_biz_desc',
+        'plan_ent_name', 'plan_ent_price', 'plan_ent_yearly', 'plan_ent_period', 'plan_ent_desc',
+        'pricing_heading', 'pricing_sub',
+    ]
+    if request.method == 'POST':
+        for key in pricing_keys:
+            val = request.form.get(key)
+            if val is not None:
+                site_content[key] = val
+        saved = True
+
+    c = site_content
+    plans = [
+        ('Free',     'plan_free',  '#27500A', '#EAF3DE'),
+        ('Pro',      'plan_pro',   '#042C53', '#E6F1FB'),
+        ('Business', 'plan_biz',   '#533F00', '#FEF9EE'),
+        ('Enterprise','plan_ent',  '#3C1F6E', '#F4EEFE'),
+    ]
+
+    alert = ''
+    if saved:
+        alert = '<div style="background:#E5F0E9;border:1px solid #A5D6A7;border-radius:10px;padding:12px 16px;margin-bottom:20px;color:#3F7D58;font-size:14px;font-weight:500">&#10003; Prices saved! All pages now use the new values.</div>'
+
+    cards = ''
+    for plan_name, key, col, bg in plans:
+        cards += f'''
+        <div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:20px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <div style="width:34px;height:34px;border-radius:8px;background:{bg};display:flex;align-items:center;justify-content:center;font-size:16px">💰</div>
+            <div><p style="font-size:15px;font-weight:600;color:{col}">{plan_name} Plan</p><p style="font-size:11px;color:#9CA3AF">Displayed on /pricing</p></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Monthly Price (number only)</label>
+              <input type="text" name="{key}_price" value="{c.get(key + "_price", "")}" style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Yearly Price (number only)</label>
+              <input type="text" name="{key}_yearly" value="{c.get(key + "_yearly", "")}" style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Plan Name</label>
+              <input type="text" name="{key}_name" value="{c.get(key + "_name", "")}" style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px">
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Period Label</label>
+              <input type="text" name="{key}_period" value="{c.get(key + "_period", "")}" style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px">
+            </div>
+          </div>
+        </div>'''
+
+    page = f'''<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pricing Admin</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<script src="/admin-sidebar-js"></script>
+</head><body style="background:#F0F2F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1A1A2E">
+<div style="padding:28px;max-width:760px;margin-left:220px">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
+    <a href="/admin" style="color:#6B7280;font-size:20px;text-decoration:none"><i class="ti ti-arrow-left"></i></a>
+    <div>
+      <p style="font-size:20px;font-weight:700;color:#1A1A2E">Pricing Management</p>
+      <p style="font-size:13px;color:#6B7280">Changes apply instantly to /pricing, /billing, and all plan pages</p>
+    </div>
+  </div>
+
+  <div style="background:#FEF9EE;border:0.5px solid #F5D88A;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#633806">
+    <b>Tip:</b> Enter numbers only for prices (e.g. <code>29</code> or <code>299</code>, no $ symbol). The $ is added automatically.
+  </div>
+
+  {alert}
+
+  <form method="POST">
+    {cards}
+
+    <div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:20px;margin-bottom:16px">
+      <p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Pricing Page Header</p>
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Heading</label>
+        <input type="text" name="pricing_heading" value="{c.get("pricing_heading", "")}" style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Subheading</label>
+        <input type="text" name="pricing_sub" value="{c.get("pricing_sub", "")}" style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px">
+      </div>
+    </div>
+
+    <button type="submit" style="width:100%;background:#042C53;color:white;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+      <i class="ti ti-device-floppy"></i> Save Prices
+    </button>
+  </form>
+
+  <div style="margin-top:20px;background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:16px">
+    <p style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px">Quick links to verify changes:</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a href="/pricing" target="_blank" style="font-size:12px;background:#E6F1FB;color:#042C53;padding:6px 12px;border-radius:6px;font-weight:500">&#128279; /pricing</a>
+      <a href="/billing" target="_blank" style="font-size:12px;background:#EAF3DE;color:#27500A;padding:6px 12px;border-radius:6px;font-weight:500">&#128279; /billing</a>
+      <a href="/admin/revenue" target="_blank" style="font-size:12px;background:#FEF9EE;color:#533F00;padding:6px 12px;border-radius:6px;font-weight:500">&#128279; Revenue</a>
+    </div>
+  </div>
+</div>
+</body></html>'''
+    return render_template_string(page)
+
+
+# ================================================================
 # CLEANUP NOW (manual)
 # ================================================================
 
@@ -5557,7 +5675,9 @@ def admin_revenue():
     pro = sum(1 for u in users_db.values() if u.get('plan') == 'Pro')
     biz = sum(1 for u in users_db.values() if u.get('plan') == 'Business')
     free = total - pro - biz
-    mrr = (pro * 29) + (biz * 99)
+    _pro_price = int(site_content.get('plan_pro_price', '29') or '29')
+    _biz_price = int(site_content.get('plan_biz_price', '299') or '299')
+    mrr = (pro * _pro_price) + (biz * _biz_price)
     arr = mrr * 12
     page = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Revenue - Admin</title></head><body style="background:#F0F2F5;font-family:-apple-system,sans-serif;color:#1A1A2E">'
     page += '<div style="padding:24px"><div style="display:flex;align-items:center;gap:14px;margin-bottom:20px"><a href="/admin" style="color:#6B7280;font-size:22px;text-decoration:none">&larr;</a><p style="font-size:20px;font-weight:600">Revenue Analytics</p></div>'
@@ -5569,8 +5689,8 @@ def admin_revenue():
     page += '</div>'
     page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:10px;padding:20px">'
     page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E;margin-bottom:14px">Subscription breakdown</p>'
-    page += '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #EEF0F3"><span style="font-size:13px;color:#374151">Pro plan ($29/mo)</span><span style="font-size:13px;font-weight:600">'+str(pro)+' users &nbsp;$'+str(pro*29)+'/mo</span></div>'
-    page += '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #EEF0F3"><span style="font-size:13px;color:#374151">Business plan ($99/mo)</span><span style="font-size:13px;font-weight:600">'+str(biz)+' users &nbsp;$'+str(biz*99)+'/mo</span></div>'
+    page += '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #EEF0F3"><span style="font-size:13px;color:#374151">Pro plan ($'+str(_pro_price)+'/mo)</span><span style="font-size:13px;font-weight:600">'+str(pro)+' users &nbsp;$'+str(pro*_pro_price)+'/mo</span></div>'
+    page += '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #EEF0F3"><span style="font-size:13px;color:#374151">Business plan ($'+str(_biz_price)+'/mo)</span><span style="font-size:13px;font-weight:600">'+str(biz)+' users &nbsp;$'+str(biz*_biz_price)+'/mo</span></div>'
     page += '<div style="display:flex;justify-content:space-between;padding:10px 0"><span style="font-size:13px;color:#374151">Free plan</span><span style="font-size:13px;font-weight:600;color:#9CA3AF">'+str(free)+' users &nbsp;$0/mo</span></div>'
     page += '</div></div></body></html>'
     return render_template_string(page)
@@ -6091,7 +6211,7 @@ def compare_page(slug):
             [('SurveyQC','Automated tool','10 min per survey','99% accuracy','Auto screenshots','Professional Word report','No manual effort','GDPR compliant'),
              ('Excel Manual QC','Spreadsheet + human','8+ hours per survey','~70% accuracy','No screenshots','Manual formatting','Heavy manual effort','No compliance')]),
         'manual': (c['compare_manual_heading'], c['compare_manual_summary'],
-            [('SurveyQC','AI-powered','10 min per survey','99% accuracy','Never misses edge cases','Consistent every time','Scales instantly','Costs $29/mo'),
+            [('SurveyQC','AI-powered','10 min per survey','99% accuracy','Never misses edge cases','Consistent every time','Scales instantly','Costs $'+c.get('plan_pro_price','29')+'/mo'),
              ('Manual Testing','Human tester','8+ hours per survey','~70% accuracy','Misses 30% of bugs','Varies by tester','Bottleneck at scale','Costs $50+/hr')]),
     }
     if slug not in pages:
@@ -6176,7 +6296,11 @@ def affiliate():
     page += '<div style="padding:60px 40px;max-width:1000px;margin:0 auto">'
     page += '<div style="text-align:center;margin-bottom:40px"><h2 style="font-size:28px;font-weight:700;color:#1A1A2E;margin-bottom:8px">How it works</h2></div>'
     page += '<div class="grid4" style="margin-bottom:50px">'+step_cards+'</div>'
-    page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:14px;padding:32px;text-align:center"><h3 style="font-size:22px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Example earnings</h3><p style="font-size:14px;color:#6B7280;margin-bottom:24px">If you refer 10 Pro users ($29/mo each):</p><p style="font-size:36px;font-weight:700;color:#1B140F;margin-bottom:4px">$87/month</p><p style="font-size:14px;color:#9CA3AF">recurring, every month, forever &middot; $1,044/year</p><a href="/signup" style="display:inline-block;background:#1B140F;color:white;font-size:15px;padding:14px 36px;border-radius:10px;font-weight:600;margin-top:24px">Start earning free</a></div>'
+    _aff_pro_price = int(c.get('plan_pro_price', '29') or '29')
+    _aff_commission_pct = int(c.get('affiliate_commission', '30') or '30')
+    _aff_monthly = round(10 * _aff_pro_price * _aff_commission_pct / 100)
+    _aff_yearly = _aff_monthly * 12
+    page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:14px;padding:32px;text-align:center"><h3 style="font-size:22px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Example earnings</h3><p style="font-size:14px;color:#6B7280;margin-bottom:24px">If you refer 10 Pro users ($'+str(_aff_pro_price)+'/mo each):</p><p style="font-size:36px;font-weight:700;color:#1B140F;margin-bottom:4px">$'+str(_aff_monthly)+'/month</p><p style="font-size:14px;color:#9CA3AF">recurring, every month, forever &middot; $'+str(_aff_yearly)+'/year</p><a href="/signup" style="display:inline-block;background:#1B140F;color:white;font-size:15px;padding:14px 36px;border-radius:10px;font-weight:600;margin-top:24px">Start earning free</a></div>'
     page += '</div><footer style="background:#1B140F;padding:30px 40px;text-align:center"><p style="color:#6B7280;font-size:13px">'+c['footer_text']+'</p></footer></body></html>'
     return page
 
@@ -7534,13 +7658,25 @@ def admin_sidebar_js():
     '<p style="font-size:9px;color:rgba(255,255,255,.3);margin-bottom:8px;text-transform:uppercase;padding:0 8px">Settings</p>',
     '<a href="/admin/apis" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; API Keys</a>',
     '<a href="/admin/tokens" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Token Limits</a>',
+    '<a href="/admin/pricing" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#128176; Pricing</a>',
     '<a href="/admin/content" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Content</a>',
     '<a href="/admin/privacy" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Privacy</a>',
     '<a href="/admin/gift" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px;margin-bottom:2px">&#9632; Gift Access</a>',
     '<hr style="border-color:rgba(255,255,255,.1);margin:8px 0">',
     '<a href="/" style="display:block;padding:8px 10px;color:#9A8C7B;font-size:12px;text-decoration:none;border-radius:7px">&#8592; Back to site</a>',
   ].join('');
-  document.addEventListener('DOMContentLoaded',function(){document.body.insertBefore(s,document.body.firstChild);if(!document.querySelector('.main-content'))if(!document.querySelector('.main-content'))document.body.style.marginLeft='220px';});
+  document.addEventListener('DOMContentLoaded',function(){
+    document.body.insertBefore(s,document.body.firstChild);
+    if(!document.querySelector('.main-content'))document.body.style.marginLeft='220px';
+    var cur=window.location.pathname;
+    s.querySelectorAll('a[href]').forEach(function(a){
+      if(a.getAttribute('href')===cur){
+        a.style.background='rgba(196,106,43,.18)';
+        a.style.color='#E87B30';
+        a.style.fontWeight='600';
+      }
+    });
+  });
 })();
 """
     from flask import Response
