@@ -988,7 +988,8 @@ function dzPick(inp,zoneId,doneId,multi){
       +'<p class="dz-dm">'+sz+'</p></div>';
   }
   inner+='<button type="button" class="dz-rm"'
-    +' onclick="dzClear(\''+inp.id+'\',\''+zoneId+'\',\''+doneId+'\')"'
+    +' onclick="dzClear(this.dataset.inp,this.dataset.zone,this.dataset.done)"'
+    +' data-inp="'+inp.id+'" data-zone="'+zoneId+'" data-done="'+doneId+'"'
     +' title="Remove">&times;</button>';
   done.innerHTML=inner;
   done.style.display='flex';
