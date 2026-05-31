@@ -632,223 +632,526 @@ def new_qc():
     user = get_current_user()
     plan = user.get('plan','Free') if user else 'Free'
     sb = sidebar_html('new-qc')
-
-    page = SHARED_CSS + '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>New QC - SurveyQC</title></head><body>'
-    page += '<div class="app-layout">' + sb + '<div class="main-content">'
-    page += '<div class="topbar"><div><p class="page-title">New QC</p><p class="page-sub">Upload doc + URL + XML export. AI handles everything automatically.</p></div></div>'
-
-    # Info strip
-    page += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">'
-    checks = [
-        ('ti-x-octagon','#E6F1FB','#185FA5','Termination','Every rule clicked & verified'),
-        ('ti-text-recognition','#E1F5EE','#0F6E56','Missing Words','Word-by-word comparison'),
-        ('ti-list-check','#EAF3DE','#3B6D11','Text Match','Question text vs spec'),
-        ('ti-camera','#EEEDFE','#534AB7','Screenshots','Every question captured'),
-    ]
-    for icon,bg,col,title,desc in checks:
-        page += ('<div style="background:white;border:0.5px solid #DDE1E7;border-radius:10px;padding:14px;display:flex;align-items:center;gap:10px">'
-            '<div style="width:34px;height:34px;border-radius:8px;background:'+bg+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
-            '<i class="ti '+icon+'" style="font-size:17px;color:'+col+'"></i></div>'
-            '<div><p style="font-size:12px;font-weight:600;color:#1A1A2E">'+title+'</p>'
-            '<p style="font-size:11px;color:#9CA3AF;margin-top:1px">'+desc+'</p></div></div>')
-    page += '</div>'
-
-    # Main form card
-    page += '<div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:28px;max-width:680px">'
-    page += '<form action="/run-qc" method="POST" enctype="multipart/form-data">'
-
-    # Section header: Required Inputs
-    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">'
-    page += '<span style="font-size:11px;font-weight:700;color:#042C53;text-transform:uppercase;letter-spacing:.06em">Required Inputs</span>'
-    page += '<div style="flex:1;height:1px;background:#EEF0F3"></div>'
-    page += '<span style="font-size:10px;color:#E24B4A;font-weight:600">All 3 required</span>'
-    page += '</div>'
-
-    # Step 1 - Doc
-    page += '<div style="margin-bottom:22px">'
-    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
-    page += '<div style="width:26px;height:26px;border-radius:50%;background:#042C53;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">1</div>'
-    page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Upload Spec Document <span style="color:#E24B4A">*</span></p></div>'
-    page += '<input type="file" name="doc" id="docInput" accept=".docx" required style="width:100%;padding:10px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:#FAFAFA;cursor:pointer" onchange="previewFile(this,\'docPreview\')">'
-    page += '<div id="docPreview" style="display:none;margin-top:8px;padding:8px 12px;background:#F0FAF4;border:0.5px solid #A7D7B8;border-radius:7px;display:flex;align-items:center;gap:8px">'
-    page += '<i class="ti ti-circle-check" style="font-size:16px;color:#16A34A;flex-shrink:0"></i>'
-    page += '<div style="flex:1;min-width:0"><p id="docPreviewName" style="font-size:12px;font-weight:600;color:#1A1A2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>'
-    page += '<p id="docPreviewSize" style="font-size:11px;color:#6B7280;margin-top:1px"></p></div></div>'
-    page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">Screener / spec .docx file. Required.</p>'
-    page += '</div>'
-
-    # Step 2 - URL
-    page += '<div style="margin-bottom:22px">'
-    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
-    page += '<div style="width:26px;height:26px;border-radius:50%;background:#042C53;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">2</div>'
-    page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Live Survey URL <span style="color:#E24B4A">*</span></p></div>'
-    page += '<input type="url" name="url" id="urlInput" placeholder="https://survey.confirmit.com/..." required class="form-input" oninput="updateBtn()">'
-    page += '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
-    for plat in ['Confirmit','Decipher','Forsta','Qualtrics']:
-        page += '<span style="font-size:11px;background:#F0F2F5;color:#6B7280;padding:3px 10px;border-radius:6px;font-weight:500">'+plat+'</span>'
-    page += '</div></div>'
-
-    # Step 3 - XML export (REQUIRED)
-    page += '<div style="margin-bottom:22px">'
-    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
-    page += '<div style="width:26px;height:26px;border-radius:50%;background:#042C53;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">3</div>'
-    page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Survey Export (XML/QSF) <span style="color:#E24B4A">*</span></p>'
-    # Tooltip trigger
-    page += '<button type="button" onclick="toggleXmlTip()" style="background:none;border:none;cursor:pointer;color:#9CA3AF;padding:0 4px" title="How to get this file"><i class="ti ti-info-circle" style="font-size:15px"></i></button>'
-    page += '</div>'
-    # Tooltip content
-    page += '<div id="xmlTip" style="display:none;background:#F0F7FF;border:0.5px solid #B8D4F0;border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12px;color:#1A1A2E">'
-    page += '<p style="font-weight:600;margin-bottom:6px">How to export from your platform:</p>'
-    page += '<ul style="margin:0;padding-left:18px;line-height:1.8">'
-    page += '<li><b>Confirmit:</b> Designer → Export Survey Definition (.zip)</li>'
-    page += '<li><b>Decipher:</b> Survey settings → Download XML</li>'
-    page += '<li><b>Forsta:</b> Survey settings → Export XML</li>'
-    page += '<li><b>Qualtrics:</b> Tools → Import/Export → Export QSF</li>'
-    page += '</ul></div>'
-    page += '<input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required style="width:100%;padding:10px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:#FAFAFA;cursor:pointer" onchange="previewFile(this,\'xmlPreview\');updateBtn()">'
-    page += '<div id="xmlPreview" style="display:none;margin-top:8px;padding:8px 12px;background:#F0FAF4;border:0.5px solid #A7D7B8;border-radius:7px;display:flex;align-items:center;gap:8px">'
-    page += '<i class="ti ti-circle-check" style="font-size:16px;color:#16A34A;flex-shrink:0"></i>'
-    page += '<div style="flex:1;min-width:0"><p id="xmlPreviewName" style="font-size:12px;font-weight:600;color:#1A1A2E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>'
-    page += '<p id="xmlPreviewSize" style="font-size:11px;color:#6B7280;margin-top:1px"></p></div></div>'
-    page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">Get this from Confirmit/Decipher/Forsta/Qualtrics admin panel. Boosts accuracy from ~75% to ~91%.</p>'
-    page += '</div>'
-
-    # Section header: Optional Helpers
-    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;margin-top:8px">'
-    page += '<span style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Optional Helpers</span>'
-    page += '<div style="flex:1;height:1px;background:#EEF0F3"></div>'
-    page += '<span style="font-size:10px;color:#9CA3AF;font-weight:500">Skip if not needed</span>'
-    page += '</div>'
-
-    # Step 4 - Screenshots (OPTIONAL)
-    page += '<div style="margin-bottom:22px;padding:16px;background:#F8F9FA;border-radius:10px;border:0.5px dashed #DDE1E7">'
-    page += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
-    page += '<div style="width:26px;height:26px;border-radius:50%;background:#6B7280;color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">4</div>'
-    page += '<p style="font-size:14px;font-weight:600;color:#1A1A2E">Screenshots <span style="font-size:12px;font-weight:400;color:#9CA3AF">(Optional)</span></p>'
-    page += '<span style="margin-left:auto;font-size:11px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:20px;font-weight:500">Pro+</span>' if plan == 'Free' else ''
-    page += '</div>'
-    page += '<p style="font-size:12px;color:#6B7280;margin-bottom:10px">Upload WhatsApp screenshots — AI will pay extra attention to the specific questions shown.</p>'
-
-    if plan == 'Free':
-        page += '<div style="background:#FAEEDA;border-radius:7px;padding:10px 12px;margin-bottom:10px"><p style="font-size:12px;color:#633806"><i class="ti ti-lock" style="font-size:12px"></i> Screenshot QC is Pro+ only. <a href="/billing" style="color:#042C53;font-weight:600">Upgrade &rarr;</a></p></div>'
-        page += '<input type="file" name="screenshots" accept="image/*" multiple disabled style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#9CA3AF;background:#F0F2F5;cursor:not-allowed">'
-    else:
-        page += '<input type="file" name="screenshots" accept="image/*" multiple style="width:100%;padding:9px 12px;border:0.5px solid #DDE1E7;border-radius:8px;font-size:13px;color:#374151;background:white;cursor:pointer">'
-        page += '<p style="font-size:11px;color:#9CA3AF;margin-top:5px">You can select multiple files. AI will cross-verify questions that appear in the screenshots.</p>'
-    page += '</div>'
-
-    # Advanced options collapsible
-    page += '<div style="margin-bottom:22px">'
-    page += '<button type="button" onclick="toggleAdv()" style="background:none;border:none;color:#6B7280;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;padding:0"><i class="ti ti-settings" style="font-size:14px"></i> Advanced options <i class="ti ti-chevron-down" style="font-size:12px" id="advIcon"></i></button>'
-    page += '<div id="advPanel" style="display:none;margin-top:14px;padding:16px;background:#F8F9FA;border-radius:8px;border:0.5px solid #EEF0F3">'
-    page += '<div class="form-group"><label class="form-label">Country (for screener question)</label>'
-    page += '<input type="text" name="country" placeholder="e.g. United Kingdom" class="form-input"></div>'
-    page += '<div class="form-group"><label class="form-label">Specific questions only (optional)</label>'
-    page += '<input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12 (blank = all questions)" class="form-input">'
-    page += '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">Leave blank for full survey QC</p></div>'
-    page += '<div><label class="form-label">Checks to run</label>'
-    page += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">'
-    chk_items = [
-        ('chk_term','Termination rules'),
-        ('chk_text','Question text'),
-        ('chk_words','Missing words'),
-        ('chk_options','Options match'),
-        ('chk_mandatory','Mandatory markers'),
-        ('chk_piping','Piping markers'),
-        ('chk_codes','Answer codes'),
-        ('chk_order','Question order'),
-    ]
-    for name,label in chk_items:
-        page += '<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#374151;cursor:pointer"><input type="checkbox" name="'+name+'" value="1" checked style="accent-color:#042C53;width:14px;height:14px">'+label+'</label>'
-    page += '</div></div></div></div>'
-
-    # Submit
-    page += '<button type="submit" id="runBtn" class="btn btn-primary" style="width:100%;padding:14px;font-size:15px;font-weight:600;border-radius:10px">'
-    page += '<i class="ti ti-player-play" style="font-size:16px"></i> <span id="runBtnText">Run QC — Takes 3-5 minutes</span></button>'
-    page += '<p id="runBtnSub" style="font-size:12px;color:#9CA3AF;text-align:center;margin-top:10px">You\'ll get a Word report</p>'
-    page += '</form></div>'
-
-    # Recent reports mini list
     email = session.get('user_email','')
+    is_pro = plan in ('Pro','Business','Enterprise')
+
+    # Recent reports mini list data
     recent = [(jid,j) for jid,j in list(jobs.items()) if j.get('user_email')==email][-3:]
+
+    # Screenshots section html (plan-aware)
+    if not is_pro:
+        ss_body = (
+            '<div style="display:flex;align-items:center;gap:8px;background:#FEF3E2;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
+            '<i class="ti ti-lock" style="font-size:14px;color:#C46A2B;flex-shrink:0"></i>'
+            '<p style="font-size:12px;color:#7C3D0A">Screenshot QC is Pro+ only. '
+            '<a href="/billing" style="color:#042C53;font-weight:600">Upgrade &rarr;</a></p></div>'
+            '<div class="qcz qcz-disabled"><i class="ti ti-camera" style="font-size:24px;color:#D1D5DB"></i>'
+            '<p style="font-size:13px;color:#9CA3AF;margin-top:6px">Upgrade to Pro to unlock</p></div>'
+            '<input type="file" name="screenshots" accept="image/*" multiple disabled style="display:none">'
+        )
+    else:
+        ss_body = (
+            '<div class="qcz" id="ssZone" onclick="document.getElementById(\'ssInput\').click()"'
+            ' ondragover="dzOver(event,this)" ondragleave="dzLeave(this)" ondrop="dzDrop(event,this,\'ssInput\',\'ssPreview\')">'
+            '<i class="ti ti-camera" style="font-size:26px;color:#9CA3AF"></i>'
+            '<p style="font-size:13px;color:#6B7280;margin-top:8px;font-weight:500">Drop screenshots here, or <span style="color:#C46A2B;text-decoration:underline">browse</span></p>'
+            '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">WhatsApp screenshots · Multiple files OK</p></div>'
+            '<input type="file" name="screenshots" id="ssInput" accept="image/*" multiple style="display:none"'
+            ' onchange="dzFilePicked(this,\'ssZone\',\'ssPreview\',true)">'
+            '<div id="ssPreview" class="qcz-preview" style="display:none"></div>'
+        )
+
+    # Checkboxes
+    chk_items = [
+        ('chk_term','Termination rules'),('chk_text','Question text'),
+        ('chk_words','Missing words'),('chk_options','Options match'),
+        ('chk_mandatory','Mandatory markers'),('chk_piping','Piping markers'),
+        ('chk_codes','Answer codes'),('chk_order','Question order'),
+    ]
+    chk_html = ''.join(
+        f'<label class="qc-chk"><input type="checkbox" name="{n}" value="1" checked>{lbl}</label>'
+        for n,lbl in chk_items
+    )
+
+    # Recent reports html
+    recent_html = ''
     if recent:
-        page += '<div style="margin-top:24px;max-width:680px">'
-        page += '<p style="font-size:13px;font-weight:600;color:#6B7280;margin-bottom:10px">Recent reports</p>'
+        recent_html = '<div style="max-width:720px;margin-top:24px"><p style="font-size:12px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Recent reports</p>'
         for jid,j in reversed(recent):
-            status = j.get('status','unknown')
-            if status == 'done':
-                badge = '<span style="background:#EAF3DE;color:#27500A;font-size:10px;padding:2px 8px;border-radius:20px">Done</span>'
-            elif status == 'running':
-                badge = '<span style="background:#E6F1FB;color:#0C447C;font-size:10px;padding:2px 8px;border-radius:20px">Running</span>'
-            else:
-                badge = '<span style="background:#FCEBEB;color:#791F1F;font-size:10px;padding:2px 8px;border-radius:20px">Error</span>'
-            page += ('<div style="background:white;border:0.5px solid #DDE1E7;border-radius:8px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px">'
-                '<i class="ti ti-file-report" style="font-size:16px;color:#6B7280;flex-shrink:0"></i>'
-                '<p style="font-size:13px;color:#374151;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+j.get('doc_name','Unknown')[:45]+'</p>'
-                +badge+
-                '<a href="/report/'+jid+'" style="font-size:12px;color:#185FA5;flex-shrink:0">View &rarr;</a>'
-                '</div>')
-        page += '</div>'
+            st = j.get('status','unknown')
+            if st == 'done':   bdg = '<span class="rbadge rbadge-done">Done</span>'
+            elif st == 'running': bdg = '<span class="rbadge rbadge-run">Running</span>'
+            else:              bdg = '<span class="rbadge rbadge-err">Error</span>'
+            recent_html += (
+                f'<div class="rrow">'
+                f'<i class="ti ti-file-report" style="font-size:15px;color:#9CA3AF;flex-shrink:0"></i>'
+                f'<p style="font-size:13px;color:#374151;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{j.get("doc_name","Unknown")[:50]}</p>'
+                f'{bdg}<a href="/report/{jid}" style="font-size:12px;color:#185FA5;flex-shrink:0;white-space:nowrap">View &rarr;</a></div>'
+            )
+        recent_html += '</div>'
 
-    page += '<div class="mobile-nav"><div class="mobile-nav-inner">'
-    page += '<a href="/dashboard" class="mobile-nav-item"><i class="ti ti-home"></i><span>Home</span></a>'
-    page += '<a href="/new-qc" class="mobile-nav-item active"><i class="ti ti-plus"></i><span>New QC</span></a>'
-    page += '<a href="/reports" class="mobile-nav-item"><i class="ti ti-file-text"></i><span>Reports</span></a>'
-    page += '<a href="/settings" class="mobile-nav-item"><i class="ti ti-settings"></i><span>Settings</span></a>'
-    page += '</div></div>'
+    pro_badge = '<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:20px;font-weight:600;margin-left:auto">Pro+</span>' if not is_pro else ''
 
-    page += '</div></div>'
-    page += '''<script>
-function toggleAdv(){
-    var p=document.getElementById("advPanel");
-    var i=document.getElementById("advIcon");
-    if(p.style.display==="none"){p.style.display="block";i.className="ti ti-chevron-up";}
-    else{p.style.display="none";i.className="ti ti-chevron-down";}
+    page = SHARED_CSS + '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>New QC Analysis — SurveyQC</title>
+<style>
+/* ── New QC premium styles ─────────────────────────────── */
+.nqc-wrap{max-width:720px}
+.nqc-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:28px}
+.nqc-stat{background:white;border:1px solid #EEF0F3;border-radius:12px;padding:14px 16px;
+  display:flex;align-items:center;gap:11px;
+  box-shadow:0 1px 3px rgba(0,0,0,.04);
+  transition:transform .15s,box-shadow .15s;cursor:default}
+.nqc-stat:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.nqc-stat-icon{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* Accuracy meter */
+.acc-wrap{background:white;border:1px solid #EEF0F3;border-radius:14px;
+  padding:18px 22px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.acc-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.acc-label{font-size:13px;font-weight:600;color:#374151}
+.acc-pct{font-size:13px;font-weight:700}
+.acc-track{height:8px;background:#F3F4F6;border-radius:99px;overflow:hidden;position:relative}
+.acc-fill{height:100%;border-radius:99px;transition:width .4s ease,background .4s ease}
+.acc-hint{font-size:11px;color:#9CA3AF;margin-top:8px}
+
+/* Section dividers */
+.sec-hdr{display:flex;align-items:center;gap:10px;margin:28px 0 16px}
+.sec-hdr span{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap}
+.sec-hdr hr{flex:1;border:none;border-top:1px solid #EEF0F3;margin:0}
+.sec-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+
+/* Input cards */
+.qc-card{background:white;border:1px solid #EEF0F3;border-radius:14px;
+  padding:20px 22px;margin-bottom:14px;
+  box-shadow:0 1px 3px rgba(0,0,0,.04);transition:border-color .2s}
+.qc-card:focus-within{border-color:#C46A2B}
+.qc-card-hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.step-num{width:24px;height:24px;border-radius:50%;background:#042C53;color:white;
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.step-num-opt{background:#D1D5DB}
+.card-title{font-size:14px;font-weight:600;color:#1A1A2E}
+.card-badge{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;margin-left:4px}
+.card-badge-acc{background:#DCFCE7;color:#166534}
+.tip-row{display:flex;align-items:flex-start;gap:6px;margin-top:10px}
+.tip-row i{font-size:13px;color:#C46A2B;margin-top:1px;flex-shrink:0}
+.tip-row p{font-size:11px;color:#6B7280;line-height:1.5}
+
+/* Drop zones */
+.qcz{border:1.5px dashed #D1D5DB;border-radius:10px;padding:28px 20px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;transition:border-color .2s,background .2s;text-align:center;
+  background:#FAFAFA;user-select:none}
+.qcz:hover{border-color:#C46A2B;background:#FEF9F5}
+.qcz.dz-over{border-color:#C46A2B;background:#FEF3E2;border-style:solid}
+.qcz-disabled{border:1.5px dashed #E5E7EB;border-radius:10px;padding:22px 20px;
+  display:flex;flex-direction:column;align-items:center;background:#F9FAFB;text-align:center}
+.qcz-preview{margin-top:10px;padding:10px 14px;background:#F0FAF4;
+  border:1px solid #A7D7B8;border-radius:9px;display:flex;align-items:center;gap:10px}
+.qcz-prev-name{font-size:12px;font-weight:600;color:#1A1A2E;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qcz-prev-meta{font-size:11px;color:#6B7280;margin-top:2px}
+.qcz-remove{margin-left:auto;background:none;border:none;cursor:pointer;
+  color:#9CA3AF;font-size:16px;padding:0 2px;flex-shrink:0;line-height:1}
+.qcz-remove:hover{color:#DC2626}
+
+/* URL field with platform badge */
+.url-wrap{position:relative}
+.url-badge{position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px;
+  background:#DCFCE7;color:#166534;display:none;pointer-events:none}
+.url-input{width:100%;padding:11px 14px;padding-right:110px;
+  border:1px solid #DDE1E7;border-radius:9px;font-size:13px;
+  color:#374151;font-family:inherit;outline:none;transition:border-color .2s}
+.url-input:focus{border-color:#C46A2B;box-shadow:0 0 0 3px rgba(196,106,43,.1)}
+.plat-pills{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.plat-pill{font-size:11px;background:#F3F4F6;color:#6B7280;padding:3px 11px;
+  border-radius:6px;font-weight:500;cursor:pointer;transition:background .15s}
+.plat-pill:hover{background:#EEF0F3;color:#374151}
+
+/* XML tooltip */
+.xml-tip{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:9px;
+  padding:12px 14px;margin-bottom:12px;font-size:12px;color:#1E3A5F}
+.xml-tip ul{margin:6px 0 0;padding-left:18px;line-height:1.9}
+.xml-tip-btn{background:none;border:none;cursor:pointer;color:#9CA3AF;
+  padding:0 4px;display:flex;align-items:center;gap:3px;font-size:11px;font-family:inherit}
+.xml-tip-btn:hover{color:#374151}
+
+/* Run button */
+.run-btn{width:100%;padding:15px;font-size:15px;font-weight:700;border-radius:11px;
+  border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  gap:10px;transition:background .3s,box-shadow .2s;color:white;
+  background:#042C53;box-shadow:0 4px 14px rgba(4,44,83,.25)}
+.run-btn:hover{box-shadow:0 6px 20px rgba(4,44,83,.35);transform:translateY(-1px)}
+.run-btn:active{transform:translateY(0)}
+.run-btn.btn-warm{background:linear-gradient(135deg,#C46A2B,#D97706);
+  box-shadow:0 4px 14px rgba(196,106,43,.3)}
+.run-btn.btn-full{background:linear-gradient(135deg,#042C53,#0F5132);
+  box-shadow:0 4px 14px rgba(4,44,83,.3)}
+.run-sub{font-size:12px;color:#9CA3AF;text-align:center;margin-top:10px}
+
+/* Advanced */
+.adv-btn{background:none;border:1px solid #EEF0F3;border-radius:8px;
+  color:#6B7280;font-size:12px;cursor:pointer;display:flex;align-items:center;
+  gap:6px;padding:8px 14px;font-family:inherit;width:100%;transition:background .15s}
+.adv-btn:hover{background:#F8F9FA;color:#374151}
+.adv-panel{margin-top:12px;padding:18px;background:#F8F9FA;
+  border-radius:10px;border:1px solid #EEF0F3}
+.qc-chk{display:flex;align-items:center;gap:8px;font-size:12px;
+  color:#374151;cursor:pointer;padding:2px 0}
+.qc-chk input{accent-color:#042C53;width:14px;height:14px;flex-shrink:0}
+.chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+
+/* Recent reports */
+.rrow{background:white;border:1px solid #EEF0F3;border-radius:9px;
+  padding:11px 14px;margin-bottom:7px;display:flex;align-items:center;gap:10px}
+.rbadge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500;flex-shrink:0}
+.rbadge-done{background:#EAF3DE;color:#27500A}
+.rbadge-run{background:#E6F1FB;color:#0C447C}
+.rbadge-err{background:#FCEBEB;color:#791F1F}
+
+@media(max-width:640px){
+  .nqc-stat-grid{grid-template-columns:1fr 1fr}
+  .chk-grid{grid-template-columns:1fr}
 }
+</style>
+</head>
+<body>
+''' + f'<div class="app-layout">{sb}<div class="main-content">' + '''
+
+<div class="topbar">
+  <div>
+    <p class="page-title">New QC Analysis</p>
+    <p class="page-sub">Upload your files. AI compares everything and finds issues.</p>
+  </div>
+</div>
+
+<div class="nqc-wrap">
+
+  <!-- Stat cards -->
+  <div class="nqc-stat-grid">
+    <div class="nqc-stat">
+      <div class="nqc-stat-icon" style="background:#E6F1FB"><i class="ti ti-x-octagon" style="font-size:17px;color:#185FA5"></i></div>
+      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Termination</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">Every rule clicked</p></div>
+    </div>
+    <div class="nqc-stat">
+      <div class="nqc-stat-icon" style="background:#E1F5EE"><i class="ti ti-text-recognition" style="font-size:17px;color:#0F6E56"></i></div>
+      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Missing Words</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">Word-by-word check</p></div>
+    </div>
+    <div class="nqc-stat">
+      <div class="nqc-stat-icon" style="background:#EAF3DE"><i class="ti ti-list-check" style="font-size:17px;color:#3B6D11"></i></div>
+      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Text Match</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">vs spec doc</p></div>
+    </div>
+    <div class="nqc-stat">
+      <div class="nqc-stat-icon" style="background:#EEEDFE"><i class="ti ti-camera" style="font-size:17px;color:#534AB7"></i></div>
+      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Screenshots</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">Every question</p></div>
+    </div>
+  </div>
+
+  <!-- Accuracy meter -->
+  <div class="acc-wrap">
+    <div class="acc-row">
+      <span class="acc-label">Estimated accuracy</span>
+      <span class="acc-pct" id="accPct" style="color:#9CA3AF">Fill in required fields</span>
+    </div>
+    <div class="acc-track">
+      <div class="acc-fill" id="accFill" style="width:0%;background:#E5E7EB"></div>
+    </div>
+    <p class="acc-hint" id="accHint">Add your spec doc, survey URL, and XML export to reach maximum accuracy.</p>
+  </div>
+
+  <!-- Form -->
+  <form action="/run-qc" method="POST" enctype="multipart/form-data" id="qcForm">
+
+    <!-- ── REQUIRED INPUTS ── -->
+    <div class="sec-hdr">
+      <span style="color:#042C53">Required Inputs</span>
+      <hr>
+      <span class="sec-badge" style="background:#FEE2E2;color:#991B1B">All 3 required</span>
+    </div>
+
+    <!-- Card 1: Spec Doc -->
+    <div class="qc-card" id="card1">
+      <div class="qc-card-hdr">
+        <div class="step-num">1</div>
+        <span class="card-title">Spec Document <span style="color:#E24B4A">*</span></span>
+      </div>
+      <div class="qcz" id="docZone"
+           onclick="document.getElementById('docInput').click()"
+           ondragover="dzOver(event,this)"
+           ondragleave="dzLeave(this)"
+           ondrop="dzDrop(event,this,'docInput','docPreview')">
+        <i class="ti ti-file-word" style="font-size:28px;color:#9CA3AF"></i>
+        <p style="font-size:13px;color:#6B7280;margin-top:8px;font-weight:500">Drop your <b>.docx</b> here, or <span style="color:#C46A2B;text-decoration:underline">browse</span></p>
+        <p style="font-size:11px;color:#9CA3AF;margin-top:4px">Screener or spec document · Word format</p>
+      </div>
+      <input type="file" name="doc" id="docInput" accept=".docx" required style="display:none"
+             onchange="dzFilePicked(this,'docZone','docPreview')">
+      <div id="docPreview" class="qcz-preview" style="display:none"></div>
+      <div class="tip-row"><i class="ti ti-bulb"></i><p>Tip: Most common format is .docx with PROG TABLE rows for each question.</p></div>
+    </div>
+
+    <!-- Card 2: Live URL -->
+    <div class="qc-card" id="card2">
+      <div class="qc-card-hdr">
+        <div class="step-num">2</div>
+        <span class="card-title">Live Survey URL <span style="color:#E24B4A">*</span></span>
+        <span id="platBadge" style="display:none;font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px;background:#DCFCE7;color:#166534;margin-left:auto"></span>
+      </div>
+      <div class="url-wrap">
+        <input type="url" name="url" id="urlInput" required class="url-input"
+               placeholder="https://survey.confirmit.com/wix/..."
+               oninput="detectPlat(this.value);updateMeter()">
+      </div>
+      <div class="plat-pills">
+        <span class="plat-pill" onclick="setUrlHint('confirmit')">Confirmit</span>
+        <span class="plat-pill" onclick="setUrlHint('decipher')">Decipher</span>
+        <span class="plat-pill" onclick="setUrlHint('forsta')">Forsta</span>
+        <span class="plat-pill" onclick="setUrlHint('qualtrics')">Qualtrics</span>
+      </div>
+      <div class="tip-row"><i class="ti ti-bulb"></i><p>Tip: Use the test/preview link, not the production link — so AI can navigate freely.</p></div>
+    </div>
+
+    <!-- Card 3: XML Export -->
+    <div class="qc-card" id="card3">
+      <div class="qc-card-hdr">
+        <div class="step-num">3</div>
+        <span class="card-title">Survey Export <span style="color:#E24B4A">*</span></span>
+        <span class="card-badge card-badge-acc">+15% accuracy</span>
+        <button type="button" class="xml-tip-btn" onclick="toggleXmlTip()" style="margin-left:auto">
+          <i class="ti ti-info-circle" style="font-size:13px"></i> How to get this
+        </button>
+      </div>
+      <div id="xmlTipBox" class="xml-tip" style="display:none">
+        <p style="font-weight:600;margin-bottom:2px">How to export from your platform:</p>
+        <ul>
+          <li><b>Confirmit:</b> Designer → Export Survey Definition (.zip)</li>
+          <li><b>Decipher:</b> Survey settings → Download XML</li>
+          <li><b>Forsta:</b> Survey settings → Export XML</li>
+          <li><b>Qualtrics:</b> Tools → Import/Export → Export QSF</li>
+        </ul>
+      </div>
+      <div class="qcz" id="xmlZone"
+           onclick="document.getElementById('xmlInput').click()"
+           ondragover="dzOver(event,this)"
+           ondragleave="dzLeave(this)"
+           ondrop="dzDrop(event,this,'xmlInput','xmlPreview')">
+        <i class="ti ti-file-code" style="font-size:28px;color:#9CA3AF"></i>
+        <p style="font-size:13px;color:#6B7280;margin-top:8px;font-weight:500">Drop <b>.xml</b> / <b>.qsf</b> / <b>.zip</b> here, or <span style="color:#C46A2B;text-decoration:underline">browse</span></p>
+        <p style="font-size:11px;color:#9CA3AF;margin-top:4px">Exported from your survey platform admin panel</p>
+      </div>
+      <input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required style="display:none"
+             onchange="dzFilePicked(this,'xmlZone','xmlPreview');updateMeter()">
+      <div id="xmlPreview" class="qcz-preview" style="display:none"></div>
+      <div class="tip-row"><i class="ti ti-bulb"></i><p>Tip: This export is the source of truth — boosts accuracy from ~75% to ~91% by giving AI exact question definitions.</p></div>
+    </div>
+
+    <!-- ── OPTIONAL HELPERS ── -->
+    <div class="sec-hdr">
+      <span style="color:#6B7280">Optional Helpers</span>
+      <hr>
+      <span class="sec-badge" style="background:#F3F4F6;color:#6B7280">Skip if not needed</span>
+    </div>
+
+    <!-- Card 4: Screenshots -->
+    <div class="qc-card" id="card4">
+      <div class="qc-card-hdr">
+        <div class="step-num step-num-opt">4</div>
+        <span class="card-title" style="color:#374151">Screenshots</span>
+        <span style="font-size:11px;color:#9CA3AF;margin-left:4px">(Optional)</span>
+        ''' + pro_badge + '''
+      </div>
+      ''' + ss_body + '''
+    </div>
+
+    <!-- Advanced options -->
+    <div style="margin-bottom:24px">
+      <button type="button" class="adv-btn" onclick="toggleAdv()">
+        <i class="ti ti-settings" style="font-size:14px"></i>
+        Advanced options
+        <i class="ti ti-chevron-down" style="font-size:12px;margin-left:auto" id="advIcon"></i>
+      </button>
+      <div id="advPanel" style="display:none" class="adv-panel">
+        <div class="form-group" style="margin-bottom:14px">
+          <label class="form-label">Country (for screener question)</label>
+          <input type="text" name="country" placeholder="e.g. United Kingdom" class="form-input">
+        </div>
+        <div class="form-group" style="margin-bottom:14px">
+          <label class="form-label">Specific questions only <span style="font-weight:400;color:#9CA3AF">(optional)</span></label>
+          <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12" class="form-input">
+          <p style="font-size:11px;color:#9CA3AF;margin-top:4px">Leave blank for full survey QC</p>
+        </div>
+        <div>
+          <label class="form-label">Checks to run</label>
+          <div class="chk-grid">''' + chk_html + '''</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Run button -->
+    <button type="submit" class="run-btn" id="runBtn">
+      <i class="ti ti-player-play" style="font-size:17px"></i>
+      <span id="runBtnText">Run QC — Takes 3-5 minutes</span>
+    </button>
+    <p class="run-sub" id="runBtnSub">You&#39;ll get a Word report · Typically done in under 5 minutes</p>
+
+  </form>
+
+  ''' + recent_html + '''
+
+</div><!-- /nqc-wrap -->
+
+<div class="mobile-nav"><div class="mobile-nav-inner">
+  <a href="/dashboard" class="mobile-nav-item"><i class="ti ti-home"></i><span>Home</span></a>
+  <a href="/new-qc" class="mobile-nav-item active"><i class="ti ti-plus"></i><span>New QC</span></a>
+  <a href="/reports" class="mobile-nav-item"><i class="ti ti-file-text"></i><span>Reports</span></a>
+  <a href="/settings" class="mobile-nav-item"><i class="ti ti-settings"></i><span>Settings</span></a>
+</div></div>
+
+</div></div><!-- /app-layout -->
+
+<script>
+/* ── Drop zone helpers ────────────────────────── */
+function dzOver(e,el){e.preventDefault();el.classList.add('dz-over')}
+function dzLeave(el){el.classList.remove('dz-over')}
+function dzDrop(e,el,inputId,previewId){
+  e.preventDefault();el.classList.remove('dz-over');
+  var inp=document.getElementById(inputId);
+  if(e.dataTransfer&&e.dataTransfer.files.length){
+    var dt=new DataTransfer();
+    for(var i=0;i<e.dataTransfer.files.length;i++) dt.items.add(e.dataTransfer.files[i]);
+    inp.files=dt.files;
+    dzFilePicked(inp,el.id,previewId,e.dataTransfer.files.length>1);
+  }
+}
+function dzFilePicked(inp,zoneId,previewId,multi){
+  if(!inp.files||!inp.files[0]) return;
+  var zone=document.getElementById(zoneId);
+  var prev=document.getElementById(previewId);
+  if(!zone||!prev) return;
+  var files=inp.files;
+  zone.style.display='none';
+  if(multi&&files.length>1){
+    prev.innerHTML='<i class="ti ti-circle-check" style="font-size:18px;color:#16A34A;flex-shrink:0"></i>'
+      +'<div style="flex:1;min-width:0"><p class="qcz-prev-name">'+files.length+' files selected</p>'
+      +'<p class="qcz-prev-meta">Ready to process</p></div>'
+      +'<button type="button" class="qcz-remove" onclick="dzClear(\''+inp.id+'\',\''+zoneId+'\',\''+previewId+'\')" title="Remove">&times;</button>';
+  } else {
+    var f=files[0];
+    var sz=f.size<1048576?(Math.round(f.size/1024)+'KB'):(Math.round(f.size/1048576*10)/10+'MB');
+    prev.innerHTML='<i class="ti ti-circle-check" style="font-size:18px;color:#16A34A;flex-shrink:0"></i>'
+      +'<div style="flex:1;min-width:0"><p class="qcz-prev-name">'+f.name+'</p>'
+      +'<p class="qcz-prev-meta">'+sz+' &middot; Ready to process</p></div>'
+      +'<button type="button" class="qcz-remove" onclick="dzClear(\''+inp.id+'\',\''+zoneId+'\',\''+previewId+'\')" title="Remove">&times;</button>';
+  }
+  prev.style.display='flex';
+  updateMeter();
+}
+function dzClear(inputId,zoneId,previewId){
+  var inp=document.getElementById(inputId);
+  var zone=document.getElementById(zoneId);
+  var prev=document.getElementById(previewId);
+  if(inp){inp.value='';inp.files=new DataTransfer().files;}
+  if(prev) prev.style.display='none';
+  if(zone) zone.style.display='flex';
+  updateMeter();
+}
+
+/* ── Accuracy meter ───────────────────────────── */
+function updateMeter(){
+  var hasDoc=!!(document.getElementById('docInput')&&document.getElementById('docInput').files.length);
+  var hasXml=!!(document.getElementById('xmlInput')&&document.getElementById('xmlInput').files.length);
+  var urlVal=(document.getElementById('urlInput')&&document.getElementById('urlInput').value||'').trim();
+  var fill=document.getElementById('accFill');
+  var pct=document.getElementById('accPct');
+  var hint=document.getElementById('accHint');
+  var btn=document.getElementById('runBtn');
+  var sub=document.getElementById('runBtnSub');
+  var txt=document.getElementById('runBtnText');
+  if(hasDoc&&hasXml&&urlVal){
+    fill.style.width='91%'; fill.style.background='#16A34A';
+    pct.textContent='91% — Maximum ⚡'; pct.style.color='#16A34A';
+    hint.textContent='All inputs filled. AI will use doc \xb7 XML \xb7 live survey for the deepest comparison.';
+    txt.textContent='Run QC — Enhanced accuracy (~91%)';
+    if(sub) sub.textContent='With XML: 3-5 min \xb7 You’ll get a Word report';
+    btn.className='run-btn btn-full';
+  } else if(hasDoc&&urlVal){
+    fill.style.width='75%'; fill.style.background='#EAB308';
+    pct.textContent='75% — Good'; pct.style.color='#CA8A04';
+    hint.textContent='Add the XML export (Step 3) to boost accuracy from 75% to 91%.';
+    txt.textContent='Run QC — Standard accuracy (~75%)';
+    if(sub) sub.textContent='Without XML: 5-10 min \xb7 You’ll get a Word report';
+    btn.className='run-btn btn-warm';
+  } else if(hasDoc){
+    fill.style.width='40%'; fill.style.background='#9CA3AF';
+    pct.textContent='40% — Basic'; pct.style.color='#9CA3AF';
+    hint.textContent='Add the live survey URL (Step 2) to enable comparison.';
+    txt.textContent='Run QC — Takes 3-5 minutes';
+    if(sub) sub.textContent='You’ll get a Word report';
+    btn.className='run-btn';
+  } else {
+    fill.style.width='0%'; fill.style.background='#E5E7EB';
+    pct.textContent='Fill in required fields'; pct.style.color='#9CA3AF';
+    hint.textContent='Add your spec doc, survey URL, and XML export to reach maximum accuracy.';
+    txt.textContent='Run QC — Takes 3-5 minutes';
+    if(sub) sub.textContent='You’ll get a Word report';
+    btn.className='run-btn';
+  }
+}
+
+/* ── Platform detection ───────────────────────── */
+var platMap=[
+  [/confirmit/i,'Confirmit'],
+  [/decipher/i,'Decipher'],
+  [/forsta|confirmit[.]com.*[/](confirm|wix)/i,'Forsta'],
+  [/qualtrics/i,'Qualtrics'],
+  [/survey[.]monkey|surveymonkey/i,'SurveyMonkey'],
+];
+function detectPlat(v){
+  var badge=document.getElementById('platBadge');
+  if(!badge) return;
+  var found='';
+  for(var i=0;i<platMap.length;i++){if(platMap[i][0].test(v)){found=platMap[i][1];break;}}
+  if(found){badge.textContent='✓ '+found;badge.style.display='inline-block';}
+  else badge.style.display='none';
+}
+function setUrlHint(plat){
+  var hints={confirmit:'https://survey.confirmit.com/wix/',decipher:'https://survey.decipherinc.com/',
+    forsta:'https://survey.forsta.com/',qualtrics:'https://survey.qualtrics.com/'};
+  var inp=document.getElementById('urlInput');
+  if(inp&&!inp.value&&hints[plat]) inp.placeholder='e.g. '+hints[plat]+'...';
+  detectPlat(plat);
+}
+
+/* ── UI toggles ───────────────────────────────── */
 function toggleXmlTip(){
-    var t=document.getElementById("xmlTip");
-    t.style.display=t.style.display==="none"?"block":"none";
+  var t=document.getElementById('xmlTipBox');
+  if(t) t.style.display=t.style.display==='none'?'block':'none';
 }
-function previewFile(input, previewId){
-    var el=document.getElementById(previewId);
-    if(!el) return;
-    if(!input.files||!input.files[0]){el.style.display="none";return;}
-    var f=input.files[0];
-    var sz=f.size<1024*1024?(Math.round(f.size/1024)+"KB"):(Math.round(f.size/1024/1024*10)/10+"MB");
-    el.querySelector("[id$='Name']").textContent=f.name;
-    el.querySelector("[id$='Size']").textContent=sz+" · Ready to process";
-    el.style.display="flex";
+function toggleAdv(){
+  var p=document.getElementById('advPanel');
+  var i=document.getElementById('advIcon');
+  if(!p) return;
+  if(p.style.display==='none'){p.style.display='block';i.className='ti ti-chevron-up';}
+  else{p.style.display='none';i.className='ti ti-chevron-down';}
 }
-function updateBtn(){
-    var hasDoc=document.getElementById("docInput")&&document.getElementById("docInput").files.length>0;
-    var hasXml=document.getElementById("xmlInput")&&document.getElementById("xmlInput").files.length>0;
-    var urlVal=document.getElementById("urlInput")&&document.getElementById("urlInput").value.trim();
-    var btn=document.getElementById("runBtnText");
-    var sub=document.getElementById("runBtnSub");
-    var runBtn=document.getElementById("runBtn");
-    if(!btn) return;
-    if(hasDoc&&hasXml&&urlVal){
-        btn.textContent="Run QC — Enhanced accuracy (~91%)";
-        if(sub) sub.textContent="With XML: 3-5 min \xb7 Word report";
-        if(runBtn){runBtn.style.background="";runBtn.style.background="#042C53";}
-    } else if(hasDoc&&urlVal){
-        btn.textContent="Run QC — Standard accuracy (~75%)";
-        if(sub) sub.textContent="Without XML: 5-10 min \xb7 Word report";
-        if(runBtn){runBtn.style.background="#C46A2B";}
-    } else {
-        btn.textContent="Run QC — Takes 3-5 minutes";
-        if(sub) sub.textContent="You\'ll get a Word report";
-        if(runBtn){runBtn.style.background="";}
-    }
-}
-document.addEventListener("DOMContentLoaded",function(){
-    var urlEl=document.getElementById("urlInput");
-    var docEl=document.getElementById("docInput");
-    if(urlEl) urlEl.addEventListener("input",updateBtn);
-    if(docEl) docEl.addEventListener("change",function(){previewFile(docEl,"docPreview");updateBtn();});
+
+/* ── Submit loading state ─────────────────────── */
+document.getElementById('qcForm').addEventListener('submit',function(){
+  var btn=document.getElementById('runBtn');
+  var txt=document.getElementById('runBtnText');
+  if(btn){btn.disabled=true;btn.style.opacity='.75';}
+  if(txt) txt.textContent='Processing your files…';
 });
-</script>'''
-    page += '</body></html>'
+
+document.addEventListener('DOMContentLoaded', updateMeter);
+</script>
+</body></html>'''
+
     return render_template_string(page)
 
 
