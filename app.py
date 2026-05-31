@@ -323,20 +323,14 @@ a{text-decoration:none;color:inherit}
     </a>
     <div class="auth-left-content">
       <h2>Welcome back to<br>perfect survey QC.</h2>
-      <div class="auth-quote">
-        <p>"8 hours of manual QC now takes 10 minutes. Caught a termination bug that would have killed our entire dataset."</p>
-        <div class="auth-quote-author">
-          <div class="auth-quote-avatar">ST</div>
-          <div>
-            <div class="auth-quote-name">Sarah Thompson</div>
-            <div class="auth-quote-role">QC Manager, Ipsos UK</div>
-          </div>
-        </div>
+      <div style="margin-top:24px">
+        <p style="font-size:16px;font-weight:600;color:#F7F4EE;margin-bottom:8px">Built for survey QC professionals.</p>
+        <p style="font-size:14px;color:#9A8C7B;line-height:1.7">Catch every survey bug before your data is collected — termination logic, question text, piping, mandatory markers, and more.</p>
       </div>
     </div>
     <div class="auth-stats">
-      <div><div class="auth-stat-num">500+</div><div class="auth-stat-lbl">QC professionals</div></div>
-      <div><div class="auth-stat-num">99%</div><div class="auth-stat-lbl">Accuracy rate</div></div>
+      <div><div class="auth-stat-num">15+</div><div class="auth-stat-lbl">QC checks</div></div>
+      <div><div class="auth-stat-num">4</div><div class="auth-stat-lbl">Platforms</div></div>
       <div><div class="auth-stat-num">80+</div><div class="auth-stat-lbl">Languages</div></div>
     </div>
   </div>
@@ -454,9 +448,9 @@ a{text-decoration:none;color:inherit}
       </ul>
     </div>
     <div class="auth-stats">
-      <div><div class="auth-stat-num">500+</div><div class="auth-stat-lbl">QC professionals</div></div>
-      <div><div class="auth-stat-num">8h</div><div class="auth-stat-lbl">Saved per survey</div></div>
-      <div><div class="auth-stat-num">99%</div><div class="auth-stat-lbl">Accuracy</div></div>
+      <div><div class="auth-stat-num">15+</div><div class="auth-stat-lbl">QC checks</div></div>
+      <div><div class="auth-stat-num">4</div><div class="auth-stat-lbl">Platforms</div></div>
+      <div><div class="auth-stat-num">80+</div><div class="auth-stat-lbl">Languages</div></div>
     </div>
   </div>
   <div class="auth-right">
@@ -553,19 +547,9 @@ def dashboard():
 
     <div class="time-saved-banner">
       <div>
-        <p style="font-size:11px;color:var(--text3);margin-bottom:5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase">This month you saved</p>
-        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
-          <p style="font-size:32px;font-weight:800;color:#2E8B57;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-0.5px">{saved} hours</p>
-          <p style="font-size:13px;color:var(--green);font-weight:500">= {saved//8 if saved > 0 else 0} full working days back in your life</p>
-        </div>
-        <p style="font-size:11px;color:var(--text3)">{reports_used} surveys completed — manual would take {reports_used*8}h, SurveyQC did it in {reports_used} mins</p>
+        {"<p style='font-size:11px;color:var(--text3);margin-bottom:5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase'>This month you saved</p><div style='display:flex;align-items:baseline;gap:10px;margin-bottom:4px'><p style='font-size:32px;font-weight:800;color:#2E8B57;font-family:Plus Jakarta Sans,sans-serif;letter-spacing:-0.5px'>" + str(reports_used * 8) + " hours</p><p style='font-size:13px;color:var(--green);font-weight:500'>= " + str(reports_used) + " full working days back in your life</p></div><p style='font-size:11px;color:var(--text3)'>" + str(reports_used) + " surveys completed — manual would take " + str(reports_used*8) + "h, SurveyQC did it in " + str(reports_used) + " mins</p>" if reports_used > 0 else "<p style='font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px'>Welcome to SurveyQC!</p><p style='font-size:13px;color:var(--text3);line-height:1.6'>Run your first QC to see how much time you save here.</p>"}
       </div>
-      <div style="text-align:center">
-        <div style="background:rgba(255,255,255,.1);border-radius:10px;padding:10px 18px">
-          <p style="font-size:20px;font-weight:600;color:var(--text)">{max(1,reports_used*8)}x</p>
-          <p style="font-size:10px;color:var(--text3)">ROI on plan</p>
-        </div>
-      </div>
+      {"<div style='text-align:center'><div style='background:rgba(255,255,255,.1);border-radius:10px;padding:10px 18px'><p style='font-size:20px;font-weight:600;color:var(--text)'>" + str(reports_used * 8) + "x</p><p style='font-size:10px;color:var(--text3)'>ROI on plan</p></div></div>" if reports_used > 0 and user.get('plan','Free') != 'Free' else ""}
     </div>
 
     <div class="stats-grid">
@@ -596,9 +580,9 @@ def dashboard():
               <i class="ti ti-plus" style="font-size:20px;color:var(--purple)"></i>
               <p style="font-size:11px;color:var(--text);margin-top:5px;font-weight:500">New QC</p>
             </a>
-            <a href="/ai-tester" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
-              <i class="ti ti-robot" style="font-size:20px;color:#EF9F27"></i>
-              <p style="font-size:11px;color:var(--text);margin-top:5px;font-weight:500">AI Tester</p>
+            <a href="/retest" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
+              <i class="ti ti-refresh" style="font-size:20px;color:#EF9F27"></i>
+              <p style="font-size:11px;color:var(--text);margin-top:5px;font-weight:500">Re-test</p>
             </a>
             <a href="/reports" style="text-decoration:none;padding:12px;background:rgba(255,255,255,.04);border-radius:8px;text-align:center;display:block">
               <i class="ti ti-file-report" style="font-size:20px;color:#1D9E75"></i>
@@ -632,378 +616,334 @@ def new_qc():
     user = get_current_user()
     plan = user.get('plan','Free') if user else 'Free'
     sb = sidebar_html('new-qc')
-    email = session.get('user_email','')
     is_pro = plan in ('Pro','Business','Enterprise')
 
-    # Recent reports mini list data
-    recent = [(jid,j) for jid,j in list(jobs.items()) if j.get('user_email')==email][-3:]
-
-    # Screenshots section html (plan-aware)
+    # Screenshots card body — compact, plan-aware
     if not is_pro:
         ss_body = (
-            '<div style="display:flex;align-items:center;gap:8px;background:#FEF3E2;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
-            '<i class="ti ti-lock" style="font-size:14px;color:#C46A2B;flex-shrink:0"></i>'
-            '<p style="font-size:12px;color:#7C3D0A">Screenshot QC is Pro+ only. '
+            '<div style="display:flex;align-items:center;gap:7px;background:#FEF3E2;'
+            'border-radius:7px;padding:7px 10px;margin-bottom:8px">'
+            '<i class="ti ti-lock" style="font-size:13px;color:#C46A2B;flex-shrink:0"></i>'
+            '<p style="font-size:11px;color:#7C3D0A">Pro+ only. '
             '<a href="/billing" style="color:#042C53;font-weight:600">Upgrade &rarr;</a></p></div>'
-            '<div class="qcz qcz-disabled"><i class="ti ti-camera" style="font-size:24px;color:#D1D5DB"></i>'
-            '<p style="font-size:13px;color:#9CA3AF;margin-top:6px">Upgrade to Pro to unlock</p></div>'
+            '<div class="dz dz-sm dz-off">'
+            '<i class="ti ti-camera" style="font-size:20px;color:#D1D5DB"></i>'
+            '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">Upgrade to unlock</p></div>'
             '<input type="file" name="screenshots" accept="image/*" multiple disabled style="display:none">'
         )
     else:
         ss_body = (
-            '<div class="qcz" id="ssZone" onclick="document.getElementById(\'ssInput\').click()"'
-            ' ondragover="dzOver(event,this)" ondragleave="dzLeave(this)" ondrop="dzDrop(event,this,\'ssInput\',\'ssPreview\')">'
-            '<i class="ti ti-camera" style="font-size:26px;color:#9CA3AF"></i>'
-            '<p style="font-size:13px;color:#6B7280;margin-top:8px;font-weight:500">Drop screenshots here, or <span style="color:#C46A2B;text-decoration:underline">browse</span></p>'
-            '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">WhatsApp screenshots · Multiple files OK</p></div>'
-            '<input type="file" name="screenshots" id="ssInput" accept="image/*" multiple style="display:none"'
-            ' onchange="dzFilePicked(this,\'ssZone\',\'ssPreview\',true)">'
-            '<div id="ssPreview" class="qcz-preview" style="display:none"></div>'
+            '<div class="dz dz-sm" id="ssZone"'
+            ' onclick="document.getElementById(\'ssInput\').click()"'
+            ' ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"'
+            ' ondrop="dzDrop(event,this,\'ssInput\',\'ssDone\',true)">'
+            '<i class="ti ti-camera" style="font-size:20px;color:#9CA3AF"></i>'
+            '<p style="font-size:11px;color:#6B7280;margin-top:4px">'
+            'Drop screenshots or <span style="color:#C46A2B;text-decoration:underline">browse</span>'
+            ' <span style="color:#D1D5DB">&middot;</span> Multiple OK</p></div>'
+            '<input type="file" name="screenshots" id="ssInput" accept="image/*" multiple'
+            ' style="display:none" onchange="dzPick(this,\'ssZone\',\'ssDone\',true)">'
+            '<div id="ssDone" class="dz-done" style="display:none"></div>'
         )
+
+    pro_badge = ('<span style="font-size:10px;background:#E6F1FB;color:#0C447C;'
+                 'padding:2px 7px;border-radius:20px;font-weight:600;margin-left:4px">Pro+</span>'
+                 if not is_pro else '')
 
     # Checkboxes
     chk_items = [
-        ('chk_term','Termination rules'),('chk_text','Question text'),
+        ('chk_term','Termination'),('chk_text','Question text'),
         ('chk_words','Missing words'),('chk_options','Options match'),
-        ('chk_mandatory','Mandatory markers'),('chk_piping','Piping markers'),
+        ('chk_mandatory','Mandatory'),('chk_piping','Piping'),
         ('chk_codes','Answer codes'),('chk_order','Question order'),
     ]
     chk_html = ''.join(
         f'<label class="qc-chk"><input type="checkbox" name="{n}" value="1" checked>{lbl}</label>'
-        for n,lbl in chk_items
+        for n, lbl in chk_items
     )
-
-    # Recent reports html
-    recent_html = ''
-    if recent:
-        recent_html = '<div style="max-width:720px;margin-top:24px"><p style="font-size:12px;font-weight:600;color:#9CA3AF;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Recent reports</p>'
-        for jid,j in reversed(recent):
-            st = j.get('status','unknown')
-            if st == 'done':   bdg = '<span class="rbadge rbadge-done">Done</span>'
-            elif st == 'running': bdg = '<span class="rbadge rbadge-run">Running</span>'
-            else:              bdg = '<span class="rbadge rbadge-err">Error</span>'
-            recent_html += (
-                f'<div class="rrow">'
-                f'<i class="ti ti-file-report" style="font-size:15px;color:#9CA3AF;flex-shrink:0"></i>'
-                f'<p style="font-size:13px;color:#374151;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{j.get("doc_name","Unknown")[:50]}</p>'
-                f'{bdg}<a href="/report/{jid}" style="font-size:12px;color:#185FA5;flex-shrink:0;white-space:nowrap">View &rarr;</a></div>'
-            )
-        recent_html += '</div>'
-
-    pro_badge = '<span style="font-size:10px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:20px;font-weight:600;margin-left:auto">Pro+</span>' if not is_pro else ''
 
     page = SHARED_CSS + '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>New QC Analysis — SurveyQC</title>
+<title>New QC — SurveyQC</title>
 <style>
-/* ── New QC premium styles ─────────────────────────────── */
-.nqc-wrap{max-width:720px}
-.nqc-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:28px}
-.nqc-stat{background:white;border:1px solid #EEF0F3;border-radius:12px;padding:14px 16px;
-  display:flex;align-items:center;gap:11px;
-  box-shadow:0 1px 3px rgba(0,0,0,.04);
-  transition:transform .15s,box-shadow .15s;cursor:default}
-.nqc-stat:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
-.nqc-stat-icon{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+/* ── compact 2-col new-qc ─────────────────────── */
+.nqc-outer{max-width:900px}
 
-/* Accuracy meter */
-.acc-wrap{background:white;border:1px solid #EEF0F3;border-radius:14px;
-  padding:18px 22px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.acc-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.acc-label{font-size:13px;font-weight:600;color:#374151}
-.acc-pct{font-size:13px;font-weight:700}
-.acc-track{height:8px;background:#F3F4F6;border-radius:99px;overflow:hidden;position:relative}
-.acc-fill{height:100%;border-radius:99px;transition:width .4s ease,background .4s ease}
-.acc-hint{font-size:11px;color:#9CA3AF;margin-top:8px}
+/* 2-column grid */
+.nqc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px}
+.nqc-col{display:flex;flex-direction:column;gap:10px}
 
-/* Section dividers */
-.sec-hdr{display:flex;align-items:center;gap:10px;margin:28px 0 16px}
-.sec-hdr span{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap}
-.sec-hdr hr{flex:1;border:none;border-top:1px solid #EEF0F3;margin:0}
-.sec-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+/* cards */
+.nc{background:white;border:1px solid #EEF0F3;border-radius:11px;
+  padding:13px 15px;box-shadow:0 1px 3px rgba(0,0,0,.04);
+  transition:border-color .15s}
+.nc:focus-within{border-color:#C46A2B;box-shadow:0 0 0 3px rgba(196,106,43,.07)}
+.nc-hdr{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+.nc-step{width:20px;height:20px;border-radius:50%;background:#042C53;color:white;
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;flex-shrink:0}
+.nc-step-opt{background:#9CA3AF}
+.nc-lbl{font-size:13px;font-weight:600;color:#1A1A2E;line-height:1}
+.nc-req{color:#E24B4A}
+.nc-acc{font-size:10px;font-weight:700;background:#DCFCE7;color:#166534;
+  padding:1px 7px;border-radius:20px;margin-left:3px}
+.nc-opt{font-size:11px;color:#9CA3AF;margin-left:2px}
 
-/* Input cards */
-.qc-card{background:white;border:1px solid #EEF0F3;border-radius:14px;
-  padding:20px 22px;margin-bottom:14px;
-  box-shadow:0 1px 3px rgba(0,0,0,.04);transition:border-color .2s}
-.qc-card:focus-within{border-color:#C46A2B}
-.qc-card-hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-.step-num{width:24px;height:24px;border-radius:50%;background:#042C53;color:white;
-  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
-.step-num-opt{background:#D1D5DB}
-.card-title{font-size:14px;font-weight:600;color:#1A1A2E}
-.card-badge{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;margin-left:4px}
-.card-badge-acc{background:#DCFCE7;color:#166534}
-.tip-row{display:flex;align-items:flex-start;gap:6px;margin-top:10px}
-.tip-row i{font-size:13px;color:#C46A2B;margin-top:1px;flex-shrink:0}
-.tip-row p{font-size:11px;color:#6B7280;line-height:1.5}
-
-/* Drop zones */
-.qcz{border:1.5px dashed #D1D5DB;border-radius:10px;padding:28px 20px;
+/* compact drop zones */
+.dz{border:1.5px dashed #D1D5DB;border-radius:8px;min-height:90px;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  cursor:pointer;transition:border-color .2s,background .2s;text-align:center;
-  background:#FAFAFA;user-select:none}
-.qcz:hover{border-color:#C46A2B;background:#FEF9F5}
-.qcz.dz-over{border-color:#C46A2B;background:#FEF3E2;border-style:solid}
-.qcz-disabled{border:1.5px dashed #E5E7EB;border-radius:10px;padding:22px 20px;
-  display:flex;flex-direction:column;align-items:center;background:#F9FAFB;text-align:center}
-.qcz-preview{margin-top:10px;padding:10px 14px;background:#F0FAF4;
-  border:1px solid #A7D7B8;border-radius:9px;display:flex;align-items:center;gap:10px}
-.qcz-prev-name{font-size:12px;font-weight:600;color:#1A1A2E;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.qcz-prev-meta{font-size:11px;color:#6B7280;margin-top:2px}
-.qcz-remove{margin-left:auto;background:none;border:none;cursor:pointer;
-  color:#9CA3AF;font-size:16px;padding:0 2px;flex-shrink:0;line-height:1}
-.qcz-remove:hover{color:#DC2626}
+  cursor:pointer;background:#FAFAFA;text-align:center;padding:8px 12px;
+  transition:border-color .15s,background .15s;user-select:none}
+.dz:hover{border-color:#C46A2B;background:#FEF9F5}
+.dz.dz-over{border-color:#C46A2B;background:#FEF3E2;border-style:solid}
+.dz.dz-sm{min-height:74px}
+.dz.dz-off{cursor:default;opacity:.7}
+.dz.dz-off:hover{border-color:#D1D5DB;background:#FAFAFA}
 
-/* URL field with platform badge */
-.url-wrap{position:relative}
-.url-badge{position:absolute;right:12px;top:50%;transform:translateY(-50%);
-  font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px;
-  background:#DCFCE7;color:#166534;display:none;pointer-events:none}
-.url-input{width:100%;padding:11px 14px;padding-right:110px;
-  border:1px solid #DDE1E7;border-radius:9px;font-size:13px;
-  color:#374151;font-family:inherit;outline:none;transition:border-color .2s}
-.url-input:focus{border-color:#C46A2B;box-shadow:0 0 0 3px rgba(196,106,43,.1)}
-.plat-pills{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
-.plat-pill{font-size:11px;background:#F3F4F6;color:#6B7280;padding:3px 11px;
-  border-radius:6px;font-weight:500;cursor:pointer;transition:background .15s}
-.plat-pill:hover{background:#EEF0F3;color:#374151}
+/* uploaded strip */
+.dz-done{display:flex;align-items:center;gap:8px;padding:8px 10px;
+  background:#F0FAF4;border:1px solid #A7D7B8;border-radius:8px;
+  margin-top:0}
+.dz-dn{font-size:11px;font-weight:600;color:#1A1A2E;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.dz-dm{font-size:10px;color:#6B7280}
+.dz-rm{background:none;border:none;cursor:pointer;color:#9CA3AF;
+  font-size:14px;padding:0;flex-shrink:0;line-height:1}
+.dz-rm:hover{color:#DC2626}
 
-/* XML tooltip */
-.xml-tip{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:9px;
-  padding:12px 14px;margin-bottom:12px;font-size:12px;color:#1E3A5F}
-.xml-tip ul{margin:6px 0 0;padding-left:18px;line-height:1.9}
-.xml-tip-btn{background:none;border:none;cursor:pointer;color:#9CA3AF;
-  padding:0 4px;display:flex;align-items:center;gap:3px;font-size:11px;font-family:inherit}
-.xml-tip-btn:hover{color:#374151}
+/* URL field */
+.url-inp{width:100%;padding:9px 11px;border:1px solid #DDE1E7;border-radius:8px;
+  font-size:13px;color:#374151;font-family:inherit;outline:none;
+  transition:border-color .15s;box-sizing:border-box}
+.url-inp:focus{border-color:#C46A2B;box-shadow:0 0 0 3px rgba(196,106,43,.08)}
+.plat-pills{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+.pp{font-size:10px;background:#F3F4F6;color:#6B7280;padding:2px 8px;
+  border-radius:5px;cursor:pointer;border:none;font-family:inherit;
+  transition:background .12s}
+.pp:hover{background:#E5E7EB;color:#374151}
 
-/* Run button */
-.run-btn{width:100%;padding:15px;font-size:15px;font-weight:700;border-radius:11px;
+/* xml tooltip */
+.xml-tb{background:none;border:none;cursor:pointer;color:#9CA3AF;
+  font-size:10px;font-family:inherit;padding:0;margin-left:auto;
+  display:flex;align-items:center;gap:2px}
+.xml-tb:hover{color:#374151}
+.xml-tip{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:7px;
+  padding:9px 11px;margin-bottom:8px;font-size:11px;color:#1E3A5F;line-height:1.5}
+.xml-tip ul{margin:3px 0 0;padding-left:15px}
+
+/* slim accuracy strip */
+.acc-strip{display:flex;align-items:center;gap:10px;padding:7px 13px;
+  background:white;border:1px solid #EEF0F3;border-radius:8px;
+  margin-bottom:9px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.acc-bar{flex:1;height:4px;background:#F3F4F6;border-radius:99px;overflow:hidden}
+.acc-fill{height:100%;border-radius:99px;transition:width .4s ease,background .4s ease}
+.acc-lbl{font-size:11px;font-weight:600;white-space:nowrap}
+
+/* run button */
+.run-btn{width:100%;padding:13px;font-size:14px;font-weight:700;border-radius:9px;
   border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
-  gap:10px;transition:background .3s,box-shadow .2s;color:white;
-  background:#042C53;box-shadow:0 4px 14px rgba(4,44,83,.25)}
-.run-btn:hover{box-shadow:0 6px 20px rgba(4,44,83,.35);transform:translateY(-1px)}
+  gap:8px;color:white;background:#042C53;
+  box-shadow:0 3px 10px rgba(4,44,83,.22);
+  transition:background .3s,box-shadow .15s,transform .1s}
+.run-btn:hover{box-shadow:0 5px 16px rgba(4,44,83,.3);transform:translateY(-1px)}
 .run-btn:active{transform:translateY(0)}
 .run-btn.btn-warm{background:linear-gradient(135deg,#C46A2B,#D97706);
-  box-shadow:0 4px 14px rgba(196,106,43,.3)}
-.run-btn.btn-full{background:linear-gradient(135deg,#042C53,#0F5132);
-  box-shadow:0 4px 14px rgba(4,44,83,.3)}
-.run-sub{font-size:12px;color:#9CA3AF;text-align:center;margin-top:10px}
+  box-shadow:0 3px 10px rgba(196,106,43,.28)}
+.run-btn.btn-full{background:linear-gradient(135deg,#0F5132,#042C53);
+  box-shadow:0 3px 10px rgba(15,81,50,.28)}
 
-/* Advanced */
-.adv-btn{background:none;border:1px solid #EEF0F3;border-radius:8px;
-  color:#6B7280;font-size:12px;cursor:pointer;display:flex;align-items:center;
-  gap:6px;padding:8px 14px;font-family:inherit;width:100%;transition:background .15s}
-.adv-btn:hover{background:#F8F9FA;color:#374151}
-.adv-panel{margin-top:12px;padding:18px;background:#F8F9FA;
-  border-radius:10px;border:1px solid #EEF0F3}
-.qc-chk{display:flex;align-items:center;gap:8px;font-size:12px;
-  color:#374151;cursor:pointer;padding:2px 0}
-.qc-chk input{accent-color:#042C53;width:14px;height:14px;flex-shrink:0}
-.chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+/* sub row */
+.run-sub{font-size:11px;color:#9CA3AF;text-align:center;margin-top:7px;
+  display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
+.adv-lnk{background:none;border:none;cursor:pointer;font-size:11px;color:#9CA3AF;
+  font-family:inherit;padding:0;text-decoration:underline;text-underline-offset:2px}
+.adv-lnk:hover{color:#374151}
 
-/* Recent reports */
-.rrow{background:white;border:1px solid #EEF0F3;border-radius:9px;
-  padding:11px 14px;margin-bottom:7px;display:flex;align-items:center;gap:10px}
-.rbadge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500;flex-shrink:0}
-.rbadge-done{background:#EAF3DE;color:#27500A}
-.rbadge-run{background:#E6F1FB;color:#0C447C}
-.rbadge-err{background:#FCEBEB;color:#791F1F}
+/* advanced panel */
+.adv-panel{margin-top:10px;padding:13px;background:#F8F9FA;
+  border-radius:8px;border:1px solid #EEF0F3}
+.qc-chk{display:flex;align-items:center;gap:6px;font-size:11px;
+  color:#374151;cursor:pointer}
+.qc-chk input{accent-color:#042C53;width:12px;height:12px;flex-shrink:0}
+.chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px}
 
+@media(max-width:1024px){
+  .nqc-grid{grid-template-columns:1fr}
+  .nqc-outer{max-width:540px}
+}
 @media(max-width:640px){
-  .nqc-stat-grid{grid-template-columns:1fr 1fr}
   .chk-grid{grid-template-columns:1fr}
+  .adv-2col{grid-template-columns:1fr !important}
 }
 </style>
 </head>
 <body>
-''' + f'<div class="app-layout">{sb}<div class="main-content">' + '''
+''' + f'<div class="app-layout">{sb}<div class="main-content" style="padding-top:0">' + '''
 
-<div class="topbar">
+<div class="topbar" style="padding-top:16px;padding-bottom:10px">
   <div>
-    <p class="page-title">New QC Analysis</p>
-    <p class="page-sub">Upload your files. AI compares everything and finds issues.</p>
+    <p class="page-title" style="font-size:19px;margin-bottom:1px">New QC</p>
+    <p class="page-sub" style="font-size:12px">Upload your files. AI handles everything.</p>
   </div>
 </div>
 
-<div class="nqc-wrap">
+<div class="nqc-outer">
+<form action="/run-qc" method="POST" enctype="multipart/form-data" id="qcForm">
 
-  <!-- Stat cards -->
-  <div class="nqc-stat-grid">
-    <div class="nqc-stat">
-      <div class="nqc-stat-icon" style="background:#E6F1FB"><i class="ti ti-x-octagon" style="font-size:17px;color:#185FA5"></i></div>
-      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Termination</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">Every rule clicked</p></div>
-    </div>
-    <div class="nqc-stat">
-      <div class="nqc-stat-icon" style="background:#E1F5EE"><i class="ti ti-text-recognition" style="font-size:17px;color:#0F6E56"></i></div>
-      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Missing Words</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">Word-by-word check</p></div>
-    </div>
-    <div class="nqc-stat">
-      <div class="nqc-stat-icon" style="background:#EAF3DE"><i class="ti ti-list-check" style="font-size:17px;color:#3B6D11"></i></div>
-      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Text Match</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">vs spec doc</p></div>
-    </div>
-    <div class="nqc-stat">
-      <div class="nqc-stat-icon" style="background:#EEEDFE"><i class="ti ti-camera" style="font-size:17px;color:#534AB7"></i></div>
-      <div><p style="font-size:12px;font-weight:600;color:#1A1A2E">Screenshots</p><p style="font-size:11px;color:#9CA3AF;margin-top:1px">Every question</p></div>
-    </div>
-  </div>
+  <div class="nqc-grid">
 
-  <!-- Accuracy meter -->
-  <div class="acc-wrap">
-    <div class="acc-row">
-      <span class="acc-label">Estimated accuracy</span>
-      <span class="acc-pct" id="accPct" style="color:#9CA3AF">Fill in required fields</span>
-    </div>
-    <div class="acc-track">
+    <!-- ── LEFT COLUMN ── -->
+    <div class="nqc-col">
+
+      <!-- 1: Spec Doc -->
+      <div class="nc">
+        <div class="nc-hdr">
+          <div class="nc-step">1</div>
+          <span class="nc-lbl">Spec Document <span class="nc-req">*</span></span>
+        </div>
+        <div class="dz" id="docZone"
+             onclick="document.getElementById('docInput').click()"
+             ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
+             ondrop="dzDrop(event,this,'docInput','docDone')">
+          <i class="ti ti-file-word" style="font-size:22px;color:#9CA3AF"></i>
+          <p style="font-size:12px;color:#6B7280;margin-top:5px">
+            Drop <b>.docx</b> or <span style="color:#C46A2B;text-decoration:underline">browse</span>
+          </p>
+        </div>
+        <input type="file" name="doc" id="docInput" accept=".docx" required style="display:none"
+               onchange="dzPick(this,'docZone','docDone')">
+        <div id="docDone" class="dz-done" style="display:none"></div>
+      </div>
+
+      <!-- 2: URL -->
+      <div class="nc">
+        <div class="nc-hdr">
+          <div class="nc-step">2</div>
+          <span class="nc-lbl">Live Survey URL <span class="nc-req">*</span></span>
+          <span id="platBadge" style="display:none;font-size:10px;font-weight:600;
+            padding:1px 7px;border-radius:5px;background:#DCFCE7;color:#166534;
+            margin-left:auto;white-space:nowrap"></span>
+        </div>
+        <input type="url" name="url" id="urlInput" required class="url-inp"
+               placeholder="https://survey.confirmit.com/..."
+               oninput="detectPlat(this.value);updateMeter()">
+        <div class="plat-pills">
+          <button type="button" class="pp" onclick="setUrlHint('confirmit')">Confirmit</button>
+          <button type="button" class="pp" onclick="setUrlHint('decipher')">Decipher</button>
+          <button type="button" class="pp" onclick="setUrlHint('forsta')">Forsta</button>
+          <button type="button" class="pp" onclick="setUrlHint('qualtrics')">Qualtrics</button>
+        </div>
+      </div>
+
+    </div><!-- /LEFT -->
+
+    <!-- ── RIGHT COLUMN ── -->
+    <div class="nqc-col">
+
+      <!-- 3: XML Export -->
+      <div class="nc">
+        <div class="nc-hdr">
+          <div class="nc-step">3</div>
+          <span class="nc-lbl">Survey Export <span class="nc-req">*</span></span>
+          <span class="nc-acc">&#9889; +15%</span>
+          <button type="button" class="xml-tb" onclick="toggleXmlTip()">
+            <i class="ti ti-info-circle" style="font-size:11px"></i> How to get
+          </button>
+        </div>
+        <div id="xmlTipBox" class="xml-tip" style="display:none">
+          <b>Export from your platform:</b>
+          <ul>
+            <li><b>Confirmit:</b> Designer &rarr; Export Survey Definition (.zip)</li>
+            <li><b>Decipher:</b> Survey settings &rarr; Download XML</li>
+            <li><b>Forsta:</b> Survey settings &rarr; Export XML</li>
+            <li><b>Qualtrics:</b> Tools &rarr; Import/Export &rarr; Export QSF</li>
+          </ul>
+        </div>
+        <div class="dz" id="xmlZone"
+             onclick="document.getElementById('xmlInput').click()"
+             ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
+             ondrop="dzDrop(event,this,'xmlInput','xmlDone')">
+          <i class="ti ti-file-code" style="font-size:22px;color:#9CA3AF"></i>
+          <p style="font-size:12px;color:#6B7280;margin-top:5px">
+            Drop <b>.xml</b> / <b>.qsf</b> / <b>.zip</b> or
+            <span style="color:#C46A2B;text-decoration:underline">browse</span>
+          </p>
+        </div>
+        <input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required
+               style="display:none"
+               onchange="dzPick(this,'xmlZone','xmlDone');updateMeter()">
+        <div id="xmlDone" class="dz-done" style="display:none"></div>
+      </div>
+
+      <!-- 4: Screenshots collapsible -->
+      <div>
+        <button type="button" onclick="toggleSS()" id="ssToggleBtn"
+          style="display:flex;align-items:center;gap:6px;background:#FAFAFA;border:1px solid #EEF0F3;border-radius:8px;padding:8px 12px;cursor:pointer;width:100%;font-family:inherit;transition:background .12s">
+          <div class="nc-step nc-step-opt" style="width:18px;height:18px;font-size:9px">4</div>
+          <span style="font-size:12px;font-weight:600;color:#6B7280">Screenshots</span>
+          <span class="nc-opt" style="font-size:11px">(Optional)</span>
+          ''' + pro_badge + '''
+          <span id="ssChev" style="margin-left:auto;color:#9CA3AF;font-size:11px">&#9660;</span>
+        </button>
+        <div id="ssPanel" style="display:none;margin-top:6px" class="nc">
+          ''' + ss_body + '''
+        </div>
+      </div>
+
+    </div><!-- /RIGHT -->
+
+  </div><!-- /nqc-grid -->
+
+  <!-- Slim accuracy strip -->
+  <div class="acc-strip">
+    <div class="acc-bar">
       <div class="acc-fill" id="accFill" style="width:0%;background:#E5E7EB"></div>
     </div>
-    <p class="acc-hint" id="accHint">Add your spec doc, survey URL, and XML export to reach maximum accuracy.</p>
+    <span class="acc-lbl" id="accLbl" style="color:#9CA3AF">Fill in fields above</span>
   </div>
 
-  <!-- Form -->
-  <form action="/run-qc" method="POST" enctype="multipart/form-data" id="qcForm">
+  <!-- Run button -->
+  <button type="submit" class="run-btn" id="runBtn">
+    <i class="ti ti-player-play" style="font-size:15px"></i>
+    <span id="runBtnText">Run QC &#8212; Takes 3-5 minutes</span>
+  </button>
 
-    <!-- ── REQUIRED INPUTS ── -->
-    <div class="sec-hdr">
-      <span style="color:#042C53">Required Inputs</span>
-      <hr>
-      <span class="sec-badge" style="background:#FEE2E2;color:#991B1B">All 3 required</span>
-    </div>
-
-    <!-- Card 1: Spec Doc -->
-    <div class="qc-card" id="card1">
-      <div class="qc-card-hdr">
-        <div class="step-num">1</div>
-        <span class="card-title">Spec Document <span style="color:#E24B4A">*</span></span>
-      </div>
-      <div class="qcz" id="docZone"
-           onclick="document.getElementById('docInput').click()"
-           ondragover="dzOver(event,this)"
-           ondragleave="dzLeave(this)"
-           ondrop="dzDrop(event,this,'docInput','docPreview')">
-        <i class="ti ti-file-word" style="font-size:28px;color:#9CA3AF"></i>
-        <p style="font-size:13px;color:#6B7280;margin-top:8px;font-weight:500">Drop your <b>.docx</b> here, or <span style="color:#C46A2B;text-decoration:underline">browse</span></p>
-        <p style="font-size:11px;color:#9CA3AF;margin-top:4px">Screener or spec document · Word format</p>
-      </div>
-      <input type="file" name="doc" id="docInput" accept=".docx" required style="display:none"
-             onchange="dzFilePicked(this,'docZone','docPreview')">
-      <div id="docPreview" class="qcz-preview" style="display:none"></div>
-      <div class="tip-row"><i class="ti ti-bulb"></i><p>Tip: Most common format is .docx with PROG TABLE rows for each question.</p></div>
-    </div>
-
-    <!-- Card 2: Live URL -->
-    <div class="qc-card" id="card2">
-      <div class="qc-card-hdr">
-        <div class="step-num">2</div>
-        <span class="card-title">Live Survey URL <span style="color:#E24B4A">*</span></span>
-        <span id="platBadge" style="display:none;font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px;background:#DCFCE7;color:#166534;margin-left:auto"></span>
-      </div>
-      <div class="url-wrap">
-        <input type="url" name="url" id="urlInput" required class="url-input"
-               placeholder="https://survey.confirmit.com/wix/..."
-               oninput="detectPlat(this.value);updateMeter()">
-      </div>
-      <div class="plat-pills">
-        <span class="plat-pill" onclick="setUrlHint('confirmit')">Confirmit</span>
-        <span class="plat-pill" onclick="setUrlHint('decipher')">Decipher</span>
-        <span class="plat-pill" onclick="setUrlHint('forsta')">Forsta</span>
-        <span class="plat-pill" onclick="setUrlHint('qualtrics')">Qualtrics</span>
-      </div>
-      <div class="tip-row"><i class="ti ti-bulb"></i><p>Tip: Use the test/preview link, not the production link — so AI can navigate freely.</p></div>
-    </div>
-
-    <!-- Card 3: XML Export -->
-    <div class="qc-card" id="card3">
-      <div class="qc-card-hdr">
-        <div class="step-num">3</div>
-        <span class="card-title">Survey Export <span style="color:#E24B4A">*</span></span>
-        <span class="card-badge card-badge-acc">+15% accuracy</span>
-        <button type="button" class="xml-tip-btn" onclick="toggleXmlTip()" style="margin-left:auto">
-          <i class="ti ti-info-circle" style="font-size:13px"></i> How to get this
-        </button>
-      </div>
-      <div id="xmlTipBox" class="xml-tip" style="display:none">
-        <p style="font-weight:600;margin-bottom:2px">How to export from your platform:</p>
-        <ul>
-          <li><b>Confirmit:</b> Designer → Export Survey Definition (.zip)</li>
-          <li><b>Decipher:</b> Survey settings → Download XML</li>
-          <li><b>Forsta:</b> Survey settings → Export XML</li>
-          <li><b>Qualtrics:</b> Tools → Import/Export → Export QSF</li>
-        </ul>
-      </div>
-      <div class="qcz" id="xmlZone"
-           onclick="document.getElementById('xmlInput').click()"
-           ondragover="dzOver(event,this)"
-           ondragleave="dzLeave(this)"
-           ondrop="dzDrop(event,this,'xmlInput','xmlPreview')">
-        <i class="ti ti-file-code" style="font-size:28px;color:#9CA3AF"></i>
-        <p style="font-size:13px;color:#6B7280;margin-top:8px;font-weight:500">Drop <b>.xml</b> / <b>.qsf</b> / <b>.zip</b> here, or <span style="color:#C46A2B;text-decoration:underline">browse</span></p>
-        <p style="font-size:11px;color:#9CA3AF;margin-top:4px">Exported from your survey platform admin panel</p>
-      </div>
-      <input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required style="display:none"
-             onchange="dzFilePicked(this,'xmlZone','xmlPreview');updateMeter()">
-      <div id="xmlPreview" class="qcz-preview" style="display:none"></div>
-      <div class="tip-row"><i class="ti ti-bulb"></i><p>Tip: This export is the source of truth — boosts accuracy from ~75% to ~91% by giving AI exact question definitions.</p></div>
-    </div>
-
-    <!-- ── OPTIONAL HELPERS ── -->
-    <div class="sec-hdr">
-      <span style="color:#6B7280">Optional Helpers</span>
-      <hr>
-      <span class="sec-badge" style="background:#F3F4F6;color:#6B7280">Skip if not needed</span>
-    </div>
-
-    <!-- Card 4: Screenshots -->
-    <div class="qc-card" id="card4">
-      <div class="qc-card-hdr">
-        <div class="step-num step-num-opt">4</div>
-        <span class="card-title" style="color:#374151">Screenshots</span>
-        <span style="font-size:11px;color:#9CA3AF;margin-left:4px">(Optional)</span>
-        ''' + pro_badge + '''
-      </div>
-      ''' + ss_body + '''
-    </div>
-
-    <!-- Advanced options -->
-    <div style="margin-bottom:24px">
-      <button type="button" class="adv-btn" onclick="toggleAdv()">
-        <i class="ti ti-settings" style="font-size:14px"></i>
-        Advanced options
-        <i class="ti ti-chevron-down" style="font-size:12px;margin-left:auto" id="advIcon"></i>
-      </button>
-      <div id="advPanel" style="display:none" class="adv-panel">
-        <div class="form-group" style="margin-bottom:14px">
-          <label class="form-label">Country (for screener question)</label>
-          <input type="text" name="country" placeholder="e.g. United Kingdom" class="form-input">
-        </div>
-        <div class="form-group" style="margin-bottom:14px">
-          <label class="form-label">Specific questions only <span style="font-weight:400;color:#9CA3AF">(optional)</span></label>
-          <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12" class="form-input">
-          <p style="font-size:11px;color:#9CA3AF;margin-top:4px">Leave blank for full survey QC</p>
-        </div>
-        <div>
-          <label class="form-label">Checks to run</label>
-          <div class="chk-grid">''' + chk_html + '''</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Run button -->
-    <button type="submit" class="run-btn" id="runBtn">
-      <i class="ti ti-player-play" style="font-size:17px"></i>
-      <span id="runBtnText">Run QC — Takes 3-5 minutes</span>
+  <!-- Sub row: hint + advanced link -->
+  <div class="run-sub">
+    <span id="runBtnSub">You&#39;ll get a Word report</span>
+    <span style="color:#DDE1E7">|</span>
+    <button type="button" class="adv-lnk" onclick="toggleAdv()">
+      Advanced <span id="advChev">&#9660;</span>
     </button>
-    <p class="run-sub" id="runBtnSub">You&#39;ll get a Word report · Typically done in under 5 minutes</p>
+  </div>
 
-  </form>
+  <!-- Advanced panel (hidden by default) -->
+  <div id="advPanel" style="display:none" class="adv-panel">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px" class="adv-2col">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Country (screener)</label>
+        <input type="text" name="country" placeholder="e.g. United Kingdom"
+               style="width:100%;padding:7px 10px;border:1px solid #DDE1E7;border-radius:7px;
+               font-size:12px;font-family:inherit;outline:none;box-sizing:border-box"
+               onfocus="this.style.borderColor='#C46A2B'" onblur="this.style.borderColor='#DDE1E7'">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Specific QIDs only</label>
+        <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12"
+               style="width:100%;padding:7px 10px;border:1px solid #DDE1E7;border-radius:7px;
+               font-size:12px;font-family:inherit;outline:none;box-sizing:border-box"
+               onfocus="this.style.borderColor='#C46A2B'" onblur="this.style.borderColor='#DDE1E7'">
+      </div>
+    </div>
+    <p style="font-size:11px;font-weight:600;color:#374151;margin-bottom:5px">Checks to run</p>
+    <div class="chk-grid">''' + chk_html + '''</div>
+  </div>
 
-  ''' + recent_html + '''
-
-</div><!-- /nqc-wrap -->
+</form>
+</div><!-- /nqc-outer -->
 
 <div class="mobile-nav"><div class="mobile-nav-inner">
   <a href="/dashboard" class="mobile-nav-item"><i class="ti ti-home"></i><span>Home</span></a>
@@ -1012,143 +952,143 @@ def new_qc():
   <a href="/settings" class="mobile-nav-item"><i class="ti ti-settings"></i><span>Settings</span></a>
 </div></div>
 
-</div></div><!-- /app-layout -->
+</div></div>
 
 <script>
-/* ── Drop zone helpers ────────────────────────── */
+/* ── drag-drop ───────────────────────── */
 function dzOver(e,el){e.preventDefault();el.classList.add('dz-over')}
 function dzLeave(el){el.classList.remove('dz-over')}
-function dzDrop(e,el,inputId,previewId){
+function dzDrop(e,el,inpId,doneId,multi){
   e.preventDefault();el.classList.remove('dz-over');
-  var inp=document.getElementById(inputId);
+  var inp=document.getElementById(inpId);
   if(e.dataTransfer&&e.dataTransfer.files.length){
     var dt=new DataTransfer();
     for(var i=0;i<e.dataTransfer.files.length;i++) dt.items.add(e.dataTransfer.files[i]);
     inp.files=dt.files;
-    dzFilePicked(inp,el.id,previewId,e.dataTransfer.files.length>1);
+    dzPick(inp,el.id,doneId,multi);
   }
 }
-function dzFilePicked(inp,zoneId,previewId,multi){
+function dzPick(inp,zoneId,doneId,multi){
   if(!inp.files||!inp.files[0]) return;
   var zone=document.getElementById(zoneId);
-  var prev=document.getElementById(previewId);
-  if(!zone||!prev) return;
-  var files=inp.files;
+  var done=document.getElementById(doneId);
+  if(!zone||!done) return;
   zone.style.display='none';
+  var files=inp.files;
+  var inner;
   if(multi&&files.length>1){
-    prev.innerHTML='<i class="ti ti-circle-check" style="font-size:18px;color:#16A34A;flex-shrink:0"></i>'
-      +'<div style="flex:1;min-width:0"><p class="qcz-prev-name">'+files.length+' files selected</p>'
-      +'<p class="qcz-prev-meta">Ready to process</p></div>'
-      +'<button type="button" class="qcz-remove" onclick="dzClear(\''+inp.id+'\',\''+zoneId+'\',\''+previewId+'\')" title="Remove">&times;</button>';
+    inner='<i class="ti ti-circle-check" style="font-size:16px;color:#16A34A;flex-shrink:0"></i>'
+      +'<div style="flex:1;min-width:0"><p class="dz-dn">'+files.length+' files selected</p>'
+      +'<p class="dz-dm">Ready</p></div>';
   } else {
     var f=files[0];
     var sz=f.size<1048576?(Math.round(f.size/1024)+'KB'):(Math.round(f.size/1048576*10)/10+'MB');
-    prev.innerHTML='<i class="ti ti-circle-check" style="font-size:18px;color:#16A34A;flex-shrink:0"></i>'
-      +'<div style="flex:1;min-width:0"><p class="qcz-prev-name">'+f.name+'</p>'
-      +'<p class="qcz-prev-meta">'+sz+' &middot; Ready to process</p></div>'
-      +'<button type="button" class="qcz-remove" onclick="dzClear(\''+inp.id+'\',\''+zoneId+'\',\''+previewId+'\')" title="Remove">&times;</button>';
+    inner='<i class="ti ti-circle-check" style="font-size:16px;color:#16A34A;flex-shrink:0"></i>'
+      +'<div style="flex:1;min-width:0"><p class="dz-dn">'+f.name+'</p>'
+      +'<p class="dz-dm">'+sz+'</p></div>';
   }
-  prev.style.display='flex';
+  inner+='<button type="button" class="dz-rm"'
+    +' onclick="dzClear(\''+inp.id+'\',\''+zoneId+'\',\''+doneId+'\')"'
+    +' title="Remove">&times;</button>';
+  done.innerHTML=inner;
+  done.style.display='flex';
   updateMeter();
 }
-function dzClear(inputId,zoneId,previewId){
-  var inp=document.getElementById(inputId);
+function dzClear(inpId,zoneId,doneId){
+  var inp=document.getElementById(inpId);
   var zone=document.getElementById(zoneId);
-  var prev=document.getElementById(previewId);
-  if(inp){inp.value='';inp.files=new DataTransfer().files;}
-  if(prev) prev.style.display='none';
+  var done=document.getElementById(doneId);
+  if(inp){try{inp.value='';inp.files=new DataTransfer().files;}catch(e){}}
+  if(done) done.style.display='none';
   if(zone) zone.style.display='flex';
   updateMeter();
 }
 
-/* ── Accuracy meter ───────────────────────────── */
+/* ── accuracy meter + button ─────────── */
 function updateMeter(){
   var hasDoc=!!(document.getElementById('docInput')&&document.getElementById('docInput').files.length);
   var hasXml=!!(document.getElementById('xmlInput')&&document.getElementById('xmlInput').files.length);
-  var urlVal=(document.getElementById('urlInput')&&document.getElementById('urlInput').value||'').trim();
+  var urlVal=((document.getElementById('urlInput')||{}).value||'').trim();
   var fill=document.getElementById('accFill');
-  var pct=document.getElementById('accPct');
-  var hint=document.getElementById('accHint');
+  var lbl=document.getElementById('accLbl');
   var btn=document.getElementById('runBtn');
   var sub=document.getElementById('runBtnSub');
   var txt=document.getElementById('runBtnText');
+  if(!fill||!lbl||!btn) return;
   if(hasDoc&&hasXml&&urlVal){
-    fill.style.width='91%'; fill.style.background='#16A34A';
-    pct.textContent='91% — Maximum ⚡'; pct.style.color='#16A34A';
-    hint.textContent='All inputs filled. AI will use doc \xb7 XML \xb7 live survey for the deepest comparison.';
+    fill.style.width='91%';fill.style.background='#16A34A';
+    lbl.textContent='91% — Maximum ⚡';lbl.style.color='#16A34A';
     txt.textContent='Run QC — Enhanced accuracy (~91%)';
-    if(sub) sub.textContent='With XML: 3-5 min \xb7 You’ll get a Word report';
+    if(sub) sub.textContent='With XML: 3-5 min · Word report';
     btn.className='run-btn btn-full';
   } else if(hasDoc&&urlVal){
-    fill.style.width='75%'; fill.style.background='#EAB308';
-    pct.textContent='75% — Good'; pct.style.color='#CA8A04';
-    hint.textContent='Add the XML export (Step 3) to boost accuracy from 75% to 91%.';
+    fill.style.width='75%';fill.style.background='#EAB308';
+    lbl.textContent='75% — Add XML for 91%';lbl.style.color='#CA8A04';
     txt.textContent='Run QC — Standard accuracy (~75%)';
-    if(sub) sub.textContent='Without XML: 5-10 min \xb7 You’ll get a Word report';
+    if(sub) sub.textContent='Without XML: 5-10 min · Word report';
     btn.className='run-btn btn-warm';
   } else if(hasDoc){
-    fill.style.width='40%'; fill.style.background='#9CA3AF';
-    pct.textContent='40% — Basic'; pct.style.color='#9CA3AF';
-    hint.textContent='Add the live survey URL (Step 2) to enable comparison.';
+    fill.style.width='40%';fill.style.background='#9CA3AF';
+    lbl.textContent='40% — Add URL to compare';lbl.style.color='#9CA3AF';
     txt.textContent='Run QC — Takes 3-5 minutes';
-    if(sub) sub.textContent='You’ll get a Word report';
+    if(sub) sub.textContent="You'll get a Word report";
     btn.className='run-btn';
   } else {
-    fill.style.width='0%'; fill.style.background='#E5E7EB';
-    pct.textContent='Fill in required fields'; pct.style.color='#9CA3AF';
-    hint.textContent='Add your spec doc, survey URL, and XML export to reach maximum accuracy.';
+    fill.style.width='0%';fill.style.background='#E5E7EB';
+    lbl.textContent='Fill in fields above';lbl.style.color='#9CA3AF';
     txt.textContent='Run QC — Takes 3-5 minutes';
-    if(sub) sub.textContent='You’ll get a Word report';
+    if(sub) sub.textContent="You'll get a Word report";
     btn.className='run-btn';
   }
 }
 
-/* ── Platform detection ───────────────────────── */
-var platMap=[
-  [/confirmit/i,'Confirmit'],
-  [/decipher/i,'Decipher'],
-  [/forsta|confirmit[.]com.*[/](confirm|wix)/i,'Forsta'],
-  [/qualtrics/i,'Qualtrics'],
-  [/survey[.]monkey|surveymonkey/i,'SurveyMonkey'],
-];
+/* ── platform detection ──────────────── */
+var platMap=[[/confirmit/i,'Confirmit'],[/decipher/i,'Decipher'],
+  [/forsta/i,'Forsta'],[/qualtrics/i,'Qualtrics']];
 function detectPlat(v){
-  var badge=document.getElementById('platBadge');
-  if(!badge) return;
-  var found='';
-  for(var i=0;i<platMap.length;i++){if(platMap[i][0].test(v)){found=platMap[i][1];break;}}
-  if(found){badge.textContent='✓ '+found;badge.style.display='inline-block';}
-  else badge.style.display='none';
+  var b=document.getElementById('platBadge');if(!b)return;
+  var found='';for(var i=0;i<platMap.length;i++){if(platMap[i][0].test(v)){found=platMap[i][1];break;}}
+  if(found){b.textContent='✓ '+found;b.style.display='inline-block';}else b.style.display='none';
 }
-function setUrlHint(plat){
-  var hints={confirmit:'https://survey.confirmit.com/wix/',decipher:'https://survey.decipherinc.com/',
+function setUrlHint(p){
+  var h={confirmit:'https://survey.confirmit.com/wix/',decipher:'https://survey.decipherinc.com/',
     forsta:'https://survey.forsta.com/',qualtrics:'https://survey.qualtrics.com/'};
   var inp=document.getElementById('urlInput');
-  if(inp&&!inp.value&&hints[plat]) inp.placeholder='e.g. '+hints[plat]+'...';
-  detectPlat(plat);
+  if(inp&&!inp.value&&h[p]) inp.placeholder='e.g. '+h[p]+'...';
+  detectPlat(p);
 }
 
-/* ── UI toggles ───────────────────────────────── */
+/* ── toggles ─────────────────────────── */
+function toggleSS(){
+  var p=document.getElementById('ssPanel');
+  var c=document.getElementById('ssChev');
+  if(!p) return;
+  var open=p.style.display==='none';
+  p.style.display=open?'block':'none';
+  if(c) c.innerHTML=open?'&#9650;':'&#9660;';
+}
 function toggleXmlTip(){
   var t=document.getElementById('xmlTipBox');
   if(t) t.style.display=t.style.display==='none'?'block':'none';
 }
 function toggleAdv(){
   var p=document.getElementById('advPanel');
-  var i=document.getElementById('advIcon');
+  var c=document.getElementById('advChev');
   if(!p) return;
-  if(p.style.display==='none'){p.style.display='block';i.className='ti ti-chevron-up';}
-  else{p.style.display='none';i.className='ti ti-chevron-down';}
+  var open=p.style.display==='none';
+  p.style.display=open?'block':'none';
+  if(c) c.innerHTML=open?'&#9650;':'&#9660;';
 }
 
-/* ── Submit loading state ─────────────────────── */
+/* ── submit loading ──────────────────── */
 document.getElementById('qcForm').addEventListener('submit',function(){
   var btn=document.getElementById('runBtn');
   var txt=document.getElementById('runBtnText');
-  if(btn){btn.disabled=true;btn.style.opacity='.75';}
-  if(txt) txt.textContent='Processing your files…';
+  if(btn){btn.disabled=true;btn.style.opacity='.7';}
+  if(txt) txt.textContent='Processing…';
 });
 
-document.addEventListener('DOMContentLoaded', updateMeter);
+document.addEventListener('DOMContentLoaded',updateMeter);
 </script>
 </body></html>'''
 
@@ -2277,7 +2217,7 @@ def admin_dashboard():
 
     return render_template_string(SHARED_CSS + """<style>.app-layout{margin-left:0!important}.main-content{margin-left:220px!important}</style>""" + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Admin — SurveyQC</title></head><body>
-<div style="display:flex;min-height:100vh"><div style="margin-left:220px;flex:1;padding:28px;min-width:0;width:calc(100% - 220px)">
+<div style="display:flex;min-height:100vh;background:var(--bg)"><div style="margin-left:220px;flex:1;padding:28px;min-width:0;max-width:1100px">
   
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <div><p style="font-size:20px;font-weight:600;color:var(--text)">Admin overview</p><p style="font-size:12px;color:var(--text3)">{datetime.now().strftime('%A, %d %B %Y')}</p></div>
@@ -2287,12 +2227,12 @@ def admin_dashboard():
       </div>
     </div>
 
-    <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
-      <div class="stat-card"><p class="stat-num">{total_users}</p><p class="stat-label">Total users</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{paid_users}</p><p class="stat-label">Paid users</p></div>
-      <div class="stat-card"><p class="stat-num">{total_jobs}</p><p class="stat-label">Total reports</p></div>
-      <div class="stat-card" style="background:rgba(124,101,255,.1);border-color:var(--purple-border)"><p class="stat-num" style="color:var(--purple)">${mrr}</p><p class="stat-label">MRR</p></div>
-      <div class="stat-card" style="background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">${arr}</p><p class="stat-label">ARR</p></div>
+    <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px">
+      <div class="stat-card" style="padding:20px"><p class="stat-num">{total_users}</p><p class="stat-label">Total users</p></div>
+      <div class="stat-card" style="padding:20px"><p class="stat-num" style="color:#1D9E75">{paid_users}</p><p class="stat-label">Paid users</p></div>
+      <div class="stat-card" style="padding:20px"><p class="stat-num">{total_jobs}</p><p class="stat-label">Total reports</p></div>
+      <div class="stat-card" style="padding:20px;background:rgba(124,101,255,.1);border-color:var(--purple-border)"><p class="stat-num" style="color:var(--purple)">${mrr}</p><p class="stat-label">MRR</p></div>
+      <div class="stat-card" style="padding:20px;background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">${arr}</p><p class="stat-label">ARR</p></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -2302,7 +2242,6 @@ def admin_dashboard():
           <div class="worker-card"><span class="pulse"></span><div style="flex:1"><p style="font-size:12px;color:white">Playwright browser</p></div><span class="badge badge-teal">Healthy</span></div>
           <div class="worker-card"><span class="pulse"></span><div style="flex:1"><p style="font-size:12px;color:white">Report generator</p></div><span class="badge badge-teal">Healthy</span></div>
           <div class="worker-card"><span class="pulse"></span><div style="flex:1"><p style="font-size:12px;color:white">File storage</p></div><span class="badge badge-teal">Healthy</span></div>
-          <div class="worker-card"><span class="dot dot-amber" style="margin-left:1px"></span><div style="flex:1"><p style="font-size:12px;color:white">Email service</p></div><span class="badge badge-amber">Not configured</span></div>
         </div>
       </div>
       <div class="card">
@@ -2375,7 +2314,7 @@ def admin_users():
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Users — Admin</title><script src="/admin-sidebar-js"></script></head><body>
-<div style="padding:24px;margin-left:0">
+<div style="padding:24px;margin-left:220px;max-width:1100px">
   <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
     <a href="/admin" style="color:var(--text3);text-decoration:none"><i class="ti ti-arrow-left"></i></a>
     <p style="font-size:20px;font-weight:600;color:var(--text)">All Users ({len(users_db)})</p>
@@ -5110,15 +5049,13 @@ site_content = {
     'pfaq6_a': 'Yes, 7-day money-back guarantee.',
     'pfaq7_q': 'Is my data secure?',
     'pfaq7_a': 'Yes. Encrypted, GDPR compliant, auto-deleted after 90 days.',
-    'pfaq8_q': 'Can I cancel anytime?',
-    'pfaq8_a': 'Yes, cancel anytime. No contracts.',
     # Features Page - 25 features grouped
     'features_heading': 'Everything you need for perfect survey QC',
     'features_sub': '25+ specialized checks and tools, built by QC professionals for QC professionals.',
     # Group 1: Core QC Checks
     'feat_grp1_name': 'Core QC Checks',
     'feat_grp1_desc': 'Essential checks every survey needs.',
-    'feat_grp1_items': 'Termination Testing||Every terminate rule clicked and verified with PASS/FAIL||ti-x-octagon##Question Text Match||Full question text compared word-by-word against spec doc||ti-text-recognition##Missing Words Detection||Catches typos and missing phrases between spec and live survey||ti-search##Options Match||All answer options compared against spec - missing/extra detected||ti-checkbox##Answer Codes Validation||Verifies answer codes are sequential and match spec exactly||ti-list-numbers##Mandatory Markers||Checks * mandatory markers match the spec on every question||ti-asterisk##Question Order||Verifies questions appear in correct order as per spec||ti-arrows-sort##Piping Markers||Detects unresolved {piped_text} variables shown to respondents||ti-replace',
+    'feat_grp1_items': 'Termination Testing||Every terminate rule clicked and verified with PASS/FAIL||ti-shield-x##Question Text Match||Full question text compared word-by-word against spec doc||ti-text-recognition##Missing Words Detection||Catches typos and missing phrases between spec and live survey||ti-search##Options Match||All answer options compared against spec - missing/extra detected||ti-checkbox##Answer Codes Validation||Verifies answer codes are sequential and match spec exactly||ti-list-numbers##Mandatory Markers||Checks * mandatory markers match the spec on every question||ti-asterisk##Question Order||Verifies questions appear in correct order as per spec||ti-arrows-sort##Piping Markers||Detects unresolved {piped_text} variables shown to respondents||ti-replace',
     # Group 2: Advanced Logic
     'feat_grp2_name': 'Advanced Logic Testing',
     'feat_grp2_desc': 'Catches complex logic bugs humans miss.',
@@ -7060,8 +6997,9 @@ img{max-width:100%}
 
 .trusted{padding:40px 24px 20px;text-align:center}
 .trusted-l{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin-bottom:24px}
-.trusted-row{display:flex;align-items:center;justify-content:center;gap:48px;flex-wrap:wrap;opacity:.7}
-.trusted-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:700;color:var(--text2)}
+.trusted-row{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.trusted-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:#9CA3AF;background:#FFFFFF;border:1px solid #E5E7EB;border-radius:10px;padding:10px 18px;letter-spacing:.04em;transition:all .2s;cursor:default}
+.trusted-logo:hover{color:#6B7280;border-color:#D1D5DB;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 
 .section{padding:88px 24px}
 .container{max-width:1240px;margin:0 auto;padding:0 24px}
