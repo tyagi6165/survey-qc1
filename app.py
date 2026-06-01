@@ -4744,6 +4744,34 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         sr.font.size = Pt(11); sr.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
         report.add_paragraph()
 
+        _hdr_xml_count = len(xml_questions)
+        if _hdr_xml_count:
+            _src_hdr = report.add_paragraph()
+            _src_hdr.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _src_hdr_r = _src_hdr.add_run("Sources analyzed:")
+            _src_hdr_r.font.size = Pt(10); _src_hdr_r.font.bold = True
+            _src_hdr_r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+            for _src_line in [
+                f"  •  Spec Document ({len(questions)} questions)",
+                f"  •  Live Survey ({len(live_data)} questions)",
+                f"  •  Survey Export XML ({_hdr_xml_count} questions)  ⚡ Enhanced mode",
+            ]:
+                _slp = report.add_paragraph(); _slp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _slr = _slp.add_run(_src_line)
+                _slr.font.size = Pt(10); _slr.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+            _acc_p = report.add_paragraph(); _acc_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _acc_r = _acc_p.add_run("Accuracy mode: Enhanced (XML-based three-way comparison)")
+            _acc_r.font.size = Pt(10); _acc_r.font.italic = True
+            _acc_r.font.color.rgb = RGBColor(0x13, 0x8D, 0x5A)
+        else:
+            _src_p = report.add_paragraph(); _src_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _src_r = _src_p.add_run(
+                f"Sources analyzed: Doc ({len(questions)}) + Live ({len(live_data)})"
+                f"    |    Accuracy mode: Standard (doc vs live comparison)"
+            )
+            _src_r.font.size = Pt(10); _src_r.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
+        report.add_paragraph()
+
         if filter_qids:
             _rt_banner = report.add_paragraph()
             _rt_banner.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -4869,6 +4897,27 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 p2 = report.add_paragraph()
                 p2r = p2.add_run(f"   Fix: {fix}")
                 p2r.font.size = Pt(11); p2r.font.italic = True; p2r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+                _xml_verd = issue.get('xml_verdict', '')
+                _itype = issue.get('type', '')
+                if _xml_verd == 'all_differ':
+                    _xml_label = "   ⚡ XML Verdict: HIGH (95%) — All 3 sources differ"
+                    _xml_clr = (0xC0, 0x00, 0x00)
+                elif _xml_verd == 'live_differs':
+                    _xml_label = "   ⚡ XML Verdict: HIGH (90%) — Live programming bug confirmed"
+                    _xml_clr = (0xC0, 0x00, 0x00)
+                elif _xml_verd == 'doc_differs':
+                    _xml_label = "   ⚡ XML Verdict: MEDIUM (75%) — Spec may be outdated"
+                    _xml_clr = (0xBA, 0x75, 0x17)
+                elif _itype == 'QID IN EXPORT NOT IN DOC/LIVE':
+                    _xml_label = "   ⚡ XML Verdict: MEDIUM — Missing question flag"
+                    _xml_clr = (0xBA, 0x75, 0x17)
+                else:
+                    _xml_label = ''
+                if _xml_label:
+                    _xvp = report.add_paragraph()
+                    _xvr = _xvp.add_run(_xml_label)
+                    _xvr.font.size = Pt(10); _xvr.font.bold = True
+                    _xvr.font.color.rgb = RGBColor(*_xml_clr)
                 report.add_paragraph(); n += 1
 
         if _review_issues:
@@ -4915,6 +4964,38 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 p = report.add_paragraph()
                 pr = p.add_run(f"  {status}  {r['test_qid']} = code {r['answer_code']}")
                 pr.font.size = Pt(11); pr.font.color.rgb = RGBColor(*color)
+
+        report.add_paragraph()
+        _qsum_h = report.add_paragraph()
+        _qsum_hr = _qsum_h.add_run("QC Summary")
+        _qsum_hr.font.size = Pt(14); _qsum_hr.font.bold = True
+        _qsum_hr.font.color.rgb = RGBColor(0x7C, 0x65, 0xFF)
+        _sum_high = sum(1 for i in issues if i.get('confidence', 0) >= 95)
+        _sum_med   = sum(1 for i in issues if 75 <= i.get('confidence', 0) < 95)
+        _sum_low   = sum(1 for i in issues if i.get('confidence', 0) < 75)
+        for _sl in [
+            f"Total issues found: {len(issues)}",
+            f"High confidence (95%+): {_sum_high}",
+            f"Medium confidence (75–90%): {_sum_med}",
+            f"Low confidence (<75%): {_sum_low}",
+        ]:
+            _slp = report.add_paragraph()
+            _slp.add_run(f"  • {_sl}").font.size = Pt(11)
+        _xml_flagged = sum(
+            1 for i in issues
+            if i.get('xml_verdict') or i.get('type') == 'QID IN EXPORT NOT IN DOC/LIVE'
+        )
+        if _xml_flagged and len(xml_questions):
+            report.add_paragraph()
+            _xfp = report.add_paragraph()
+            _xfr = _xfp.add_run(f"  Issues flagged by XML comparison: {_xml_flagged}")
+            _xfr.font.size = Pt(11); _xfr.font.bold = True
+            _xfr.font.color.rgb = RGBColor(0x13, 0x8D, 0x5A)
+            _xfp2 = report.add_paragraph()
+            _xfp2.add_run(
+                f"  (XML upload helped catch {_xml_flagged} issue(s) with higher confidence)"
+            ).font.size = Pt(10)
+        report.add_paragraph()
 
         footer_p = report.add_paragraph(); footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         fr = footer_p.add_run("— End of Report — Generated by SurveyQC v10.0 —")
