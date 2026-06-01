@@ -3614,12 +3614,22 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 log('  PHASE 1.5: XML EXPORT PARSING', 'cyan')
                 log('════════════════════════════════════', 'cyan')
                 import xml_parser as _xml_parser_mod
-                xml_questions = _xml_parser_mod.parse_export(_xml_path)
+                xml_questions, _xml_meta = _xml_parser_mod.parse_export_with_stats(_xml_path)
+                _xml_hidden = _xml_meta.get('hidden_count', 0)
                 job['xml_questions'] = xml_questions
                 job['xml_qids'] = len(xml_questions)
-                log(f'  Phase 1.5: Parsed {len(xml_questions)} questions from XML export', 'green')
+                job['xml_hidden_count'] = _xml_hidden
+                if xml_questions:
+                    _hidden_note = f' ({_xml_hidden} hidden/template variables skipped)' if _xml_hidden else ''
+                    log(f'  Phase 1.5: Parsed {len(xml_questions)} visible questions from XML export{_hidden_note}', 'green')
+                else:
+                    log(f'  Phase 1.5: ERROR — XML uploaded but 0 questions extracted. '
+                        f'Format may be unsupported or all questions were filtered as hidden/template.', 'red')
+                    log(f'  Phase 1.5: Falling back to doc-vs-live comparison (Standard mode)', 'yellow')
+                    job['xml_parse_failed'] = True
             except Exception as _xe:
-                log(f'  Phase 1.5: XML parse warning — {str(_xe)[:120]} (continuing without XML)', 'yellow')
+                log(f'  Phase 1.5: XML parse error — {str(_xe)[:120]} (continuing without XML)', 'red')
+                job['xml_parse_failed'] = True
                 xml_questions = []
         else:
             if _xml_path:
@@ -4744,17 +4754,37 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         sr.font.size = Pt(11); sr.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
         report.add_paragraph()
 
-        _hdr_xml_count = len(xml_questions)
-        if _hdr_xml_count:
+        _hdr_xml_count  = len(xml_questions)
+        _hdr_xml_hidden = job.get('xml_hidden_count', 0)
+        _xml_failed     = job.get('xml_parse_failed', False)
+        if _xml_failed:
+            _warn_p = report.add_paragraph(); _warn_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _warn_r = _warn_p.add_run(
+                "⚠ XML parsing failed — falling back to doc-vs-live comparison. "
+                "Accuracy may be lower. Please check the XML format."
+            )
+            _warn_r.font.size = Pt(10); _warn_r.font.bold = True
+            _warn_r.font.color.rgb = RGBColor(0xC0, 0x00, 0x00)
+            _src_p = report.add_paragraph(); _src_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _src_r = _src_p.add_run(
+                f"Sources analyzed: Doc ({len(questions)}) + Live ({len(live_data)})"
+                f"    |    Accuracy mode: Standard (doc vs live comparison)"
+            )
+            _src_r.font.size = Pt(10); _src_r.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
+        elif _hdr_xml_count:
             _src_hdr = report.add_paragraph()
             _src_hdr.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _src_hdr_r = _src_hdr.add_run("Sources analyzed:")
             _src_hdr_r.font.size = Pt(10); _src_hdr_r.font.bold = True
             _src_hdr_r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+            _xml_src_str = f"  •  Survey Export XML ({_hdr_xml_count} visible questions"
+            if _hdr_xml_hidden:
+                _xml_src_str += f"; {_hdr_xml_hidden} hidden/template not compared"
+            _xml_src_str += ")  ⚡ Enhanced mode"
             for _src_line in [
                 f"  •  Spec Document ({len(questions)} questions)",
                 f"  •  Live Survey ({len(live_data)} questions)",
-                f"  •  Survey Export XML ({_hdr_xml_count} questions)  ⚡ Enhanced mode",
+                _xml_src_str,
             ]:
                 _slp = report.add_paragraph(); _slp.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 _slr = _slp.add_run(_src_line)
