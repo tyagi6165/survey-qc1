@@ -3391,7 +3391,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     ct = "\n".join(p.text.strip() for p in cell.paragraphs if p.text.strip())
                     all_cells_text.append(ct)
             joined = "\n".join(all_cells_text)
-            pt_match = re.search(r'PROG(?:RAM(?:M?ING)?)?\s+TABLE[\s\|\n]*([A-Za-z]{1,8}\d+(?:\.\d+)*)', joined, re.IGNORECASE)
+            pt_match = re.search(r'PROG(?:RAM(?:M?ING)?)?\s+TABLE[\s\|\n]*([A-Za-z]{1,8}\d*(?:[a-zA-Z]{1,4}\d*)?)', joined, re.IGNORECASE)
             if pt_match: table_qid = pt_match.group(1)
 
             for cell_text in all_cells_text:
