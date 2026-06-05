@@ -22,6 +22,10 @@ app_backup*.py
 app.py.backup*
 qc_engine.py.backup*
 
+# Database (contains user data — never commit)
+*.db
+*.sqlite3
+
 # Debug artifacts
 debug_*.png
 debug_*.txt

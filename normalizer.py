@@ -19,6 +19,7 @@ import time
 
 from docx import Document
 from docx.oxml.ns import qn
+from table_awareness import classify_table
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +105,8 @@ def extract_raw_text(doc_path: str) -> str:
         elif child.tag == qn('w:tbl'):
             for tbl in doc.tables:
                 if tbl._element is child:
-                    parts.append('[TABLE_START]')
+                    # Build rows first so we can classify before emitting text
+                    rows = []
                     for row in tbl.rows:
                         cells = []
                         for cell in row.cells:
@@ -116,8 +118,19 @@ def extract_raw_text(doc_path: str) -> str:
                             if ct:
                                 cells.append(ct)
                         if cells:
-                            parts.append(' | '.join(cells))
-                    parts.append('[TABLE_END]')
+                            rows.append(cells)
+
+                    table_type = classify_table(rows)
+                    if table_type in ('ROUTING_TABLE', 'PROGRAMMING_TABLE', 'QUOTA_TABLE'):
+                        # Emit a single marker so routing/logic text never
+                        # bleeds into a question chunk sent to Gemini
+                        parts.append(f'[TABLE_SKIP:{table_type}]')
+                        log.debug('extract_raw_text: skipped %s (%d rows)', table_type, len(rows))
+                    else:
+                        parts.append('[TABLE_START]')
+                        for row_cells in rows:
+                            parts.append(' | '.join(row_cells))
+                        parts.append('[TABLE_END]')
                     break
 
     return '\n'.join(parts)

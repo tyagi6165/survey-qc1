@@ -53,6 +53,13 @@ except ImportError:
     def _rv_test_cases(doc_q, id_prefix='TC_RNG'): return []
 
 try:
+    from translation_sync import check_translation_sync as _ts_check
+    _TRANSLATION_SYNC_OK = True
+except ImportError:
+    _TRANSLATION_SYNC_OK = False
+    def _ts_check(doc_q, live_q, text_issues=None): return [], list(text_issues or [])
+
+try:
     from embeddings import (
         semantic_similarity, batch_embeddings, get_embedding, clear_cache,
         MATCH as SEM_MATCH, LIKELY_MATCH as SEM_LIKELY, MISMATCH as SEM_MISMATCH,
@@ -973,6 +980,7 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
         "options_match": [],
         "piping_issues": [],        # CHECK1-4 piping validation
         "range_issues": [],         # R041-R045 numeric range validation
+        "translation_issues": [],   # cross-language semantic verification
         "mandatory": [],
         "piping": [],
         "answer_codes": [],
@@ -1044,6 +1052,12 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
     # CHECK 3: Text match (needs live)
     if live_questions:
         results["text_match"] = check_question_text(_doc_for_checks, live_questions, threshold)
+        # Translation sync: re-evaluate text-mismatch issues where languages differ.
+        # TRANSLATION_MATCH pairs are removed from text_match (valid translations).
+        _trans_issues, results["text_match"] = _ts_check(
+            _doc_for_checks, live_questions, results["text_match"]
+        )
+        results["translation_issues"] = _trans_issues
 
     # CHECK 4: Options match (needs live)
     if live_questions:
@@ -1103,6 +1117,7 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
         results["rule_engine"] +
         results["missing_words"] +
         results["text_match"] +
+        results["translation_issues"] +
         results["options_match"] +
         results["piping_issues"] +
         results["range_issues"] +

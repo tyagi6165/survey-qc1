@@ -29,7 +29,7 @@
 ================================================================
 """
 
-import os, re, sys, json, uuid, threading, hashlib, time
+import os, re, sys, json, uuid, threading, hashlib, time, sqlite3
 import concurrent.futures
 from pathlib import Path
 from datetime import datetime
@@ -51,6 +51,29 @@ from functools import wraps
 from flask import (Flask, render_template_string, request,
                    send_file, jsonify, session, redirect, url_for)
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
+try:
+    from email_service import (send_welcome_email,
+                                send_report_ready_email,
+                                send_password_reset_email)
+    _EMAIL_ENABLED = True
+except Exception:
+    _EMAIL_ENABLED = False
+    def send_welcome_email(*a, **kw): pass
+    def send_report_ready_email(*a, **kw): pass
+    def send_password_reset_email(*a, **kw): pass
+
+try:
+    from payment_service import create_order as _rzp_create_order
+    from payment_service import verify_payment as _rzp_verify_payment
+    from payment_service import PLANS as PAYMENT_PLANS
+    _PAYMENT_ENABLED = True
+except Exception as _pay_exc:
+    import logging as _l; _l.getLogger(__name__).warning("payment_service not loaded: %s", _pay_exc)
+    _PAYMENT_ENABLED = False
+    def _rzp_create_order(*a, **kw): raise RuntimeError("Payment not configured")
+    def _rzp_verify_payment(*a, **kw): return False
+    PAYMENT_PLANS = {}
 
 # ================================================================
 # CONFIG
@@ -80,19 +103,315 @@ ADMIN_PASSWORD = 'admin123'   # Change this!
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# In-memory stores
-jobs = {}
-users_db = {
-    'demo@surveyqc.com': {
-        'password': hashlib.sha256('demo123'.encode()).hexdigest(),
-        'name': 'Demo User',
-        'plan': 'Pro',
-        'reports_used': 12,
-        'reports_limit': 50,
-        'joined': '2026-01-15',
-        'total_saved_hours': 47
-    }
-}
+# ── SQLite-backed Job Store ───────────────────────────────────────────────────
+
+DB_PATH = '/var/www/surveyqc/surveyqc.db'
+
+class JobStore:
+    """
+    Dict-like in-memory store that persists to SQLite on job creation and at
+    explicit persist() calls (terminal states: done / error / stopped).
+
+    In-memory layer handles all real-time updates during a run (log appends,
+    progress ticks) without touching the DB on every mutation.  SQLite layer
+    makes completed-job data survive gunicorn restarts.
+    """
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._mem: dict = {}
+        self._lock = threading.Lock()
+        self._init_db()
+        self._load_from_db()
+
+    # ── DB helpers ────────────────────────────────────────────────────────────
+
+    def _conn(self):
+        c = sqlite3.connect(self._db_path, check_same_thread=False, timeout=10)
+        c.row_factory = sqlite3.Row
+        return c
+
+    def _init_db(self):
+        with self._conn() as c:
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id           TEXT PRIMARY KEY,
+                    status       TEXT,
+                    doc_filename TEXT,
+                    url          TEXT,
+                    platform     TEXT,
+                    created_at   TEXT,
+                    result_json  TEXT,
+                    log_text     TEXT
+                )
+            ''')
+
+    def _load_from_db(self):
+        """Load all persisted jobs into memory on startup."""
+        try:
+            with self._conn() as c:
+                rows = c.execute('SELECT * FROM jobs').fetchall()
+            for row in rows:
+                job = json.loads(row['result_json'] or '{}')
+                job['id']       = row['id']
+                job['status']   = row['status'] or job.get('status', 'error')
+                job['logs']     = json.loads(row['log_text'] or '[]')
+                # Orphaned running jobs can't be resumed after a restart
+                if job.get('status') == 'running':
+                    job['status'] = 'error'
+                    job['phase']  = 'Server restarted — job interrupted'
+                self._mem[row['id']] = job
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error('JobStore._load_from_db: %s', exc)
+
+    def _upsert(self, job_id: str, job: dict):
+        """Write current job state to SQLite (INSERT OR REPLACE)."""
+        logs   = job.get('logs', [])
+        result = {k: v for k, v in job.items() if k != 'logs'}
+        try:
+            with self._conn() as c:
+                c.execute(
+                    '''INSERT OR REPLACE INTO jobs
+                           (id, status, doc_filename, url, platform, created_at,
+                            result_json, log_text)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (
+                        job_id,
+                        job.get('status', ''),
+                        job.get('doc_name', ''),
+                        job.get('survey_url', ''),
+                        job.get('platform', ''),
+                        job.get('created_at', ''),
+                        json.dumps(result, default=str),
+                        json.dumps(logs,   default=str),
+                    )
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error('JobStore._upsert(%s): %s', job_id, exc)
+
+    def _delete(self, job_id: str):
+        try:
+            with self._conn() as c:
+                c.execute('DELETE FROM jobs WHERE id = ?', (job_id,))
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error('JobStore._delete(%s): %s', job_id, exc)
+
+    # ── Public dict-like interface ────────────────────────────────────────────
+
+    def __setitem__(self, key: str, value: dict):
+        """Job creation or full replacement — writes through to DB."""
+        with self._lock:
+            self._mem[key] = value
+        self._upsert(key, value)
+
+    def __getitem__(self, key: str):
+        return self._mem[key]
+
+    def __contains__(self, key: str):
+        return key in self._mem
+
+    def get(self, key: str, default=None):
+        return self._mem.get(key, default)
+
+    def __delitem__(self, key: str):
+        with self._lock:
+            del self._mem[key]
+        self._delete(key)
+
+    def pop(self, key: str, *args):
+        val = self._mem.pop(key, *args)
+        self._delete(key)
+        return val
+
+    def evict(self, job_id: str):
+        """Remove from memory only; DB record is preserved for history."""
+        self._mem.pop(job_id, None)
+
+    def persist(self, job_id: str):
+        """Sync current in-memory state to SQLite.  Call at terminal states."""
+        job = self._mem.get(job_id)
+        if job:
+            self._upsert(job_id, job)
+
+    def items(self):
+        return self._mem.items()
+
+    def values(self):
+        return self._mem.values()
+
+    def keys(self):
+        return self._mem.keys()
+
+    def __len__(self):
+        return len(self._mem)
+
+
+# ── SQLite-backed User Store ──────────────────────────────────────────────────
+
+class UserDB:
+    """
+    Dict-like user store backed by the `users` table in SQLite.
+    Loads all rows into memory on startup; writes through to DB on
+    __setitem__ and explicit save() calls after in-place mutations.
+    """
+
+    PLAN_LIMITS = {'Free': 3, 'Pro': 25, 'Business': 999999}
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._mem: dict = {}
+        self._lock = threading.Lock()
+        self._init_table()
+        self._load_all()
+
+    def _conn(self):
+        c = sqlite3.connect(self._db_path, check_same_thread=False, timeout=10)
+        c.row_factory = sqlite3.Row
+        return c
+
+    def _init_table(self):
+        with self._conn() as c:
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id                   TEXT PRIMARY KEY,
+                    email                TEXT UNIQUE NOT NULL,
+                    password_hash        TEXT NOT NULL,
+                    name                 TEXT,
+                    plan                 TEXT DEFAULT "Free",
+                    created_at           TEXT,
+                    reports_used         INTEGER DEFAULT 0,
+                    total_saved_hours    INTEGER DEFAULT 0,
+                    must_change_password INTEGER DEFAULT 0
+                )
+            ''')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    token      TEXT PRIMARY KEY,
+                    email      TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            ''')
+            # Seed default admin if absent
+            if not c.execute(
+                'SELECT id FROM users WHERE email=?', ('admin@surveyqc.com',)
+            ).fetchone():
+                c.execute(
+                    '''INSERT INTO users (id,email,password_hash,name,plan,created_at,
+                                         reports_used,total_saved_hours,must_change_password)
+                       VALUES (?,?,?,?,?,?,?,?,?)''',
+                    (str(uuid.uuid4())[:8], 'admin@surveyqc.com',
+                     generate_password_hash('admin123'),
+                     'Admin', 'Business',
+                     datetime.now().strftime('%Y-%m-%d'), 0, 0, 1),
+                )
+
+    def _row_to_dict(self, row) -> dict:
+        plan = row['plan'] or 'Free'
+        return {
+            'id':                   row['id'],
+            'email':                row['email'],
+            'password_hash':        row['password_hash'],
+            'password':             row['password_hash'],   # legacy compat key
+            'name':                 row['name'] or row['email'].split('@')[0].title(),
+            'plan':                 plan,
+            'joined':               row['created_at'] or '',
+            'created_at':           row['created_at'] or '',
+            'reports_used':         row['reports_used'] or 0,
+            'reports_limit':        self.PLAN_LIMITS.get(plan, 3),
+            'total_saved_hours':    row['total_saved_hours'] or 0,
+            'must_change_password': bool(row['must_change_password']),
+        }
+
+    def _load_all(self):
+        with self._conn() as c:
+            for row in c.execute('SELECT * FROM users').fetchall():
+                self._mem[row['email']] = self._row_to_dict(row)
+
+    def _upsert(self, email: str, u: dict):
+        try:
+            with self._conn() as c:
+                c.execute(
+                    '''INSERT OR REPLACE INTO users
+                           (id,email,password_hash,name,plan,created_at,
+                            reports_used,total_saved_hours,must_change_password)
+                       VALUES (?,?,?,?,?,?,?,?,?)''',
+                    (
+                        u.get('id') or str(uuid.uuid4())[:8],
+                        email,
+                        u.get('password_hash') or u.get('password', ''),
+                        u.get('name', ''),
+                        u.get('plan', 'Free'),
+                        u.get('joined') or u.get('created_at') or datetime.now().strftime('%Y-%m-%d'),
+                        u.get('reports_used', 0),
+                        u.get('total_saved_hours', 0),
+                        int(u.get('must_change_password', 0)),
+                    )
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error('UserDB._upsert(%s): %s', email, exc)
+
+    # ── Public dict-like interface ────────────────────────────────────────────
+
+    def __getitem__(self, email: str) -> dict:
+        return self._mem[email]
+
+    def __setitem__(self, email: str, value: dict):
+        value.setdefault('id', str(uuid.uuid4())[:8])
+        value.setdefault('plan', 'Free')
+        value['reports_limit'] = self.PLAN_LIMITS.get(value.get('plan', 'Free'), 3)
+        with self._lock:
+            self._mem[email] = value
+        self._upsert(email, value)
+
+    def __contains__(self, email: str) -> bool:
+        return email in self._mem
+
+    def get(self, email: str, default=None):
+        return self._mem.get(email, default)
+
+    def items(self):
+        return self._mem.items()
+
+    def values(self):
+        return self._mem.values()
+
+    def keys(self):
+        return self._mem.keys()
+
+    def __len__(self) -> int:
+        return len(self._mem)
+
+    def save(self, email: str):
+        """Sync in-memory user to DB after an in-place field mutation."""
+        u = self._mem.get(email)
+        if u:
+            u['reports_limit'] = self.PLAN_LIMITS.get(u.get('plan', 'Free'), 3)
+            self._upsert(email, u)
+
+    def check_password(self, email: str, password: str) -> bool:
+        u = self._mem.get(email)
+        if not u:
+            return False
+        stored = u.get('password_hash') or u.get('password', '')
+        try:
+            return check_password_hash(stored, password)
+        except Exception:
+            # Fall back to legacy sha256 hashes (pre-migration accounts)
+            return stored == hashlib.sha256(password.encode()).hexdigest()
+
+    def can_run_report(self, email: str) -> bool:
+        u = self._mem.get(email, {})
+        limit = self.PLAN_LIMITS.get(u.get('plan', 'Free'), 3)
+        return limit == 999999 or u.get('reports_used', 0) < limit
+
+
+# In-memory stores (jobs + users backed by SQLite)
+jobs = JobStore(DB_PATH)
+users_db = UserDB(DB_PATH)
 feedback_store = []
 user_feedback_db = []  # [{id, type, message, page, user_email, created_at, read}]
 
@@ -163,6 +482,10 @@ def login_required(f):
     def decorated(*args, **kwargs):
         if 'user_email' not in session:
             return redirect('/login')
+        # Force password change for first-login admin before accessing anything else
+        u = users_db.get(session['user_email'], {})
+        if u.get('must_change_password') and request.endpoint != 'settings':
+            return redirect('/settings?force_change=1')
         return f(*args, **kwargs)
     return decorated
 
@@ -179,6 +502,7 @@ def get_current_user():
     if email and email in users_db:
         u = users_db[email].copy()
         u['email'] = email
+        u['reports_limit'] = UserDB.PLAN_LIMITS.get(u.get('plan', 'Free'), 3)
         return u
     return None
 
@@ -273,11 +597,12 @@ def landing():
 def login():
     error = ''
     if request.method == 'POST':
-        email = request.form.get('email', '').strip()
+        email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
-        pw_hash = hashlib.sha256(password.encode()).hexdigest()
-        if email in users_db and users_db[email]['password'] == pw_hash:
+        if users_db.check_password(email, password):
             session['user_email'] = email
+            if users_db[email].get('must_change_password'):
+                return redirect('/settings?force_change=1')
             return redirect('/dashboard')
         error = 'Invalid email or password'
 
@@ -373,11 +698,10 @@ a{text-decoration:none;color:inherit}
         </div>
         <div class="auth-row">
           <label class="auth-check"><input type="checkbox" style="accent-color:var(--accent)"> Remember me</label>
-          <a href="/login" class="auth-link">Forgot password?</a>
+          <a href="/forgot-password" class="auth-link">Forgot password?</a>
         </div>
         <button type="submit" class="auth-btn">Sign in <i class="ti ti-arrow-right"></i></button>
       </form>
-      <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:20px">Demo: demo@surveyqc.com / demo123</p>
     </div>
   </div>
 </div>
@@ -389,24 +713,32 @@ a{text-decoration:none;color:inherit}
 def signup():
     error = ''
     if request.method == 'POST':
-        name = request.form.get('name', '').strip()
-        email = request.form.get('email', '').strip()
+        name  = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
         if email in users_db:
             error = 'Email already registered'
         elif len(password) < 6:
             error = 'Password must be at least 6 characters'
+        elif not name:
+            error = 'Full name is required'
         else:
             users_db[email] = {
-                'password': hashlib.sha256(password.encode()).hexdigest(),
-                'name': name,
-                'plan': 'Free',
-                'reports_used': 0,
-                'reports_limit': 5,
-                'joined': datetime.now().strftime('%Y-%m-%d'),
-                'total_saved_hours': 0
+                'password_hash': generate_password_hash(password),
+                'password':      generate_password_hash(password),
+                'name':          name,
+                'plan':          'Free',
+                'reports_used':  0,
+                'reports_limit': UserDB.PLAN_LIMITS['Free'],
+                'joined':        datetime.now().strftime('%Y-%m-%d'),
+                'total_saved_hours': 0,
+                'must_change_password': False,
             }
             session['user_email'] = email
+            try:
+                send_welcome_email(email, name, 'Free')
+            except Exception:
+                pass
             return redirect('/dashboard')
 
     error_html = ('<div class="auth-error"><i class="ti ti-alert-circle"></i>' + error + '</div>') if error else ''
@@ -509,6 +841,218 @@ def logout():
     session.clear()
     return redirect('/home')
 
+
+# ================================================================
+# PASSWORD RESET
+# ================================================================
+
+_AUTH_CSS = """
+:root{--bg:#F7F4EE;--text:#171717;--text2:#5F5B53;--text3:#8A847A;
+      --accent:#C46A2B;--border:#E8E1D8;--dark:#1B140F;--danger:#C84B31}
+*{box-sizing:border-box;margin:0;padding:0;
+  font-family:-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--text);min-height:100vh;
+     display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:#fff;border-radius:16px;padding:40px;width:100%;max-width:400px;
+      box-shadow:0 4px 24px rgba(0,0,0,.08)}
+h1{font-size:22px;font-weight:700;letter-spacing:-.4px;margin-bottom:8px}
+.sub{font-size:14px;color:var(--text2);margin-bottom:28px;line-height:1.6}
+.sub a{color:var(--accent);font-weight:600;text-decoration:none}
+label{font-size:13px;font-weight:600;display:block;margin-bottom:6px}
+input{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;
+      font-size:14px;outline:none;font-family:inherit;transition:border .15s}
+input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(196,106,43,.12)}
+.form-group{margin-bottom:18px}
+.btn{width:100%;background:var(--dark);color:#F7F4EE;border:none;padding:13px;
+     border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px}
+.btn-accent{background:var(--accent)}
+.alert-ok{background:#E6F4EC;border:1px solid #A7D7B8;color:#1A5632;font-size:13px;
+           padding:11px 14px;border-radius:10px;margin-bottom:18px}
+.alert-err{background:#FAE5E0;border:1px solid #F0C4BA;color:var(--danger);font-size:13px;
+           padding:11px 14px;border-radius:10px;margin-bottom:18px}
+"""
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    msg = ''
+    is_error = False
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        if email in users_db:
+            token   = uuid.uuid4().hex
+            from datetime import timedelta as _td
+            expires = (datetime.now() + _td(hours=1)).isoformat()
+            # Store token in DB
+            try:
+                with sqlite3.connect(DB_PATH, timeout=10) as _c:
+                    _c.execute('DELETE FROM password_resets WHERE email=?', (email,))
+                    _c.execute(
+                        'INSERT INTO password_resets (token,email,expires_at) VALUES (?,?,?)',
+                        (token, email, expires)
+                    )
+            except Exception as _e:
+                import logging; logging.getLogger(__name__).error('reset token store: %s', _e)
+
+            BASE_URL = "http://46.202.163.130:5000"
+            reset_link = f"{BASE_URL}/reset-password/{token}"
+            import logging as _logging
+            _logging.getLogger(__name__).info("Reset link generated: %s", reset_link)
+            try:
+                send_password_reset_email(email, reset_link)
+            except Exception as _email_exc:
+                _logging.getLogger(__name__).error("send_password_reset_email error: %s", _email_exc)
+        # Always show the same message — don't reveal whether email exists
+        msg = 'If that address is registered, a reset link is on its way. Check your inbox.'
+
+    alert = ''
+    if msg:
+        alert = f'<div class="alert-ok">{msg}</div>'
+    elif is_error:
+        alert = f'<div class="alert-err">{msg}</div>'
+
+    return render_template_string(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Forgot password — SurveyQC</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>{_AUTH_CSS}</style></head><body>
+<div class="card">
+  <div style="display:flex;align-items:center;gap:9px;margin-bottom:28px">
+    <div style="width:30px;height:30px;background:#1B140F;border-radius:7px;
+                display:flex;align-items:center;justify-content:center">
+      <i class="ti ti-shield-check" style="color:white;font-size:15px"></i>
+    </div>
+    <span style="font-weight:700;font-size:16px">SurveyQC</span>
+  </div>
+  <h1>Forgot your password?</h1>
+  <p class="sub">Enter your email and we'll send a reset link.
+    <a href="/login">Back to sign in</a></p>
+  {alert}
+  <form method="POST">
+    <div class="form-group">
+      <label>Email address</label>
+      <input type="email" name="email" placeholder="you@company.com" required autofocus>
+    </div>
+    <button type="submit" class="btn">Send reset link <i class="ti ti-send"></i></button>
+  </form>
+</div>
+</body></html>""")
+
+
+@app.route('/test-email')
+def test_email():
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    # Resend test-mode restriction: can only send to the account owner email
+    # until a domain is verified at resend.com/domains
+    target = 'tyagi6165@gmail.com'
+    _log.info("test-email route hit, sending to %s", target)
+    try:
+        result = send_password_reset_email(target, 'http://46.202.163.130:5000/reset-password/test-token-123')
+        return f'send_password_reset_email returned: {result}  (target={target})', 200
+    except Exception as exc:
+        _log.error("test-email error: %s", exc)
+        return f'ERROR: {exc}', 500
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    error = ''
+
+    # Validate token
+    try:
+        with sqlite3.connect(DB_PATH, timeout=10) as _c:
+            _c.row_factory = sqlite3.Row
+            row = _c.execute(
+                'SELECT email,expires_at FROM password_resets WHERE token=?', (token,)
+            ).fetchone()
+    except Exception:
+        row = None
+
+    if not row:
+        return render_template_string(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><title>Invalid link — SurveyQC</title>
+<style>{_AUTH_CSS}</style></head><body>
+<div class="card">
+  <h1>Link invalid or expired</h1>
+  <p class="sub" style="margin-top:8px">This reset link has already been used or has expired.<br>
+    <a href="/forgot-password">Request a new one</a></p>
+</div></body></html>"""), 400
+
+    email      = row['email']
+    expires_at = row['expires_at']
+
+    # Check expiry
+    if datetime.fromisoformat(expires_at) < datetime.now():
+        try:
+            with sqlite3.connect(DB_PATH, timeout=10) as _c:
+                _c.execute('DELETE FROM password_resets WHERE token=?', (token,))
+        except Exception:
+            pass
+        return render_template_string(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><title>Link expired — SurveyQC</title>
+<style>{_AUTH_CSS}</style></head><body>
+<div class="card">
+  <h1>Reset link expired</h1>
+  <p class="sub" style="margin-top:8px">Links expire after 1 hour.
+    <a href="/forgot-password">Request a new one</a></p>
+</div></body></html>"""), 400
+
+    if request.method == 'POST':
+        new_pw = request.form.get('password', '')
+        confirm = request.form.get('confirm', '')
+        if len(new_pw) < 6:
+            error = 'Password must be at least 6 characters.'
+        elif new_pw != confirm:
+            error = 'Passwords do not match.'
+        else:
+            # Update password
+            new_hash = generate_password_hash(new_pw)
+            if email in users_db:
+                users_db[email]['password_hash'] = new_hash
+                users_db[email]['password']       = new_hash
+                users_db[email]['must_change_password'] = False
+                users_db.save(email)
+            # Delete used token
+            try:
+                with sqlite3.connect(DB_PATH, timeout=10) as _c:
+                    _c.execute('DELETE FROM password_resets WHERE token=?', (token,))
+            except Exception:
+                pass
+            return render_template_string(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><title>Password updated — SurveyQC</title>
+<style>{_AUTH_CSS}</style></head><body>
+<div class="card">
+  <h1>Password updated ✓</h1>
+  <p class="sub" style="margin-top:8px">Your password has been changed successfully.</p>
+  <a href="/login" class="btn" style="display:block;text-align:center;text-decoration:none;
+     margin-top:20px;padding:13px">Sign in now &rarr;</a>
+</div></body></html>""")
+
+    err_html = f'<div class="alert-err">{error}</div>' if error else ''
+    return render_template_string(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset password — SurveyQC</title>
+<style>{_AUTH_CSS}</style></head><body>
+<div class="card">
+  <h1>Set a new password</h1>
+  <p class="sub" style="margin-top:8px">For <strong>{email}</strong></p>
+  {err_html}
+  <form method="POST">
+    <div class="form-group">
+      <label>New password</label>
+      <input type="password" name="password" placeholder="At least 6 characters" required autofocus>
+    </div>
+    <div class="form-group">
+      <label>Confirm password</label>
+      <input type="password" name="confirm" placeholder="Repeat password" required>
+    </div>
+    <button type="submit" class="btn btn-accent">Set new password</button>
+  </form>
+</div>
+</body></html>""")
+
+
 # ================================================================
 # PAGE: DASHBOARD
 # ================================================================
@@ -524,6 +1068,10 @@ def dashboard():
     user_jobs = [(jid, j) for jid, j in jobs.items()
                  if j.get('user_email') == session.get('user_email')]
     user_jobs.sort(key=lambda x: x[1].get('created_at', ''), reverse=True)
+
+    done_jobs      = [j for _, j in user_jobs if j.get('status') == 'done']
+    issues_found   = sum(j.get('total_issues', 0) for j in done_jobs)
+    passed_count   = sum(1 for j in done_jobs if j.get('total_issues', 0) == 0)
 
     recent_html = ''
     for jid, j in user_jobs[:5]:
@@ -576,9 +1124,9 @@ def dashboard():
     </div>
 
     <div class="stats-grid">
-      <div class="stat-card"><p class="stat-num">{reports_used}</p><p class="stat-label">Reports run</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#3F7D58">{max(0,reports_used-3)}</p><p class="stat-label">Passed</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#C84B31">3</p><p class="stat-label">Issues found</p></div>
+      <div class="stat-card"><p class="stat-num">{len(done_jobs)}</p><p class="stat-label">Reports run</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#3F7D58">{passed_count}</p><p class="stat-label">Passed</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#C84B31">{issues_found}</p><p class="stat-label">Issues found</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#2E8B57">{saved}h</p><p class="stat-label">Time saved</p></div>
     </div>
 
@@ -1280,6 +1828,34 @@ def run_qc_submit():
     if not survey_url:
         return _validation_error("Please enter the live survey URL.")
 
+    # Plan-limit gate — checked before creating the job
+    _email = session['user_email']
+    if not users_db.can_run_report(_email):
+        _u = users_db.get(_email, {})
+        _plan = _u.get('plan', 'Free')
+        _limit = UserDB.PLAN_LIMITS.get(_plan, 3)
+        return render_template_string(SHARED_CSS + f"""
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Limit Reached — SurveyQC</title></head><body>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F8F9FA">
+  <div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:36px;max-width:460px;text-align:center">
+    <div style="width:48px;height:48px;background:#FEF3C7;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+      <i class="ti ti-crown" style="font-size:24px;color:#D97706"></i>
+    </div>
+    <p style="font-size:16px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Report limit reached</p>
+    <p style="font-size:14px;color:#6B7280;margin-bottom:6px">Your <b>{_plan}</b> plan includes <b>{_limit} reports</b>.</p>
+    <p style="font-size:13px;color:#9CA3AF;margin-bottom:24px">Upgrade to Pro (25 reports) or Business (unlimited) to continue.</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <a href="/billing" style="display:inline-flex;align-items:center;gap:6px;background:#7C3AED;color:white;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none">
+        <i class="ti ti-arrow-up-circle" style="font-size:14px"></i> Upgrade plan
+      </a>
+      <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;background:#F3F4F6;color:#374151;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none">
+        Dashboard
+      </a>
+    </div>
+  </div>
+</div>
+</body></html>"""), 403
+
     job_id = str(uuid.uuid4())[:8]
     job_dir = f"{UPLOAD_FOLDER}/{job_id}"
     os.makedirs(job_dir, exist_ok=True)
@@ -1326,14 +1902,15 @@ def run_qc_submit():
     elif export_text_field:
         export_schema_text = export_text_field
 
-    # Memory guard: evict oldest finished jobs when dict exceeds 10 entries.
-    if len(jobs) >= 10:
+    # Memory guard: evict oldest finished jobs from RAM when count > 50.
+    # Records stay in SQLite; only the in-memory cache is trimmed.
+    if len(jobs) >= 50:
         _finished_ids = sorted(
             (jid for jid, j in jobs.items() if j.get('status') in ('done', 'error', 'stopped')),
             key=lambda jid: jobs[jid].get('created_at', '')
         )
-        for _evict in _finished_ids[:max(0, len(jobs) - 9)]:
-            jobs.pop(_evict, None)
+        for _evict in _finished_ids[:max(0, len(jobs) - 49)]:
+            jobs.evict(_evict)
 
     jobs[job_id] = {
         'status': 'running',
@@ -1376,6 +1953,7 @@ def run_qc_submit():
     if email in users_db:
         users_db[email]['reports_used'] = users_db[email].get('reports_used', 0) + 1
         users_db[email]['total_saved_hours'] = users_db[email].get('total_saved_hours', 0) + 8
+        users_db.save(email)
 
     return redirect(f'/progress/{job_id}')
 
@@ -1488,6 +2066,7 @@ def stop_job(job_id):
     if job_id in jobs:
         jobs[job_id]['status'] = 'stopped'
         jobs[job_id]['phase'] = 'Stopped by user'
+        jobs.persist(job_id)
     return jsonify({'ok': True})
 
 # ================================================================
@@ -2103,20 +2682,32 @@ def settings():
     email = session['user_email']
     success = ''
 
+    force_change = request.args.get('force_change') == '1' or (
+        request.method == 'POST' and request.form.get('force_change') == '1'
+    )
+
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'profile':
             users_db[email]['name'] = request.form.get('name', user['name'])
+            users_db.save(email)
             success = 'Profile updated!'
         elif action == 'password':
             old_pw = request.form.get('old_password', '')
             new_pw = request.form.get('new_password', '')
-            if hashlib.sha256(old_pw.encode()).hexdigest() == users_db[email]['password']:
+            if users_db.check_password(email, old_pw):
                 if len(new_pw) >= 6:
-                    users_db[email]['password'] = hashlib.sha256(new_pw.encode()).hexdigest()
+                    new_hash = generate_password_hash(new_pw)
+                    users_db[email]['password_hash'] = new_hash
+                    users_db[email]['password'] = new_hash
+                    users_db[email]['must_change_password'] = False
+                    users_db.save(email)
+                    session.pop('force_change', None)
                     success = 'Password updated!'
+                else:
+                    success = 'ERROR: New password must be at least 6 characters'
             else:
-                success = 'ERROR: Current password wrong'
+                success = 'ERROR: Current password is wrong'
         user = get_current_user()
 
     name = user['name']
@@ -2137,6 +2728,7 @@ def settings():
       <a href="/billing" class="tab">Billing</a>
     </div>
 
+    {'<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:#92400E"><b>⚠️ You must change your password before continuing.</b> This is required for first-time admin access.</div>' if force_change else ''}
     {'<div class="alert ' + ('alert-success' if not success.startswith('ERROR') else 'alert-error') + '">' + success + '</div>' if success else ''}
 
     <div style="display:grid;grid-template-columns:1fr 300px;gap:16px">
@@ -2169,6 +2761,7 @@ def settings():
           <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:16px">Change password</p>
           <form method="POST">
             <input type="hidden" name="action" value="password">
+            <input type="hidden" name="force_change" value="{'1' if force_change else '0'}">
             <div class="form-group">
               <label class="form-label">Current password</label>
               <input class="form-input" type="password" name="old_password" placeholder="Current password">
@@ -2266,13 +2859,19 @@ def billing():
           </div>
           <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center"><i class="ti ti-credit-card"></i>Add / update card</button>'''
 
-    def _plan_card(name, price, feats, btn_label, is_current, is_ent=False):
+    def _plan_card(name, price, feats, btn_label, is_current, is_ent=False, can_upgrade=False):
         border = 'border:2px solid var(--purple)' if is_current else ''
         badge = '<span class="badge badge-purple" style="margin-bottom:8px;display:inline-block">Current plan</span>' if is_current else ''
-        price_html = f'Custom<span style="font-size:13px;color:var(--text3)"> — contact sales</span>' if is_ent else f'${price}<span style="font-size:13px;color:var(--text3)">/mo</span>'
-        btn_cls = 'btn-primary' if is_current else ('btn-ghost' if name in ('Free','Enterprise') else 'btn-ghost')
-        btn_href = f'mailto:support@surveyqc.online?subject=Enterprise%20Inquiry' if is_ent else '#'
-        btn_tag = f'<a href="{btn_href}" class="btn {btn_cls} btn-sm" style="width:100%;justify-content:center;text-decoration:none">{btn_label}</a>' if is_ent else f'<button class="btn {btn_cls} btn-sm" style="width:100%;justify-content:center">{btn_label}</button>'
+        price_html = f'Custom<span style="font-size:13px;color:var(--text3)"> — contact sales</span>' if is_ent else f'₹{price}<span style="font-size:13px;color:var(--text3)">/mo</span>'
+        if is_ent:
+            btn_tag = f'<a href="mailto:support@surveyqc.online?subject=Enterprise%20Inquiry" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;text-decoration:none">{btn_label}</a>'
+        elif is_current or name == 'Free':
+            btn_cls = 'btn-primary' if is_current else 'btn-ghost'
+            btn_tag = f'<button class="btn {btn_cls} btn-sm" style="width:100%;justify-content:center" disabled>{btn_label}</button>'
+        elif can_upgrade and not is_demo:
+            btn_tag = f'<button class="btn btn-ghost btn-sm rzp-upgrade-btn" data-plan="{name}" style="width:100%;justify-content:center"><i class="ti ti-bolt"></i> {btn_label}</button>'
+        else:
+            btn_tag = f'<button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center" disabled>{btn_label}</button>'
         return f'''<div class="card" style="{border}">
           {badge}
           <p style="font-size:13px;font-weight:600;color:var(--text)">{name}</p>
@@ -2281,10 +2880,18 @@ def billing():
           {btn_tag}
         </div>'''
 
-    cards_html = _plan_card('Free',     free_price, free_feats, 'Current plan' if plan=='Free' else 'Downgrade',         plan=='Free')
-    cards_html += _plan_card('Pro',     pro_price,  pro_feats,  'Current plan' if plan=='Pro'  else 'Upgrade to Pro',    plan=='Pro')
-    cards_html += _plan_card('Business',biz_price,  biz_feats,  'Current plan' if plan=='Business' else 'Upgrade',       plan=='Business')
+    _plan_order = ['Free', 'Pro', 'Business']
+    _current_idx = _plan_order.index(plan) if plan in _plan_order else 0
+
+    cards_html  = _plan_card('Free',      free_price, free_feats, 'Current plan' if plan=='Free' else 'Downgrade',      plan=='Free')
+    cards_html += _plan_card('Pro',       '2,499',    pro_feats,  'Current plan' if plan=='Pro'  else 'Upgrade to Pro', plan=='Pro',      can_upgrade=(_current_idx < 1))
+    cards_html += _plan_card('Business',  '24,999',   biz_feats,  'Current plan' if plan=='Business' else 'Upgrade',    plan=='Business', can_upgrade=(_current_idx < 2))
     cards_html += _plan_card('Enterprise', ent_price, ent_feats, 'Contact Sales', plan=='Enterprise', is_ent=True)
+
+    _billing_success = request.args.get('upgraded')
+    _success_banner = ''
+    if _billing_success:
+        _success_banner = f'<div style="background:#E6F4EC;border:1px solid #A7D7B8;color:#1A5632;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:8px"><i class="ti ti-circle-check"></i> You are now on the <strong>{_billing_success}</strong> plan. Thank you!</div>'
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Billing — SurveyQC</title></head><body>
@@ -2297,6 +2904,8 @@ def billing():
       <a href="/settings" class="tab">Profile</a>
       <a href="/billing" class="tab active">Billing</a>
     </div>
+
+    {_success_banner}
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
       {cards_html}
@@ -2321,7 +2930,115 @@ def billing():
     </div>
   </div>
 </div>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+document.querySelectorAll('.rzp-upgrade-btn').forEach(function(btn) {{
+  btn.addEventListener('click', function() {{
+    var plan = this.getAttribute('data-plan');
+    var origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader"></i> Opening...';
+    fetch('/create-order', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{plan: plan}})
+    }})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(data) {{
+      if (data.error) {{ alert('Error: ' + data.error); btn.disabled=false; btn.innerHTML=origText; return; }}
+      var options = {{
+        key:         data.key_id,
+        amount:      data.amount,
+        currency:    data.currency,
+        name:        'SurveyQC',
+        description: data.description,
+        order_id:    data.order_id,
+        prefill:     {{email: '{email}'}},
+        theme:       {{color: '#C46A2B'}},
+        handler: function(response) {{
+          fetch('/verify-payment', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+              razorpay_order_id:   response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature:  response.razorpay_signature,
+              plan:                plan
+            }})
+          }})
+          .then(function(r) {{ return r.json(); }})
+          .then(function(d) {{
+            if (d.success) {{
+              window.location.href = '/billing?upgraded=' + encodeURIComponent(plan);
+            }} else {{
+              alert('Payment verification failed. Please contact support.');
+              btn.disabled=false; btn.innerHTML=origText;
+            }}
+          }});
+        }},
+        modal: {{
+          ondismiss: function() {{ btn.disabled=false; btn.innerHTML=origText; }}
+        }}
+      }};
+      var rzp = new Razorpay(options);
+      rzp.open();
+    }})
+    .catch(function(err) {{
+      alert('Could not start checkout. Please try again.');
+      btn.disabled=false; btn.innerHTML=origText;
+    }});
+  }});
+}});
+</script>
 </body></html>""")
+
+# ================================================================
+# PAYMENT: Razorpay
+# ================================================================
+@app.route('/create-order', methods=['POST'])
+@login_required
+def create_order():
+    import logging as _log
+    data = request.get_json(silent=True) or {}
+    plan = data.get('plan', '')
+    if plan not in ('Pro', 'Business'):
+        return jsonify(error='Invalid plan'), 400
+    try:
+        order = _rzp_create_order(plan)
+        return jsonify(order)
+    except Exception as exc:
+        _log.getLogger(__name__).error('create_order: %s', exc)
+        return jsonify(error=str(exc)), 500
+
+
+@app.route('/verify-payment', methods=['POST'])
+@login_required
+def verify_payment():
+    import logging as _log
+    data = request.get_json(silent=True) or {}
+    order_id   = data.get('razorpay_order_id', '')
+    payment_id = data.get('razorpay_payment_id', '')
+    signature  = data.get('razorpay_signature', '')
+    plan       = data.get('plan', '')
+
+    if not all([order_id, payment_id, signature, plan]):
+        return jsonify(success=False, error='Missing fields'), 400
+
+    if not _rzp_verify_payment(order_id, payment_id, signature):
+        return jsonify(success=False, error='Signature verification failed'), 400
+
+    # Upgrade the user's plan in the DB
+    email = session.get('user_email')
+    if email and email in users_db:
+        users_db[email]['plan'] = plan
+        users_db[email]['reports_limit'] = UserDB.PLAN_LIMITS.get(plan, 3)
+        users_db.save(email)
+        _log.getLogger(__name__).info(
+            'Plan upgraded: email=%s plan=%s order=%s payment=%s',
+            email, plan, order_id, payment_id
+        )
+    return jsonify(success=True, plan=plan)
+
 
 # ================================================================
 # ADMIN: LOGIN
@@ -2331,7 +3048,8 @@ def admin_login():
     error = ''
     if request.method == 'POST':
         pw = request.form.get('password', '')
-        if pw == ADMIN_PASSWORD:
+        # Accept if it matches the hardcoded ADMIN_PASSWORD or the admin@surveyqc.com DB user
+        if pw == ADMIN_PASSWORD or users_db.check_password('admin@surveyqc.com', pw):
             session['is_admin'] = True
             return redirect('/admin')
         error = 'Wrong password'
@@ -2612,6 +3330,7 @@ def admin_reports():
 # API ENDPOINTS
 # ================================================================
 @app.route('/api/status/<job_id>')
+@login_required
 def api_status(job_id):
     if job_id not in jobs:
         return jsonify({'error': 'Not found'}), 404
@@ -3985,6 +4704,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
     except ImportError as e:
         jobs[job_id]['status'] = 'error'
         jobs[job_id]['logs'].append({'msg': f'Module missing: {e}', 'color': 'red'})
+        jobs.persist(job_id)
         return
 
     job = jobs[job_id]
@@ -4358,8 +5078,9 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     break
 
             _dbg_rules_before = sum(len(q.get('termination_rules', [])) for q in questions.values())
-            print(f"[TERM DEBUG] --- Table: qid={table_qid!r} ctx={current_context_qid!r} "
-                  f"rows={len(table_rows_cells)} multirow={_multirow_term_ri is not None}")
+            app.logger.debug("[TERM DEBUG] --- Table: qid=%r ctx=%r rows=%d multirow=%s",
+                             table_qid, current_context_qid,
+                             len(table_rows_cells), _multirow_term_ri is not None)
 
             if _multirow_term_ri is not None:
                 # ── Mode A: multi-row ─────────────────────────────────────────
@@ -4369,14 +5090,14 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 for _ri, _row_cells in enumerate(table_rows_cells):
                     _cond_text = " | ".join(_row_cells)
                     if _ri == _multirow_term_ri:
-                        print(f"[TERM DEBUG]   row {_ri} [keyword]: {_cond_text[:100]}")
+                        app.logger.debug("[TERM DEBUG]   row %d [keyword]: %s", _ri, _cond_text[:100])
                         continue
                     _cm = _COND_LINE_RE.match(_cond_text)
                     if not _cm:
-                        print(f"[TERM DEBUG]   row {_ri} [skip — no cond match]: {_cond_text[:80]}")
+                        app.logger.debug("[TERM DEBUG]   row %d [skip — no cond match]: %s", _ri, _cond_text[:80])
                         continue
                     _cqid, _op, _ccode = _cm.group(1), _cm.group(2), _cm.group(3)
-                    print(f"[TERM DEBUG]   row {_ri} [cond]: qid={_cqid!r} op={_op!r} code={_ccode!r}")
+                    app.logger.debug("[TERM DEBUG]   row %d [cond]: qid=%r op=%r code=%r", _ri, _cqid, _op, _ccode)
                     # Use the condition QID as the rule host when it's a valid survey QID;
                     # fall back to the table's context QID for bare-code conditions.
                     if is_valid_qid(_cqid) and not should_skip_qid(_cqid):
@@ -4384,7 +5105,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     else:
                         _rule_host = table_qid or current_context_qid
                     if not _rule_host or should_skip_qid(_rule_host):
-                        print(f"[TERM DEBUG]   row {_ri} SKIPPED — no valid host for {_cqid!r}")
+                        app.logger.debug("[TERM DEBUG]   row %d SKIPPED — no valid host for %r", _ri, _cqid)
                         continue
                     if _rule_host not in questions:
                         questions[_rule_host] = {
@@ -4418,7 +5139,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         ]
                     else:
                         _dbg_pairs = []
-                    print(f"[TERM DEBUG]   row: {_row_text[:120]} | kw={bool(_kw_match)} | codes={_dbg_pairs}")
+                    app.logger.debug("[TERM DEBUG]   row: %s | kw=%s | codes=%s", _row_text[:120], bool(_kw_match), _dbg_pairs)
                     if not _kw_match:
                         continue
                     host = table_qid or current_context_qid
@@ -4477,20 +5198,21 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                     })
 
             _dbg_rules_after = sum(len(q.get('termination_rules', [])) for q in questions.values())
-            print(f"[TERM DEBUG] Table done: {_dbg_rules_after - _dbg_rules_before} new rule(s)")
+            app.logger.debug("[TERM DEBUG] Table done: %d new rule(s)", _dbg_rules_after - _dbg_rules_before)
 
         for qid in questions:
             questions[qid]["text"] = re.sub(r'\s+', ' ', questions[qid]["text"]).strip()
 
         term_count = sum(len(q.get("termination_rules", [])) for q in questions.values())
         # ── [TERM DEBUG] checkpoint 3: post-parse canonical model ────────────
-        print(f"[TERM DEBUG] Total termination rules in canonical model: {term_count}")
+        app.logger.debug("[TERM DEBUG] Total termination rules in canonical model: %d", term_count)
         for _dbg_qid, _dbg_q in questions.items():
             _dbg_tr = _dbg_q.get("termination_rules", [])
             if _dbg_tr:
-                print(f"[TERM DEBUG]   QID {_dbg_qid}: {len(_dbg_tr)} rule(s) → {[r.get('answer_codes') for r in _dbg_tr]}")
+                app.logger.debug("[TERM DEBUG]   QID %s: %d rule(s) → %s",
+                                 _dbg_qid, len(_dbg_tr), [r.get('answer_codes') for r in _dbg_tr])
         if term_count == 0:
-            print("[TERM DEBUG] *** WARNING: 0 termination rules — check keyword matching above ***")
+            app.logger.debug("[TERM DEBUG] *** WARNING: 0 termination rules — check keyword matching above ***")
         # ─────────────────────────────────────────────────────────────────────
         log(f'  Questions parsed: {len(questions)}', 'green')
         log(f'  Termination rules: {term_count}', 'green')
@@ -4901,6 +5623,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         jobs[job_id]["status"] = "error"
                         jobs[job_id]["phase"] = "Survey link expired or not working"
                         jobs[job_id]["error"] = "Survey link is not working or has expired. Please check the link and try again with a fresh link."
+                        jobs.persist(job_id)
                         try: browser.close()
                         except: pass
                         return
@@ -5000,6 +5723,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         jobs[job_id]["status"] = "error"
                         jobs[job_id]["phase"] = "Survey URL locked — no accessible questions"
                         jobs[job_id]["error"] = _err_msg
+                        jobs.persist(job_id)
                         try: browser.close()
                         except: pass
                         return
@@ -5172,6 +5896,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                             try: browser.close()
                             except: pass
                             jobs[job_id]['phase'] = 'Stopped'
+                            jobs.persist(job_id)
                             return
                         progress(20 + int((i/total)*40), 'Crawling ' + qid + '...')
                         if i % 50 == 0:
@@ -5720,6 +6445,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 jobs[job_id]['error'] = ('Crawl failed — 0 pages loaded. The live survey did not render in time. '
                                          'Possible causes: slow platform, bot detection, or session timeout. '
                                          'Retry the QC or check the link.')
+                jobs.persist(job_id)
                 return
 
         # PHASE 3: COMPARE
@@ -6100,6 +6826,44 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 if live_data[_live_key].get("has_raw_piping"):
                     issues.append({"qid":qid,"type":"PIPING NOT RESOLVED","details":f"Raw: {live_data[_live_key].get('raw_piping_found',[])[:3]}","severity":"HIGH"})
 
+            # ── TRANSLATION SYNC ─────────────────────────────────────────
+            try:
+                from translation_sync import check_translation_sync as _ts_check
+                # Build minimal doc/live dicts from the comparison list
+                _ts_doc  = {
+                    _it['_doc_key']: {'text': _it['doc_text']}
+                    for _it in _to_compare if _it.get('doc_text')
+                }
+                _ts_live = {
+                    _it['_live_key']: {'text': _it['live_text']}
+                    for _it in _to_compare if _it.get('live_text')
+                }
+                # Pull existing TEXT MISMATCH issues so matched translations
+                # can be suppressed
+                _ts_existing = [i for i in issues if i.get('type') == 'TEXT MISMATCH']
+                _ts_new, _ts_filtered = _ts_check(_ts_doc, _ts_live, _ts_existing)
+                # Replace existing TEXT MISMATCH issues with the filtered set
+                _suppressed = len(_ts_existing) - len(_ts_filtered)
+                if _suppressed:
+                    issues = [i for i in issues if i.get('type') != 'TEXT MISMATCH']
+                    issues.extend(_ts_filtered)
+                    log(f'  Translation sync: {_suppressed} false-positive(s) suppressed (valid translation)', 'green')
+                for _ti in _ts_new:
+                    _ti.setdefault('is_translation_issue', True)
+                    issues.append(_ti)
+                job['translation_issues'] = _ts_new
+                if _ts_new:
+                    log(f'  Translation sync: {len(_ts_new)} issue(s) — '
+                        f'{sum(1 for t in _ts_new if t["verdict"]=="TRANSLATION_MISMATCH")} mismatch, '
+                        f'{sum(1 for t in _ts_new if t["verdict"]=="TRANSLATION_UNCERTAIN")} uncertain',
+                        'yellow')
+                elif not _suppressed:
+                    log('  Translation sync: no cross-language issues', 'green')
+            except Exception as _ts_exc:
+                log(f'  Translation sync skipped: {str(_ts_exc)[:60]}', 'grey')
+                job.setdefault('translation_issues', [])
+            # ─────────────────────────────────────────────────────────────
+
             # ── PIPING VALIDATION (CHECK1-4) ──────────────────────────────
             try:
                 from piping_validator import validate_piping as _pv_validate
@@ -6166,9 +6930,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 }
                 # ── [TERM DEBUG] checkpoint 5: test_generator handoff ────────
                 _dbg_ltc = _gen_doc_data.get("logic_tables", [])
-                print(f"[TERM DEBUG] test_generator handoff: {len(_dbg_ltc)} logic_tables, {len(questions)} questions")
+                app.logger.debug("[TERM DEBUG] test_generator handoff: %d logic_tables, %d questions",
+                                 len(_dbg_ltc), len(questions))
                 for _dbg_lt in _dbg_ltc[:5]:
-                    print(f"[TERM DEBUG]   logic_table host={_dbg_lt.get('host_qid')!r} flat={_dbg_lt.get('flat_text','')[:80]!r}")
+                    app.logger.debug("[TERM DEBUG]   logic_table host=%r flat=%r",
+                                     _dbg_lt.get('host_qid'), _dbg_lt.get('flat_text','')[:80])
                 # ─────────────────────────────────────────────────────────────
                 _tc_list, _tc_summary = _gen_tc(_gen_doc_data)
                 # Merge range test cases from range_validator
@@ -6433,9 +7199,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     unique_rules.append(r)
 
             # ── [TERM DEBUG] checkpoint 4: Phase 4 entry ─────────────────────
-            print(f"[TERM DEBUG] Phase 4: {len(questions)} questions scanned → {len(rules)} raw rules → {len(unique_rules)} unique rules to test")
+            app.logger.debug("[TERM DEBUG] Phase 4: %d questions → %d raw rules → %d unique rules",
+                             len(questions), len(rules), len(unique_rules))
             for _dbg_r in unique_rules[:10]:
-                print(f"[TERM DEBUG]   rule: {_dbg_r['test_qid']}={_dbg_r['answer_code']}  raw={_dbg_r['raw_rule'][:60]!r}")
+                app.logger.debug("[TERM DEBUG]   rule: %s=%s  raw=%r",
+                                 _dbg_r['test_qid'], _dbg_r['answer_code'], _dbg_r['raw_rule'][:60])
             # ─────────────────────────────────────────────────────────────────
             log(f'  Testing {len(unique_rules)} rules', 'blue')
 
@@ -6443,6 +7211,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 if jobs.get(job_id, {}).get('status') == 'stopped':
                     log('  >>> STOPPED by user during termination tests', 'red')
                     jobs[job_id]['phase'] = 'Stopped'
+                    jobs.persist(job_id)
                     return
                 test_qid = rule["test_qid"]
                 answer_code = rule["answer_code"]
@@ -6562,35 +7331,83 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                 page.wait_for_timeout(500)
                         except: pass
 
-                        radio_idx = int(answer_code) - 1
+                        _ac = str(answer_code)
                         clicked = False
                         strategy = ""
 
+                        # Strategy 1: radio input whose value attribute == answer_code
+                        # (Confirmit/Forsta store the code as the <input value="N">)
                         for _attempt in range(2):
                             try:
-                                _lbl = page.locator(".cf-radio-answer__text").nth(radio_idx)
-                                try: _lbl.scroll_into_view_if_needed(timeout=2000)
-                                except: pass
-                                _lbl.click(force=True, timeout=3000)
-                                page.wait_for_timeout(600)
-                                clicked = True
-                                strategy = f"label index={radio_idx}"
-                                break
+                                _r = page.locator(f"input[type='radio'][value='{_ac}']:visible")
+                                if _r.count() > 0:
+                                    try: _r.first.scroll_into_view_if_needed(timeout=2000)
+                                    except: pass
+                                    _r.first.click(force=True, timeout=3000)
+                                    page.wait_for_timeout(600)
+                                    clicked = True
+                                    strategy = f"value={_ac}"
+                                    break
                             except:
                                 if _attempt == 0:
                                     page.wait_for_timeout(500)
 
+                        # Strategy 2: data-code / data-value / data-answer-id attribute
                         if not clicked:
-                            for _attempt in range(2):
+                            for _attr_sel in [f"[data-code='{_ac}']",
+                                              f"[data-value='{_ac}']",
+                                              f"[data-answer-id='{_ac}']"]:
                                 try:
-                                    page.locator("input[type='radio']:visible").nth(radio_idx).click(force=True, timeout=3000)
-                                    page.wait_for_timeout(600)
-                                    clicked = True
-                                    strategy = f"radio index={radio_idx}"
-                                    break
+                                    _r = page.locator(_attr_sel)
+                                    if _r.count() > 0:
+                                        try: _r.first.scroll_into_view_if_needed(timeout=2000)
+                                        except: pass
+                                        _r.first.click(force=True, timeout=3000)
+                                        page.wait_for_timeout(600)
+                                        clicked = True
+                                        strategy = f"attr={_ac}"
+                                        break
                                 except:
-                                    if _attempt == 0:
-                                        page.wait_for_timeout(500)
+                                    pass
+
+                        # Strategy 3: positional fallback (valid only for 1-indexed sequential codes)
+                        if not clicked:
+                            try:
+                                _idx = int(_ac) - 1
+                                if _idx >= 0:
+                                    for _attempt in range(2):
+                                        try:
+                                            _lbl = page.locator(".cf-radio-answer__text").nth(_idx)
+                                            try: _lbl.scroll_into_view_if_needed(timeout=2000)
+                                            except: pass
+                                            _lbl.click(force=True, timeout=3000)
+                                            page.wait_for_timeout(600)
+                                            clicked = True
+                                            strategy = f"positional-fallback={_idx}"
+                                            break
+                                        except:
+                                            if _attempt == 0:
+                                                page.wait_for_timeout(500)
+                            except (ValueError, TypeError):
+                                pass
+
+                        # Strategy 4: raw radio positional fallback
+                        if not clicked:
+                            try:
+                                _idx = int(_ac) - 1
+                                if _idx >= 0:
+                                    for _attempt in range(2):
+                                        try:
+                                            page.locator("input[type='radio']:visible").nth(_idx).click(force=True, timeout=3000)
+                                            page.wait_for_timeout(600)
+                                            clicked = True
+                                            strategy = f"radio-positional-fallback={_idx}"
+                                            break
+                                        except:
+                                            if _attempt == 0:
+                                                page.wait_for_timeout(500)
+                            except (ValueError, TypeError):
+                                pass
 
                         if not clicked:
                             r_result["passed"] = True
@@ -7051,6 +7868,48 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 report.add_paragraph()
         # ─────────────────────────────────────────────────────────────────
 
+        # ── Translation Issues section ────────────────────────────────────────
+        _trans_issues_rpt = job.get('translation_issues', [])
+        if _trans_issues_rpt:
+            report.add_paragraph()
+            _trh = report.add_paragraph()
+            _trhr = _trh.add_run("Translation Issues")
+            _trhr.font.size = Pt(14); _trhr.font.bold = True
+            _trhr.font.color.rgb = RGBColor(0x1A, 0x73, 0xE8)
+            _trsub = report.add_paragraph()
+            _trmatch = sum(1 for t in _trans_issues_rpt if t.get('verdict') == 'TRANSLATION_MISMATCH')
+            _trunc   = sum(1 for t in _trans_issues_rpt if t.get('verdict') == 'TRANSLATION_UNCERTAIN')
+            _trsub.add_run(
+                f"{len(_trans_issues_rpt)} cross-language issue(s): "
+                f"{_trmatch} mismatch, {_trunc} uncertain. "
+                "Doc and live survey appear to be in different languages."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+            _TR_CLR = {
+                'TRANSLATION_MISMATCH':  (0xC0, 0x00, 0x00),
+                'TRANSLATION_UNCERTAIN': (0xBA, 0x75, 0x17),
+            }
+            _TR_LABEL = {
+                'TRANSLATION_MISMATCH':  'Translation Mismatch',
+                'TRANSLATION_UNCERTAIN': 'Translation Uncertain — needs review',
+            }
+            for _tri in _trans_issues_rpt:
+                _tverd = _tri.get('verdict', 'TRANSLATION_UNCERTAIN')
+                _tclr  = _TR_CLR.get(_tverd, (0x33, 0x33, 0x33))
+                _tlbl  = _TR_LABEL.get(_tverd, _tverd)
+                _tp = report.add_paragraph()
+                _tpr = _tp.add_run(
+                    f"  {_tri.get('qid','?')}  —  {_tlbl}"
+                    f"  |  {_tri.get('doc_lang','?').upper()} → {_tri.get('live_lang','?').upper()}"
+                    f"  |  Score: {_tri.get('score', 0):.0%}"
+                )
+                _tpr.font.size = Pt(11); _tpr.font.bold = True
+                _tpr.font.color.rgb = RGBColor(*_tclr)
+                _tev = report.add_paragraph()
+                _tev.add_run(f"   {_tri.get('evidence','')[:250]}").font.size = Pt(10)
+                report.add_paragraph()
+        # ─────────────────────────────────────────────────────────────────────
+
         # ── Piping Issues section ─────────────────────────────────────────────
         _pipe_issues_rpt = job.get('piping_issues', [])
         if _pipe_issues_rpt:
@@ -7397,6 +8256,22 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         job['logs'].append({'msg': traceback.format_exc()[:500], 'color': 'red'})
     finally:
         _hb_stop.set()  # stop heartbeat thread
+        jobs.persist(job_id)  # sync final state (done/error) to SQLite
+        # Fire report-ready email only on success; never block on failure
+        try:
+            j = jobs.get(job_id, {})
+            if j.get('status') == 'done':
+                _ue = j.get('user_email', '')
+                _u  = users_db.get(_ue, {})
+                send_report_ready_email(
+                    _ue,
+                    _u.get('name', _ue),
+                    j.get('doc_name', 'document'),
+                    j.get('total_issues', 0),
+                    job_id,
+                )
+        except Exception:
+            pass
 
 # ================================================================
 # MAIN
@@ -8239,23 +9114,23 @@ def admin_gift():
         duration = request.form.get('duration', '1 month')
         if email in users_db:
             users_db[email]['plan'] = plan
-            if plan == 'Pro':
-                users_db[email]['reports_limit'] = 50
-            elif plan == 'Business':
-                users_db[email]['reports_limit'] = 99999
+            users_db[email]['reports_limit'] = UserDB.PLAN_LIMITS.get(plan, 3)
+            users_db.save(email)
             gifted = True
         elif email:
             # Create gift account
             users_db[email] = {
-                'password': hashlib.sha256('temp123'.encode()).hexdigest(),
-                'name': email.split('@')[0].title(),
-                'plan': plan,
-                'reports_used': 0,
-                'reports_limit': 50 if plan == 'Pro' else 99999,
-                'joined': datetime.now().strftime('%Y-%m-%d'),
+                'password_hash': generate_password_hash('temp123'),
+                'password':      generate_password_hash('temp123'),
+                'name':          email.split('@')[0].title(),
+                'plan':          plan,
+                'reports_used':  0,
+                'reports_limit': UserDB.PLAN_LIMITS.get(plan, 3),
+                'joined':        datetime.now().strftime('%Y-%m-%d'),
                 'total_saved_hours': 0,
-                'gifted': True,
-                'gift_duration': duration
+                'gifted':        True,
+                'gift_duration': duration,
+                'must_change_password': True,
             }
             gifted = True
         else:
@@ -9182,6 +10057,7 @@ def run_screenshot_qc():
             if not api_key:
                 jobs[job_id]['status'] = 'error'
                 jobs[job_id]['log'].append('No Gemini API key configured. Go to Admin > API Management to add one.')
+                jobs.persist(job_id)
                 return
 
             import google.generativeai as genai
@@ -9256,9 +10132,11 @@ def run_screenshot_qc():
             jobs[job_id]['status'] = 'done'
             jobs[job_id]['progress'] = 100
             jobs[job_id]['log'].append('Done! Report ready for download.')
+            jobs.persist(job_id)
         except Exception as e:
             jobs[job_id]['status'] = 'error'
             jobs[job_id]['log'].append('Error: '+str(e)[:100])
+            jobs.persist(job_id)
 
     t = threading.Thread(target=run_ss, args=(job_id, docx_bytes, ss_list, instructions))
     t.daemon = True
@@ -9460,13 +10338,13 @@ def retest_run(job_id):
         filter_qids = [q.strip().upper() for q in _re.split(r'[,\n\r;]+', raw_qids) if q.strip()]
 
     # ── Memory guard ────────────────────────────────────────────────────────
-    if len(jobs) >= 10:
+    if len(jobs) >= 50:
         _done = sorted(
             (jid for jid, j in jobs.items() if j.get('status') in ('done', 'error', 'stopped')),
             key=lambda jid: jobs[jid].get('created_at', '')
         )
-        for _evict in _done[:max(0, len(jobs) - 9)]:
-            jobs.pop(_evict, None)
+        for _evict in _done[:max(0, len(jobs) - 49)]:
+            jobs.evict(_evict)
 
     new_job_id = str(uuid.uuid4())[:8]
     jobs[new_job_id] = {
