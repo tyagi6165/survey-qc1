@@ -40,6 +40,13 @@ from qid_normalizer import (
     INTERNAL_NORMS, S99_DATE_PAT, FW_NORM_PAT,
     SCREENER_QIDS, build_strip_candidates,
 )
+try:
+    from loop_detector import build_loop_map as _ld_build_loop_map, get_loop_skip_set as _ld_skip_set
+    _LOOP_DETECTOR_AVAILABLE = True
+except ImportError:
+    _LOOP_DETECTOR_AVAILABLE = False
+    def _ld_build_loop_map(qids): return {}
+    def _ld_skip_set(qids): return {}
 from functools import wraps
 from flask import (Flask, render_template_string, request,
                    send_file, jsonify, session, redirect, url_for)
@@ -2817,6 +2824,139 @@ def detect_platform(page):
     return 'generic'
 
 
+_CONTAINER_BAD_TAGS = {'INPUT', 'TEXTAREA', 'LABEL', 'SPAN', 'BUTTON', 'OPTION', 'SELECT', 'A'}
+
+def _resolve_container(page, elem, qid, _log):
+    """
+    Smart container selection with parent walking.
+
+    Fast path  — text_len 50-5000: use elem directly, skip parent walk entirely.
+    Parent walk — only when text_len < 50 (element has too little text to be the
+                  question container; walk up to find a richer ancestor).
+    All JS wrapped in try-catch so DOM errors never reach Python.
+    inner_text() fallback used whenever JS evaluation fails or returns undefined.
+    """
+    try:
+        # Step A: Get element details + text_len; JS is fully guarded.
+        _info = page.evaluate("""(el) => {
+            try {
+                if (!el) return {error: 'null_element', fallback: true, text_len: 0, tag: ''};
+                const tlen = (el.innerText || el.textContent || '').length;
+                return {
+                    tag:        el.tagName || '',
+                    id:         el.id || '',
+                    cls:        (el.className || '').toString().slice(0, 100),
+                    role:       el.getAttribute ? (el.getAttribute('role') || '') : '',
+                    parent_tag: el.parentElement ? el.parentElement.tagName : '',
+                    child_count: el.children ? el.children.length : 0,
+                    text_len:   tlen,
+                    fallback:   false,
+                    error:      null
+                };
+            } catch(e) { return {error: e.message, fallback: true, text_len: 0, tag: ''}; }
+        }""", elem)
+
+        # Step B: JS failed or element was undefined → use inner_text() directly.
+        if not _info or _info.get('fallback') or _info.get('error'):
+            _log(f'   CONTAINER_JS_ERR: qid={qid} '
+                 f'err={(_info or {}).get("error", "unknown")!r} — inner_text fallback')
+            try:
+                _ft = len(elem.inner_text(timeout=2000))
+                if 50 <= _ft <= 5000:
+                    _log(f'   CONTAINER_FALLBACK_OK: qid={qid} text_len={_ft} → CONTAINER_EXACT')
+                    return elem, "CONTAINER_EXACT"
+            except Exception:
+                pass
+            return elem, "CONTAINER_EXACT"
+
+        _tlen = _info.get('text_len', 0)
+        _log(f'   CONTAINER_ELEM: qid={qid} tag={_info["tag"]} id={_info["id"]!r} '
+             f'class={_info["cls"]!r} role={_info["role"]!r} '
+             f'parent_tag={_info["parent_tag"]} child_count={_info["child_count"]} '
+             f'text_len={_tlen}')
+
+        # Step C: text_len 50-5000 → this element has enough content; use directly.
+        if 50 <= _tlen <= 5000:
+            return elem, "CONTAINER_EXACT"
+
+        # Step D: text_len < 50 — element is too thin; walk up parents for richer one.
+        _log(f'   CONTAINER_THIN: qid={qid} tag={_info["tag"]} text_len={_tlen} — walking up parents')
+
+        _parents = page.evaluate("""(el) => {
+            try {
+                if (!el) return [];
+                const out = [];
+                let cur = el.parentElement;
+                for (let i = 0; i < 6 && cur; i++) {
+                    try {
+                        const tlen = (cur.innerText || '').length;
+                        const rc   = cur.querySelectorAll('input[type="radio"]').length;
+                        const cc   = cur.querySelectorAll('input[type="checkbox"]').length;
+                        const cls  = (cur.className || '').toString();
+                        const tag  = cur.tagName || '';
+                        let score  = 0;
+                        if (tlen >= 100 && tlen <= 3000) score += 3;
+                        if (rc > 0 || cc > 0) score += 2;
+                        if (cls.toLowerCase().includes('question') ||
+                            cls.toLowerCase().includes('cf-')) score += 2;
+                        if (tag === 'DIV' || tag === 'SECTION') score += 1;
+                        if (tlen > 10000) score -= 5;
+                        out.push({ tag, cls: cls.slice(0, 100), text_len: tlen,
+                                   radio_count: rc, checkbox_count: cc, score });
+                    } catch(pe) {
+                        out.push({ tag: '?', cls: '', text_len: 0,
+                                   radio_count: 0, checkbox_count: 0, score: 0 });
+                    }
+                    cur = cur.parentElement;
+                }
+                return out;
+            } catch(e) { return []; }
+        }""", elem)
+
+        if not _parents:
+            return elem, "CONTAINER_EXACT"
+
+        for i, p in enumerate(_parents, 1):
+            _log(f'   PARENT_{i}: tag={p["tag"]} class={p["cls"]!r} text_len={p["text_len"]} '
+                 f'radio_count={p["radio_count"]} checkbox_count={p["checkbox_count"]}')
+
+        best_idx = max(range(len(_parents)), key=lambda i: _parents[i]['score'])
+        best_p   = _parents[best_idx]
+
+        if best_p['score'] <= 0:
+            return elem, "CONTAINER_EXACT"
+
+        _log(f'   FINAL_CONTAINER: tag={best_p["tag"]} class={best_p["cls"]!r} '
+             f'text_len={best_p["text_len"]} score={best_p["score"]}')
+
+        _handle = page.evaluate_handle("""(args) => {
+            try {
+                if (!args || !args.el) return args ? args.el : null;
+                let cur = args.el.parentElement;
+                for (let i = 0; i < args.steps; i++) {
+                    if (!cur) return args.el;
+                    cur = cur.parentElement;
+                }
+                return cur || args.el;
+            } catch(e) { return args ? args.el : null; }
+        }""", {"el": elem, "steps": best_idx})
+        _as_elem = _handle.as_element()
+        if _as_elem is None:
+            return elem, "CONTAINER_EXACT"
+        return _as_elem, "CONTAINER_EXACT"
+
+    except Exception as _e:
+        _log(f'   CONTAINER_RESOLVE_ERR: qid={qid} {str(_e)[:60]}')
+        try:
+            _ft = len(elem.inner_text(timeout=2000))
+            if 50 <= _ft <= 5000:
+                _log(f'   CONTAINER_RESOLVE_RECOVER: qid={qid} text_len={_ft}')
+                return elem, "CONTAINER_EXACT"
+        except Exception:
+            pass
+        return elem, "CONTAINER_EXACT"
+
+
 def get_active_container(page, target_qid, platform, plat_qid=None, _log_fn=None):
     """
     Find the visible question container for target_qid.
@@ -2869,7 +3009,7 @@ def get_active_container(page, target_qid, platform, plat_qid=None, _log_fn=None
                         continue
                 if _best_elem is not None:
                     _log(f'   CONTAINER_MATCH: qid={target_qid} sel={sel!r} text_len={_best_len}')
-                    return _best_elem, "CONTAINER_EXACT"
+                    return _resolve_container(page, _best_elem, target_qid, _log)
             except Exception:
                 continue
 
@@ -2900,7 +3040,8 @@ def get_active_container(page, target_qid, platform, plat_qid=None, _log_fn=None
                         continue
                 if _best_elem is not None:
                     _log(f'   CONTAINER_MATCH: qid={target_qid} sel={selector!r} text_len={_best_len}')
-                    return _best_elem, "CONTAINER_VISIBLE"
+                    _resolved, _ = _resolve_container(page, _best_elem, target_qid, _log)
+                    return _resolved, "CONTAINER_VISIBLE"
             except Exception:
                 continue
 
@@ -2915,7 +3056,8 @@ def get_active_container(page, target_qid, platform, plat_qid=None, _log_fn=None
                 for qid_val in qids_to_try:
                     if val.upper() == qid_val.upper():
                         _log(f'   CONTAINER_MATCH: qid={target_qid} attr={attr} val={val!r} (METADATA)')
-                        return elem, "CONTAINER_METADATA"
+                        _resolved, _ = _resolve_container(page, elem, target_qid, _log)
+                        return _resolved, "CONTAINER_METADATA"
         except Exception:
             continue
 
@@ -5704,24 +5846,22 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
 
             _naming_matched_live = set()
 
-            # ── Issue 6: Loop detection ──────────────────────────────────────────
-            # Group doc QIDs that share the same parent (Q30x1/Q30x2 → Q30).
-            # Only the FIRST iteration of each loop is compared — the rest are
-            # loop-body repeats and should not generate independent MISSING issues.
-            _loop_parent_seen: set = set()
-            _loop_skip_nqids: set = set()
-            for _ln_cand in sorted(_doc_norm.keys()):
-                _lo_cand = _doc_norm[_ln_cand]
-                _par_cand = _norm_qid(get_parent_qid(_lo_cand))
-                if _par_cand != _ln_cand:
-                    # This is a child/iteration (Q30x1, Q30x2, D3A, D3B…)
-                    if _par_cand in _loop_parent_seen:
-                        # A sibling iteration already seen — skip this one
-                        _loop_skip_nqids.add(_ln_cand)
-                    else:
-                        _loop_parent_seen.add(_par_cand)
-            if _loop_skip_nqids:
-                log(f'  Loop/child dedup: {len(_loop_skip_nqids)} sibling iteration(s) collapsed', 'grey')
+            # ── Issue 6: Loop detection (loop_detector.py) ──────────────────────
+            # Build full loop map from original doc QIDs, then normalise the skip
+            # set so it lines up with the normalised comparison key space.
+            _orig_doc_qids = list(_doc_norm.values())
+            _raw_loop_map  = _ld_build_loop_map(_orig_doc_qids)
+            _raw_loop_skip = _ld_skip_set(_orig_doc_qids)   # {child_orig: first_orig}
+            _loop_skip_nqids: set = {_norm_qid(q) for q in _raw_loop_skip.keys()}
+
+            job['loop_blocks'] = _raw_loop_map  # stored for Word report
+
+            if _raw_loop_skip:
+                log(f'  Loop/child dedup: {len(_raw_loop_skip)} sibling(s) collapsed', 'grey')
+                for _child_orig, _first_orig in sorted(_raw_loop_skip.items()):
+                    _par_orig = get_parent_qid(_child_orig)
+                    log(f'  LOOP: {_child_orig} is sibling of {_par_orig} — '
+                        f'skipping, {_first_orig} (first) already compared', 'grey')
             # ────────────────────────────────────────────────────────────────────
 
             # Unified set of normalized qids
@@ -5960,6 +6100,29 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 if live_data[_live_key].get("has_raw_piping"):
                     issues.append({"qid":qid,"type":"PIPING NOT RESOLVED","details":f"Raw: {live_data[_live_key].get('raw_piping_found',[])[:3]}","severity":"HIGH"})
 
+            # ── PIPING VALIDATION (CHECK1-4) ──────────────────────────────
+            try:
+                from piping_validator import validate_piping as _pv_validate
+                _pv_issues = _pv_validate(
+                    questions, live_data,
+                    platform=_platform if '_platform' in dir() else 'generic',
+                    all_qids=set(questions) | set(live_data),
+                )
+                for _pvi in _pv_issues:
+                    _pvi.setdefault('is_piping_issue', True)
+                    issues.append(_pvi)
+                job['piping_issues'] = _pv_issues
+                if _pv_issues:
+                    log(f'  Piping validation: {len(_pv_issues)} issue(s) found', 'yellow')
+                    for _pi in _pv_issues[:5]:
+                        log(f'    [{_pi["rule"]}] {_pi["qid"]:8s} {_pi["pipe_variable"]:20s} {_pi["evidence"][:60]}', 'yellow')
+                else:
+                    log('  Piping validation: no issues', 'green')
+            except Exception as _pv_exc:
+                log(f'  Piping validation skipped: {str(_pv_exc)[:60]}', 'grey')
+                job['piping_issues'] = []
+            # ─────────────────────────────────────────────────────────────
+
             # ── DATA EXPORT VALIDATION (R031-R038) ────────────────────────
             _export_schema_text = job.get('export_schema_text', '').strip()
             if _export_schema_text:
@@ -6008,6 +6171,42 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     print(f"[TERM DEBUG]   logic_table host={_dbg_lt.get('host_qid')!r} flat={_dbg_lt.get('flat_text','')[:80]!r}")
                 # ─────────────────────────────────────────────────────────────
                 _tc_list, _tc_summary = _gen_tc(_gen_doc_data)
+                # Merge range test cases from range_validator
+                try:
+                    from range_validator import (
+                        validate_ranges as _rv_validate,
+                        generate_range_test_cases as _rv_tcs,
+                    )
+                    _rv_issues = _rv_validate(questions, live_data)
+                    job['range_issues'] = _rv_issues
+                    if _rv_issues:
+                        log(f'  Range validation: {len(_rv_issues)} issue(s) found', 'yellow')
+                        for _ri in _rv_issues[:5]:
+                            log(f'    [{_ri["rule"]}] {_ri["qid"]:8s} {_ri["evidence"][:65]}', 'yellow')
+                    else:
+                        log('  Range validation: no issues', 'green')
+                    _rng_tcs = _rv_tcs(questions)
+                    _seen_tc_keys: set = {
+                        (t.get('qid'), t.get('action'), t.get('expected'))
+                        for t in _tc_list
+                    }
+                    _added_rng = 0
+                    for _rtc in _rng_tcs:
+                        key = (_rtc.get('qid'), _rtc.get('action'), _rtc.get('expected'))
+                        if key not in _seen_tc_keys:
+                            _seen_tc_keys.add(key)
+                            _tc_list.append(_rtc)
+                            _added_rng += 1
+                    if _added_rng:
+                        log(f'  Range test cases added: {_added_rng}', 'cyan')
+                        _tc_summary['total'] = len(_tc_list)
+                        _tc_summary['auto_runnable'] = sum(
+                            1 for t in _tc_list if t.get('auto_runnable'))
+                        _tc_summary.setdefault('by_type', {})['RANGE'] = sum(
+                            1 for t in _tc_list if t.get('type') == 'RANGE')
+                except Exception as _rv_exc:
+                    log(f'  Range validation skipped: {str(_rv_exc)[:60]}', 'grey')
+                    job.setdefault('range_issues', [])
                 job['test_cases'] = _tc_list
                 job['test_cases_summary'] = _tc_summary
                 _tc_total = _tc_summary.get('total', 0)
@@ -6041,13 +6240,17 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     log('════════════════════════════════════', 'cyan')
                     log(f'  Running {min(len(_pw_runnable), 20)} auto-runnable test case(s)…', 'blue')
                     progress(88, 'Running automated tests...')
-                    _pw_result = _run_pw(
-                        _pw_tc,
-                        survey_url,
-                        _pw_ss_dir,
-                        max_tests=20,
-                        timeout_ms=30_000,
-                    )
+                    _pw_result = {"results": [], "summary": {}, "error": None}
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pw_exec:
+                        _pw_fut = _pw_exec.submit(
+                            _run_pw, _pw_tc, survey_url, _pw_ss_dir,
+                            max_tests=20, timeout_ms=30_000)
+                        try:
+                            _pw_result = _pw_fut.result(timeout=60)
+                        except concurrent.futures.TimeoutError:
+                            log('  PLAYWRIGHT TIMEOUT — stopping tests', 'yellow')
+                            _pw_result = {"results": [], "summary": {},
+                                          "error": "PLAYWRIGHT TIMEOUT — 60s total exceeded"}
                     job['playwright_tests'] = _pw_result
                     _pw_s = _pw_result.get('summary', {})
                     log(f'  Playwright: {_pw_s.get("passed",0)} PASS  '
@@ -6847,6 +7050,123 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 ).font.size = Pt(10)
                 report.add_paragraph()
         # ─────────────────────────────────────────────────────────────────
+
+        # ── Piping Issues section ─────────────────────────────────────────────
+        _pipe_issues_rpt = job.get('piping_issues', [])
+        if _pipe_issues_rpt:
+            report.add_paragraph()
+            _ph = report.add_paragraph()
+            _phr = _ph.add_run("Piping Issues")
+            _phr.font.size = Pt(14); _phr.font.bold = True
+            _phr.font.color.rgb = RGBColor(0x9B, 0x27, 0xAF)
+            _psub = report.add_paragraph()
+            _psub.add_run(
+                f"{len(_pipe_issues_rpt)} piping issue(s) detected. "
+                "Unresolved or blank pipes cause incorrect question text in live survey."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+            _PIPE_RULE_LABELS = {
+                'CHECK1': 'Piping not resolved',
+                'CHECK2': 'Piping blank / empty value',
+                'CHECK3': 'Piping source question missing',
+                'CHECK4': 'Piping format mismatch',
+            }
+            _PIPE_SEV_CLR = {
+                'HIGH':   (0xC0, 0x00, 0x00),
+                'MEDIUM': (0xBA, 0x75, 0x17),
+            }
+            for _pi in _pipe_issues_rpt:
+                _prule = _pi.get('rule', '')
+                _plabel = _PIPE_RULE_LABELS.get(_prule, _prule)
+                _psev = _pi.get('severity', 'MEDIUM')
+                _pclr = _PIPE_SEV_CLR.get(_psev, (0x33, 0x33, 0x33))
+                _pp = report.add_paragraph()
+                _ppr = _pp.add_run(
+                    f"  [{_prule}] {_pi.get('qid','?')}  —  {_plabel}"
+                    f"  |  Variable: {_pi.get('pipe_variable','')}"
+                )
+                _ppr.font.size = Pt(11); _ppr.font.bold = True
+                _ppr.font.color.rgb = RGBColor(*_pclr)
+                _pev = report.add_paragraph()
+                _pev.add_run(f"   {_pi.get('evidence','')[:220]}").font.size = Pt(10)
+                report.add_paragraph()
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Numeric Range Issues section ──────────────────────────────────────
+        _range_issues_rpt = job.get('range_issues', [])
+        if _range_issues_rpt:
+            report.add_paragraph()
+            _rh = report.add_paragraph()
+            _rhr = _rh.add_run("Numeric Range Issues")
+            _rhr.font.size = Pt(14); _rhr.font.bold = True
+            _rhr.font.color.rgb = RGBColor(0x0F, 0x51, 0x32)
+            _rsub = report.add_paragraph()
+            _rsub.add_run(
+                f"{len(_range_issues_rpt)} numeric range issue(s) detected. "
+                "Verify boundary enforcement in live survey via Playwright test cases."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+            _RANGE_RULE_LABELS = {
+                'R041': 'Min boundary not enforced',
+                'R042': 'Max boundary not enforced',
+                'R043': 'Range in spec — validation missing',
+                'R044': 'Conflicting ranges',
+                'R045': 'Mandatory numeric — blank not blocked',
+            }
+            _RANGE_SEV_CLR = {
+                'HIGH':   (0xC0, 0x00, 0x00),
+                'MEDIUM': (0xBA, 0x75, 0x17),
+            }
+            for _ri in _range_issues_rpt:
+                _rrule = _ri.get('rule', '')
+                _rlabel = _RANGE_RULE_LABELS.get(_rrule, _rrule)
+                _rsev   = _ri.get('severity', 'HIGH')
+                _rclr   = _RANGE_SEV_CLR.get(_rsev, (0x33, 0x33, 0x33))
+                _lo = _ri.get('min_val'); _hi = _ri.get('max_val')
+                _bounds = f'  |  Range: {_lo}–{_hi}' if _lo is not None and _hi is not None else ''
+                _rp = report.add_paragraph()
+                _rpr = _rp.add_run(
+                    f"  [{_rrule}] {_ri.get('qid','?')}  —  {_rlabel}{_bounds}"
+                )
+                _rpr.font.size = Pt(11); _rpr.font.bold = True
+                _rpr.font.color.rgb = RGBColor(*_rclr)
+                _rev = report.add_paragraph()
+                _rev.add_run(f"   {_ri.get('evidence','')[:220]}").font.size = Pt(10)
+                report.add_paragraph()
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Loop/Repeat Blocks section ────────────────────────────────────────
+        _loop_blocks_rpt = job.get('loop_blocks', {})
+        if _loop_blocks_rpt:
+            report.add_paragraph()
+            _lh = report.add_paragraph()
+            _lhr = _lh.add_run("Loop/Repeat Blocks")
+            _lhr.font.size = Pt(14); _lhr.font.bold = True
+            _lhr.font.color.rgb = RGBColor(0x0C, 0x44, 0x7C)
+            _lsub = report.add_paragraph()
+            _lsub.add_run(
+                f"{len(_loop_blocks_rpt)} loop group(s) detected. "
+                "First iteration compared; siblings skipped to prevent duplicate issues."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+            for _lparent, _lchildren in sorted(_loop_blocks_rpt.items()):
+                _lp = report.add_paragraph()
+                _lpr = _lp.add_run(f"  {_lparent}  (loop: ")
+                _lpr.font.size = Pt(11); _lpr.font.bold = True
+                _lpr.font.color.rgb = RGBColor(0x0C, 0x44, 0x7C)
+                for _li, _lc in enumerate(_lchildren):
+                    _badge = "✓" if _li == 0 else "skip"
+                    _lrun = _lp.add_run(f"{_lc} {_badge}")
+                    _lrun.font.size = Pt(11)
+                    _lrun.font.color.rgb = (
+                        RGBColor(0x00, 0x70, 0x00) if _li == 0
+                        else RGBColor(0x77, 0x77, 0x77)
+                    )
+                    if _li < len(_lchildren) - 1:
+                        _lp.add_run(",  ").font.size = Pt(11)
+                _lp.add_run(")").font.size = Pt(11)
+            report.add_paragraph()
+        # ─────────────────────────────────────────────────────────────────────
 
         if term_results:
             report.add_paragraph()

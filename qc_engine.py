@@ -27,6 +27,32 @@ from ai_judge import AIJudge as _AIJudge, make_judge as _make_judge
 _rule_engine = RuleEngine()
 
 try:
+    from loop_detector import build_loop_map as _build_loop_map, get_loop_skip_set as _get_loop_skip_set
+    _LOOP_DETECTOR_OK = True
+except ImportError:
+    _LOOP_DETECTOR_OK = False
+    def _build_loop_map(qids): return {}
+    def _get_loop_skip_set(qids): return {}
+
+try:
+    from piping_validator import validate_piping as _pv_validate
+    _PIPING_VALIDATOR_OK = True
+except ImportError:
+    _PIPING_VALIDATOR_OK = False
+    def _pv_validate(doc_q, live_q=None, platform='generic', all_qids=None): return []
+
+try:
+    from range_validator import (
+        validate_ranges as _rv_validate,
+        generate_range_test_cases as _rv_test_cases,
+    )
+    _RANGE_VALIDATOR_OK = True
+except ImportError:
+    _RANGE_VALIDATOR_OK = False
+    def _rv_validate(doc_q, live_q=None): return []
+    def _rv_test_cases(doc_q, id_prefix='TC_RNG'): return []
+
+try:
     from embeddings import (
         semantic_similarity, batch_embeddings, get_embedding, clear_cache,
         MATCH as SEM_MATCH, LIKELY_MATCH as SEM_LIKELY, MISMATCH as SEM_MISMATCH,
@@ -564,6 +590,47 @@ def check_options(doc_questions, live_questions):
 
 
 # ============================================================
+# CHECK 4.5: PIPING VALIDATION (cross-platform)
+# ============================================================
+def check_piping_validation(doc_questions, live_questions=None,
+                             platform='generic', all_qids=None):
+    """
+    Run all four piping checks via piping_validator.py.
+
+    CHECK1  PIPING_NOT_RESOLVED   — literal marker still in live text  (HIGH)
+    CHECK2  PIPING_BLANK          — blank gap where piped value should be (HIGH)
+    CHECK3  PIPING_SOURCE_MISSING — source QID not found in survey       (HIGH)
+    CHECK4  PIPING_FORMAT_MISMATCH— format wrong for detected platform   (MEDIUM)
+
+    Returns list of issue dicts (qc_engine format + is_piping_issue=True).
+    """
+    _qids = all_qids or (set(doc_questions) | set(live_questions or {}))
+    return _pv_validate(doc_questions, live_questions,
+                        platform=platform, all_qids=_qids)
+
+
+# ============================================================
+# CHECK 4.6: NUMERIC RANGE VALIDATION (R041–R045)
+# ============================================================
+def check_numeric_ranges(doc_questions, live_questions=None):
+    """
+    Detect numeric range constraints in doc question text and validate
+    enforcement (R041–R045).  Multilingual: EN / FR / DE / IT / ES.
+
+    R041  RANGE_MIN_NOT_ENFORCED   — enter MIN-1, expect block  (HIGH)
+    R042  RANGE_MAX_NOT_ENFORCED   — enter MAX+1, expect block  (HIGH)
+    R043  RANGE_MISSING_VALIDATION — range in text, no NUMERIC type  (HIGH)
+    R044  RANGE_MISMATCH           — conflicting ranges in same Q     (MEDIUM)
+    R045  RANGE_MANDATORY_BLANK    — mandatory numeric, blank blocked  (HIGH)
+
+    Returns (issues: list[dict], test_cases: list[dict]).
+    """
+    issues    = _rv_validate(doc_questions, live_questions)
+    test_cases = _rv_test_cases(doc_questions)
+    return issues, test_cases
+
+
+# ============================================================
 # CHECK 5: MANDATORY MARKERS
 # ============================================================
 def check_mandatory(doc_questions, live_questions=None):
@@ -904,6 +971,8 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
         "missing_words": [],
         "text_match": [],
         "options_match": [],
+        "piping_issues": [],        # CHECK1-4 piping validation
+        "range_issues": [],         # R041-R045 numeric range validation
         "mandatory": [],
         "piping": [],
         "answer_codes": [],
@@ -917,13 +986,33 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
     qid_order = doc_data["qid_order"]
     logic_tables = doc_data["logic_tables"]
 
+    # ── LOOP DETECTION ────────────────────────────────────────────────────────
+    _loop_map  = _build_loop_map(list(doc_questions.keys()))
+    _loop_skip = set(_get_loop_skip_set(list(doc_questions.keys())).keys())
+    results["loop_blocks"] = _loop_map
+
+    # Filter doc questions for all checks: keep only first sibling per loop group.
+    # Skipped QIDs go into results["loop_siblings"] so the report can list them.
+    if _loop_skip:
+        _loop_skip_details = _get_loop_skip_set(list(doc_questions.keys()))
+        results["loop_siblings"] = {
+            child: first for child, first in _loop_skip_details.items()
+        }
+        _doc_for_checks = {k: v for k, v in doc_questions.items() if k not in _loop_skip}
+        _qid_order_filtered = [q for q in qid_order if q not in _loop_skip]
+    else:
+        results["loop_siblings"] = {}
+        _doc_for_checks = doc_questions
+        _qid_order_filtered = qid_order
+    # ─────────────────────────────────────────────────────────────────────────
+
     # ── LAYER 1+2: Deterministic rule engine (runs before AI, always) ─────────
     # Per-question-pair checks (R001–R006)
     if live_questions:
         re_issues = []
-        all_qids = set(doc_questions) | set(live_questions)
+        all_qids = set(_doc_for_checks) | set(live_questions)
         for qid in all_qids:
-            doc_q  = doc_questions.get(qid)
+            doc_q  = _doc_for_checks.get(qid)
             live_q = live_questions.get(qid)
             for ri in compare_question_pair(doc_q, live_q):
                 re_issues.append(_rule_issue_to_standard(qid, ri))
@@ -937,7 +1026,7 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
             re_survey.append(_rule_issue_to_standard(lt.get("host_qid", "?"), ri))
     if live_questions:
         live_order = list(live_questions.keys())
-        ri = _rule_engine.check_question_order(qid_order, live_order)
+        ri = _rule_engine.check_question_order(_qid_order_filtered, live_order)
         if ri["result"] in ("FAIL", "WARN"):
             re_survey.append(_rule_issue_to_standard("ORDER", ri))
     results["rule_engine"].extend(re_survey)
@@ -950,27 +1039,37 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
 
     # CHECK 2: Missing words (needs live)
     if live_questions:
-        results["missing_words"] = check_missing_words(doc_questions, live_questions)
+        results["missing_words"] = check_missing_words(_doc_for_checks, live_questions)
 
     # CHECK 3: Text match (needs live)
     if live_questions:
-        results["text_match"] = check_question_text(doc_questions, live_questions, threshold)
+        results["text_match"] = check_question_text(_doc_for_checks, live_questions, threshold)
 
     # CHECK 4: Options match (needs live)
     if live_questions:
-        results["options_match"] = check_options(doc_questions, live_questions)
+        results["options_match"] = check_options(_doc_for_checks, live_questions)
+
+    # CHECK 4.5: Piping validation (doc-only or with live)
+    results["piping_issues"] = check_piping_validation(
+        _doc_for_checks, live_questions,
+        all_qids=set(_doc_for_checks) | set(live_questions or {}),
+    )
+
+    # CHECK 4.6: Numeric range validation (R041-R045)
+    _range_issues, _range_tcs = check_numeric_ranges(_doc_for_checks, live_questions)
+    results["range_issues"] = _range_issues
 
     # CHECK 5: Mandatory (doc-only or with live)
-    results["mandatory"] = check_mandatory(doc_questions, live_questions)
+    results["mandatory"] = check_mandatory(_doc_for_checks, live_questions)
 
     # CHECK 6: Piping (doc-only or with live)
-    results["piping"] = check_piping(doc_questions, live_questions)
+    results["piping"] = check_piping(_doc_for_checks, live_questions)
 
     # CHECK 7: Answer codes (doc-only)
-    results["answer_codes"] = check_answer_codes(doc_questions)
+    results["answer_codes"] = check_answer_codes(_doc_for_checks)
 
     # CHECK 8: Question order (doc-only or with live)
-    results["question_order"] = check_question_order(qid_order, live_questions)
+    results["question_order"] = check_question_order(_qid_order_filtered, live_questions)
 
     # ── DATA EXPORT VALIDATION (R031-R038) ────────────────────────────────────
     if export_schema:
@@ -983,6 +1082,18 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
 
     # ── TEST CASE GENERATION ──────────────────────────────────────────────────
     _tc_list, _tc_summary = generate_test_cases(doc_data)
+    # Merge range test cases; deduplicate by (qid, action, expected)
+    _seen_tc: set = {(t['qid'], t.get('action'), t.get('expected')) for t in _tc_list}
+    for _rtc in _range_tcs:
+        key = (_rtc['qid'], _rtc.get('action'), _rtc.get('expected'))
+        if key not in _seen_tc:
+            _seen_tc.add(key)
+            _tc_list.append(_rtc)
+    # Recount summary
+    _tc_summary['total']        = len(_tc_list)
+    _tc_summary['auto_runnable'] = sum(1 for t in _tc_list if t.get('auto_runnable'))
+    _tc_summary.setdefault('by_type', {})['RANGE'] = sum(
+        1 for t in _tc_list if t.get('type') == 'RANGE')
     results["test_cases"] = _tc_list
     results["test_cases_summary"] = _tc_summary
     # ─────────────────────────────────────────────────────────────────────────
@@ -993,6 +1104,8 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None,
         results["missing_words"] +
         results["text_match"] +
         results["options_match"] +
+        results["piping_issues"] +
+        results["range_issues"] +
         results["mandatory"] +
         results["piping"] +
         results["answer_codes"] +
