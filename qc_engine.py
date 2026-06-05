@@ -17,9 +17,38 @@ Works with ANY language. URL required for checks 2-4.
 
 import re
 import json
+import numpy as np
 from difflib import SequenceMatcher
 from docx import Document
 from docx.oxml.ns import qn
+
+from rule_engine import RuleEngine
+from ai_judge import AIJudge as _AIJudge, make_judge as _make_judge
+_rule_engine = RuleEngine()
+
+try:
+    from embeddings import (
+        semantic_similarity, batch_embeddings, get_embedding, clear_cache,
+        MATCH as SEM_MATCH, LIKELY_MATCH as SEM_LIKELY, MISMATCH as SEM_MISMATCH,
+    )
+    _SEMANTIC_AVAILABLE = True
+except Exception:
+    _SEMANTIC_AVAILABLE = False
+    SEM_MATCH = 0.85
+    SEM_LIKELY = 0.70
+    SEM_MISMATCH = 0.60
+
+    def semantic_similarity(a, b):
+        return SequenceMatcher(None, _normalize(a)[:300], _normalize(b)[:300]).ratio()
+
+    def batch_embeddings(texts):
+        return []
+
+    def get_embedding(text):
+        return None
+
+    def clear_cache():
+        pass
 
 
 # ============================================================
@@ -309,6 +338,8 @@ Return ONLY this JSON (no markdown):
 def check_missing_words(doc_questions, live_questions):
     """
     For each question, find words in doc that are missing from live.
+    Semantic gate: if the texts are semantically equivalent (translations,
+    synonyms, paraphrases) the word differences are not bugs.
     """
     issues = []
 
@@ -316,21 +347,33 @@ def check_missing_words(doc_questions, live_questions):
         if qid not in live_questions:
             continue
 
-        doc_words = _tokenize(doc_q["text"])
-        live_words = set(_tokenize(live_questions[qid].get("text", "")))
+        doc_text = doc_q["text"]
+        live_text = live_questions[qid].get("text", "")
+
+        # Semantic gate — skip word-diff noise when meaning is preserved
+        try:
+            sem_score = semantic_similarity(doc_text[:400], live_text[:400])
+            if sem_score >= SEM_MATCH:
+                continue
+        except Exception:
+            sem_score = None
+
+        doc_words = _tokenize(doc_text)
+        live_words = set(_tokenize(live_text))
 
         missing = [w for w in doc_words if w not in live_words]
-        # Deduplicate
         missing = list(dict.fromkeys(missing))
 
         if missing:
+            score_note = f" | sem={sem_score:.2f}" if sem_score is not None else ""
             issues.append({
                 "qid": qid,
                 "check": "MISSING_WORDS",
                 "severity": "HIGH" if len(missing) >= 3 else "MEDIUM",
-                "details": f"Words in doc but not in live: {missing[:10]}",
-                "doc_snippet": doc_q["text"][:100],
-                "live_snippet": live_questions[qid].get("text", "")[:100],
+                "details": f"Words in doc but not in live: {missing[:10]}{score_note}",
+                "doc_snippet": doc_text[:100],
+                "live_snippet": live_text[:100],
+                "similarity_score": round(sem_score, 3) if sem_score is not None else None,
             })
 
     return issues
@@ -363,7 +406,15 @@ def _find_base_match(doc_qid, live_qids):
 
 def check_question_text(doc_questions, live_questions, threshold=0.65):
     """
-    Fuzzy match question text between doc and live.
+    Semantic match question text between doc and live (multilingual).
+
+    Buckets:
+      score >= MATCH (0.85)          → same meaning, no issue
+      MISMATCH (0.60) <= score < MATCH → POSSIBLE — needs review (MEDIUM)
+      score < MISMATCH (0.60)         → confirmed mismatch (HIGH)
+
+    threshold parameter kept for API compatibility but no longer used;
+    the semantic thresholds from embeddings.py are authoritative.
     """
     issues = []
 
@@ -396,20 +447,35 @@ def check_question_text(doc_questions, live_questions, threshold=0.65):
         if not doc_text or len(doc_text) < 10:
             continue
 
-        ratio = SequenceMatcher(None,
-            _normalize(doc_text)[:300],
-            _normalize(live_text)[:300]
-        ).ratio()
+        try:
+            score = semantic_similarity(doc_text[:500], live_text[:500])
+        except Exception:
+            # Fallback to fuzzy if embeddings unavailable
+            score = SequenceMatcher(
+                None, _normalize(doc_text)[:300], _normalize(live_text)[:300]
+            ).ratio()
 
-        if ratio < threshold:
-            issues.append({
-                "qid": qid,
-                "check": "TEXT_MISMATCH",
-                "severity": "HIGH" if ratio < 0.4 else "MEDIUM",
-                "details": f"Match: {int(ratio*100)}% (threshold: {int(threshold*100)}%)",
-                "doc_snippet": doc_text[:120],
-                "live_snippet": live_text[:120],
-            })
+        if score >= SEM_MATCH:
+            continue  # Same meaning — not a bug
+
+        if score >= SEM_MISMATCH:
+            check_label = "TEXT_POSSIBLE_MISMATCH"
+            severity = "MEDIUM"
+            verdict = "POSSIBLE - needs review"
+        else:
+            check_label = "TEXT_MISMATCH"
+            severity = "HIGH"
+            verdict = "confirmed mismatch"
+
+        issues.append({
+            "qid": qid,
+            "check": check_label,
+            "severity": severity,
+            "details": f"Semantic similarity: {score:.0%} — {verdict}",
+            "doc_snippet": doc_text[:120],
+            "live_snippet": live_text[:120],
+            "similarity_score": round(score, 3),
+        })
 
     return issues
 
@@ -420,6 +486,11 @@ def check_question_text(doc_questions, live_questions, threshold=0.65):
 def check_options(doc_questions, live_questions):
     """
     Check if all answer options from doc appear in live survey.
+
+    Uses batch semantic similarity so cross-lingual option lists
+    (French doc / English live, etc.) are matched correctly.
+    An option is considered found if any live option scores >= LIKELY_MATCH (0.70).
+    Similarity scores are included in reported evidence.
     """
     issues = []
 
@@ -433,21 +504,53 @@ def check_options(doc_questions, live_questions):
             continue
 
         live_opts = live_questions[qid].get("options", [])
-        live_texts = [_normalize(o.get("text", "")) for o in live_opts]
-        live_combined = " | ".join(live_texts)
+        live_raw = [o.get("text", "") for o in live_opts]
+
+        # Pre-encode all live option texts for this QID in one batch call
+        try:
+            if live_raw:
+                live_vecs = np.array(batch_embeddings(live_raw))  # (N, D)
+            else:
+                live_vecs = None
+        except Exception:
+            live_vecs = None
 
         missing_opts = []
         for opt in doc_opts:
-            opt_norm = _normalize(opt["text"])
-            if len(opt_norm) < 3:
+            opt_text = opt.get("text", "")
+            if len(_normalize(opt_text)) < 3:
                 continue
-            # Check fuzzy match against any live option
-            found = any(
-                SequenceMatcher(None, opt_norm, lt).ratio() > 0.70
-                for lt in live_texts
-            )
-            if not found and opt_norm not in live_combined:
-                missing_opts.append(f"[{opt['code']}] {opt['text'][:50]}")
+
+            best_score = 0.0
+            best_match = ""
+
+            if live_vecs is not None and live_vecs.size:
+                try:
+                    opt_vec = get_embedding(opt_text)  # (D,) normalised
+                    scores = live_vecs @ opt_vec        # cosine sim for each live option
+                    idx = int(np.argmax(scores))
+                    best_score = float(scores[idx])
+                    best_match = live_raw[idx][:50]
+                except Exception:
+                    # Fallback to fuzzy for this option
+                    live_norms = [_normalize(t) for t in live_raw]
+                    opt_norm = _normalize(opt_text)
+                    fuzz = [SequenceMatcher(None, opt_norm, lt).ratio() for lt in live_norms]
+                    best_score = max(fuzz) if fuzz else 0.0
+                    best_match = live_raw[int(np.argmax(fuzz))][:50] if fuzz else ""
+            elif live_raw:
+                live_norms = [_normalize(t) for t in live_raw]
+                opt_norm = _normalize(opt_text)
+                fuzz = [SequenceMatcher(None, opt_norm, lt).ratio() for lt in live_norms]
+                best_score = max(fuzz) if fuzz else 0.0
+
+            if best_score < SEM_LIKELY:
+                score_str = f"{best_score:.0%}"
+                label = f"[{opt['code']}] {opt_text[:50]} (best={score_str}"
+                if best_match:
+                    label += f", closest: '{best_match}'"
+                label += ")"
+                missing_opts.append(label)
 
         if missing_opts:
             issues.append({
@@ -646,22 +749,157 @@ def check_question_order(doc_qid_order, live_questions=None):
 
 
 # ============================================================
+# LAYER 1+2 BRIDGE: deterministic rules → semantic tiebreak
+# ============================================================
+def compare_question_pair(doc_q, live_q, xml_q=None):
+    """
+    Run Layer 1 (rule engine) then Layer 2 (semantic) for a single QID pair.
+
+    WARN results are escalated to semantic check:
+      - texts semantically similar (≥ MATCH) → PASS_SEMANTIC (suppressed)
+      - texts semantically different          → issue confirmed
+    FAIL results bypass semantic and are always reported.
+
+    Returns list of issue dicts ready for the results structure.
+    """
+    issues = []
+    rule_results = _rule_engine.run_all_checks(doc_q, live_q, xml_q)
+
+    for ri in rule_results:
+        if ri["result"] == "FAIL":
+            issues.append(ri)
+
+        elif ri["result"] == "WARN":
+            doc_text = (doc_q or {}).get("text", "")
+            live_text = (live_q or {}).get("text", "")
+
+            if doc_text and live_text:
+                try:
+                    score = semantic_similarity(doc_text[:500], live_text[:500])
+                    ri["similarity_score"] = round(score, 3)
+                    if score >= SEM_MATCH:
+                        ri["result"] = "PASS_SEMANTIC"
+                        ri["confidence"] = max(ri["confidence"] - 20, 30)
+                        # suppressed — don't append
+                        continue
+                except Exception:
+                    pass  # fall through to append
+
+            issues.append(ri)
+
+    return issues
+
+
+def _rule_issue_to_standard(qid, ri):
+    """Convert a rule engine result dict to the standard qc_engine issue format."""
+    severity_map = {"FAIL": "HIGH", "WARN": "MEDIUM"}
+    return {
+        "qid": qid,
+        "check": ri.get("type", "RULE_CHECK"),
+        "severity": severity_map.get(ri.get("result", "WARN"), "MEDIUM"),
+        "details": ri.get("reason", ""),
+        "rule": ri.get("rule", ""),
+        "confidence": ri.get("confidence", 0),
+        "similarity_score": ri.get("similarity_score"),
+    }
+
+
+# ============================================================
 # MASTER RUN — ALL 8 CHECKS
 # ============================================================
-def run_all_checks(doc_data, live_questions=None, gemini_model=None, threshold=0.65):
+def generate_test_cases(doc_data: dict) -> tuple:
     """
-    Run all 8 QC checks. Returns structured results.
+    Generate test cases from survey logic/routing rules.
+    Returns (test_cases: list[dict], summary: dict).
+    Safe to call with any doc_data — returns empty on error.
+    """
+    try:
+        from test_generator import generate_test_cases as _gen
+        return _gen(doc_data)
+    except Exception:
+        return [], {"total": 0, "auto_runnable": 0, "manual_only": 0,
+                    "by_type": {}, "by_priority": {}}
+
+
+def run_playwright_tests(
+    test_cases: list,
+    survey_url: str,
+    screenshot_dir: str,
+    max_tests: int = 20,
+    timeout_ms: int = 30_000,
+) -> dict:
+    """
+    Run auto_runnable test cases against the live survey using Playwright.
+
+    Safe to call whether or not Playwright is installed — returns gracefully
+    with error key set if the dependency is missing or the runner crashes.
+
+    Returns:
+        {"results": [...], "summary": {...}, "error": None | str}
+    """
+    try:
+        from test_runner import run_playwright_tests as _run
+        return _run(
+            test_cases,
+            survey_url,
+            screenshot_dir,
+            max_tests=max_tests,
+            timeout_ms=timeout_ms,
+        )
+    except Exception as e:
+        return {
+            "results": [],
+            "summary": {"total": 0, "passed": 0, "failed": 0,
+                        "errors": 0, "skipped": 0, "pass_rate": "N/A"},
+            "error": f"test_runner import failed: {str(e)[:200]}",
+        }
+
+
+def check_export_schema(
+    doc_questions: dict,
+    export_input: str,
+    xml_questions: list | None = None,
+) -> list[dict]:
+    """
+    Validate data export schema against survey definition.
+    Wraps export_validator.run_export_validation() for direct use from app.py.
 
     Args:
-        doc_data: output from parse_document()
+        doc_questions:  from parse_document()["questions"]
+        export_input:   CSV header line, TSV, or whitespace-separated variable names
+        xml_questions:  optional parsed XML questions list
+
+    Returns list of issue dicts with rule R031–R038.
+    """
+    try:
+        from export_validator import run_export_validation
+        result = run_export_validation(doc_questions, export_input,
+                                       xml_questions=xml_questions)
+        return result.get("issues", [])
+    except Exception:
+        return []
+
+
+def run_all_checks(doc_data, live_questions=None, gemini_model=None,
+                   threshold=0.65, export_schema: str | None = None):
+    """
+    Run all QC checks. Returns structured results.
+
+    Args:
+        doc_data:       output from parse_document()
         live_questions: dict of live survey data (optional, from crawler)
-        gemini_model: Gemini model instance (for termination check)
-        threshold: fuzzy match threshold
+        gemini_model:   Gemini model instance (for termination check)
+        threshold:      kept for API compatibility
+        export_schema:  CSV header string for data export validation (optional)
 
     Returns:
         dict with all check results + summary
     """
+    # Drop embedding cache so stale vectors from previous runs don't persist
+    clear_cache()
+
     results = {
+        "rule_engine": [],          # Layer 1+2 deterministic results
         "termination": {"rules": [], "meta": {}},
         "missing_words": [],
         "text_match": [],
@@ -670,11 +908,40 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None, threshold=0
         "piping": [],
         "answer_codes": [],
         "question_order": [],
+        "export_validation": [],    # R031-R038 data export checks
+        "test_cases": [],           # auto-generated test cases
+        "test_cases_summary": {},
     }
 
     doc_questions = doc_data["questions"]
     qid_order = doc_data["qid_order"]
     logic_tables = doc_data["logic_tables"]
+
+    # ── LAYER 1+2: Deterministic rule engine (runs before AI, always) ─────────
+    # Per-question-pair checks (R001–R006)
+    if live_questions:
+        re_issues = []
+        all_qids = set(doc_questions) | set(live_questions)
+        for qid in all_qids:
+            doc_q  = doc_questions.get(qid)
+            live_q = live_questions.get(qid)
+            for ri in compare_question_pair(doc_q, live_q):
+                re_issues.append(_rule_issue_to_standard(qid, ri))
+        results["rule_engine"] = re_issues
+
+    # Survey-level deterministic checks: R007 termination, R008 order
+    re_survey = []
+    for lt in logic_tables:
+        ri = _rule_engine.check_termination(lt, live_tested=False)
+        if ri["result"] in ("FAIL", "WARN"):
+            re_survey.append(_rule_issue_to_standard(lt.get("host_qid", "?"), ri))
+    if live_questions:
+        live_order = list(live_questions.keys())
+        ri = _rule_engine.check_question_order(qid_order, live_order)
+        if ri["result"] in ("FAIL", "WARN"):
+            re_survey.append(_rule_issue_to_standard("ORDER", ri))
+    results["rule_engine"].extend(re_survey)
+    # ─────────────────────────────────────────────────────────────────────────
 
     # CHECK 1: Termination (AI, batched)
     if gemini_model and logic_tables:
@@ -705,16 +972,41 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None, threshold=0
     # CHECK 8: Question order (doc-only or with live)
     results["question_order"] = check_question_order(qid_order, live_questions)
 
-    # SUMMARY
+    # ── DATA EXPORT VALIDATION (R031-R038) ────────────────────────────────────
+    if export_schema:
+        results["export_validation"] = check_export_schema(
+            doc_questions,
+            export_schema,
+            xml_questions=doc_data.get("xml_questions"),
+        )
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── TEST CASE GENERATION ──────────────────────────────────────────────────
+    _tc_list, _tc_summary = generate_test_cases(doc_data)
+    results["test_cases"] = _tc_list
+    results["test_cases_summary"] = _tc_summary
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Flatten all issues for Layer 3 review
     all_issues = (
+        results["rule_engine"] +
         results["missing_words"] +
         results["text_match"] +
         results["options_match"] +
         results["mandatory"] +
         results["piping"] +
         results["answer_codes"] +
-        results["question_order"]
+        results["question_order"] +
+        results["export_validation"]
     )
+
+    # ── LAYER 3: AI Judge — reviews only uncertain issues ─────────────────────
+    # Rules with confidence ≥ 85 are NEVER overridden (rules are king).
+    # If Gemini is unavailable the report is returned unchanged.
+    judge = _make_judge(gemini_model)
+    all_issues, _aj_stats = judge.review_all(all_issues, doc_questions, live_questions)
+    results["ai_judge"] = _aj_stats
+    # ─────────────────────────────────────────────────────────────────────────
 
     term_rules = results["termination"]["rules"]
     terminate_rules = [r for r in term_rules if r.get("action") == "terminate"]
@@ -733,16 +1025,20 @@ def run_all_checks(doc_data, live_questions=None, gemini_model=None, threshold=0
         "terminate_simple": len(simple_rules),
         "terminate_compound": len(compound_rules),
         "checks_run": sum([
-            1 if gemini_model else 0,  # termination
-            1 if live_questions else 0,  # missing words
-            1 if live_questions else 0,  # text match
-            1 if live_questions else 0,  # options
+            1,                            # rule engine (always)
+            1 if gemini_model else 0,     # termination (AI)
+            1 if live_questions else 0,   # missing words
+            1 if live_questions else 0,   # text match
+            1 if live_questions else 0,   # options
             1,  # mandatory
             1,  # piping
             1,  # codes
             1,  # order
         ]),
         "mode": "full" if live_questions else "doc_only",
+        "ai_judge": _aj_stats,
+        "test_cases_generated": _tc_summary.get("total", 0),
+        "test_cases_auto": _tc_summary.get("auto_runnable", 0),
     }
 
     # Verdict

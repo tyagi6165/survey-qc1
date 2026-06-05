@@ -54,8 +54,8 @@ _SNIFF_BYTES = 2048
 
 # ── LLM fallback config (mirrors normalizer.py) ───────────────────────────────
 
-_LLM_MAX_RETRIES = 1
-_LLM_RETRY_DELAY = 15  # seconds; multiplied by attempt number
+_LLM_MAX_RETRIES = 2
+_LLM_RETRY_DELAY = 3   # seconds; multiplied by attempt number
 
 # ── Type maps ─────────────────────────────────────────────────────────────────
 
@@ -99,47 +99,6 @@ TYPE_MAP_CONFIRMIT = {
     "loop":     "MATRIX",
     "info":     "OPEN",
 }
-
-# ── Confirmit Project (modern) format maps ────────────────────────────────────
-
-# Side-channel metadata populated during parse_confirmit_xml(); read by parse_export_with_stats()
-_parse_metadata: dict = {}
-
-# Type map keyed by element tag (lowercase) — the tag IS the type in Project format
-TYPE_MAP_CONFIRMIT_PROJECT: dict = {
-    'single':      'UNIQUE',
-    'multi':       'MULTIPLE',
-    'numeric':     'NUMERIC',
-    'open':        'OPEN',
-    'info':        'OPEN',
-    'grid':        'MATRIX',
-    'gridmulti':   'MULTIPLE',
-    'gridnumeric': 'NUMERIC',
-    'grid3d':      'MATRIX',
-    'loop':        'MATRIX',
-}
-
-# Question element tags that appear in the modern Confirmit Project XML tree
-_CONFIRMIT_PROJECT_Q_TAGS: frozenset = frozenset([
-    'Single', 'Multi', 'Numeric', 'Open', 'Info',
-    'Grid', 'GridMulti', 'GridNumeric', 'Grid3D', 'Loop',
-])
-
-# Maps element tag (lowercase) to the child tag holding answer/row elements
-_CONFIRMIT_PROJECT_ANSWERS_TAG: dict = {
-    'single':      'SingleAnswers',
-    'multi':       'MultiAnswers',
-    'grid':        'GridAnswers',
-    'gridmulti':   'GridAnswers',
-    'gridnumeric': 'GridAnswers',
-    'grid3d':      'GridAnswers',
-}
-
-# Visible survey QIDs: Q/R/S/P/SA/SC/D followed by digits + optional alphanumeric suffix
-# Hidden/template variables (InLoop, HidLang, DacimaID …) don't match this pattern
-_CONFIRMIT_VISIBLE_QID_RE = re.compile(
-    r'^(Q|R|S|P|SA|SC|D)\d+[a-zA-Z0-9_]*$', re.IGNORECASE
-)
 
 # Types that should have a non-empty options list
 _CHOICE_TYPES = {"UNIQUE", "MULTIPLE", "MATRIX", "GRID"}
@@ -211,56 +170,6 @@ def _confirmit_get_text(container_el) -> str:
         if pref in candidates:
             return candidates[pref]
     return next(iter(candidates.values()), "")
-
-
-# ── Confirmit Project (modern) text helpers ──────────────────────────────────
-
-def _confirmit_project_get_text(question_el) -> str:
-    """
-    Extract question text from the modern Confirmit Project XML format.
-    Structure: <FormTexts><FormText Language="N"><Text>…</Text></FormText></FormTexts>
-    Strips HTML tags. Prefers English (2057/1033), falls back to any language.
-    """
-    form_texts_el = question_el.find('FormTexts')
-    if form_texts_el is None:
-        return ""
-    texts: dict = {}
-    for ft in form_texts_el:
-        lang = ft.get('Language', '')
-        text_el = ft.find('Text')
-        if text_el is not None and text_el.text and text_el.text.strip():
-            clean = re.sub(r'<[^>]+>', '', text_el.text).strip()
-            if clean:
-                texts[lang] = clean
-    for pref in ('2057', '1033', 'ENG', 'EN', ''):
-        if pref in texts:
-            return texts[pref]
-    return next(iter(texts.values()), '')
-
-
-def _confirmit_project_get_answer_text(answer_el) -> str:
-    """
-    Extract answer/scale text from modern Confirmit Project XML.
-    Answers: <Texts><Text Language="N">…</Text></Texts>
-    Scales:  <FormTexts><FormText Language="N"><Text>…</Text></FormText></FormTexts>
-    Strips HTML. Prefers English, falls back to any language.
-    """
-    texts_el = answer_el.find('Texts')
-    if texts_el is not None:
-        texts: dict = {}
-        for text_el in texts_el:
-            if text_el.tag.split('}')[-1].lower() == 'text':
-                lang = text_el.get('Language', '')
-                val  = re.sub(r'<[^>]+>', '', text_el.text or '').strip()
-                if val:
-                    texts[lang] = val
-        for pref in ('2057', '1033', 'ENG', 'EN', ''):
-            if pref in texts:
-                return texts[pref]
-        if texts:
-            return next(iter(texts.values()))
-    # Scale elements may use <FormTexts> instead
-    return _confirmit_project_get_text(answer_el)
 
 
 # ── Qualtrics-specific helpers ────────────────────────────────────────────────
@@ -485,21 +394,6 @@ def parse_export(file_path: str) -> list:
     return dispatch[fmt](file_path)
 
 
-def parse_export_with_stats(file_path: str) -> tuple:
-    """
-    Like parse_export() but also returns a metadata dict.
-
-    Returns:
-        (questions: list[dict], metadata: dict)
-
-    metadata keys (all optional — present only when the format supplies them):
-        'hidden_count': int  — hidden/template variables skipped (Confirmit Project format)
-    """
-    _parse_metadata.clear()
-    questions = parse_export(file_path)
-    return questions, dict(_parse_metadata)
-
-
 # ── File loaders (wrap parsers with safe I/O) ─────────────────────────────────
 
 def _load_xml_text_and(parser_fn):
@@ -564,35 +458,19 @@ def _load_confirmit_zip(file_path: str) -> list:
 
 def parse_confirmit_xml(xml_text: str) -> list:
     """
-    Parse a Confirmit survey XML file.
-
-    Auto-detects which of two Confirmit XML formats the file uses:
-
-    • Modern 'Project' format (root = <Project>, typed elements like <Single>/<Multi>):
-      routes to _parse_confirmit_project_xml(); filters hidden/template variables.
-      Populates _parse_metadata['hidden_count'] with the number of skipped variables.
-
-    • Classic format (root = <survey>, structure <Variables><Variable name="" type="">):
-      parsed inline.
+    Parse a Confirmit survey-definition XML file.
+    Structure: <survey><Variables><Variable name="" type="Single|Multiple|…">
+                 <Texts><Text language="ENG">…</Text></Texts>
+                 <Answers><Answer code="1"><Texts><Text>…</Text></Texts></Answer>…
+               </Variable>…</Variables></survey>
     """
     try:
-        root = ET.fromstring(_strip_xml_decl(xml_text))
+        root = ET.fromstring(xml_text.lstrip("﻿"))
     except ET.ParseError as exc:
         log.warning("parse_confirmit_xml: XML parse error — %s", exc)
         return []
 
-    # ── Modern Confirmit Project format ─────────────────────────────────────
-    if _local_tag(root) == "project":
-        log.info("parse_confirmit_xml: modern Project format detected")
-        visible, hidden_count = _parse_confirmit_project_xml(root)
-        _parse_metadata['hidden_count'] = hidden_count
-        log.info(
-            "parse_confirmit_xml: %d visible questions, %d hidden/template skipped",
-            len(visible), hidden_count,
-        )
-        return visible
-
-    # ── Classic format: <Variables><Variable> ───────────────────────────────
+    # Find <Variables> container (namespace-safe)
     variables_el = None
     for el in root.iter():
         if _local_tag(el) == "variables":
@@ -600,7 +478,7 @@ def parse_confirmit_xml(xml_text: str) -> list:
             break
 
     if variables_el is None:
-        log.warning("parse_confirmit_xml: no <Variables> element found and root is not <Project>")
+        log.warning("parse_confirmit_xml: no <Variables> element found")
         return []
 
     var_elements = [el for el in variables_el if _local_tag(el) == "variable"]
@@ -608,7 +486,7 @@ def parse_confirmit_xml(xml_text: str) -> list:
         log.warning("parse_confirmit_xml: no <Variable> children found")
         return []
 
-    results   = []
+    results = []
     llm_count = 0
 
     for var_el in var_elements:
@@ -643,108 +521,6 @@ def parse_confirmit_xml(xml_text: str) -> list:
         len(results), len(results) - llm_count, llm_count,
     )
     return results
-
-
-def _parse_confirmit_project_xml(root) -> tuple:
-    """
-    Parse a modern Confirmit Project XML tree (root element = <Project>).
-
-    Question elements are typed tags (<Single>, <Multi>, <Grid>, etc.) that appear
-    anywhere in the tree. The QID lives in a <Name> child element (not an attribute).
-
-    Filters:
-      - VariableType="Hidden" or "Background"  → hidden/template, skip
-      - QID doesn't match ^(Q|R|S|P|SA|SC|D)\\d+  → programming helper, skip
-
-    Returns:
-        (visible_questions: list[dict], hidden_count: int)
-    """
-    visible   = []
-    hidden_ct = 0
-    llm_count = 0
-
-    for el in root.iter():
-        tag = el.tag.split('}')[-1]
-        if tag not in _CONFIRMIT_PROJECT_Q_TAGS:
-            continue
-
-        # QID from <Name> child element text
-        name_el = el.find('Name')
-        if name_el is None or not (name_el.text or '').strip():
-            continue
-        qid = name_el.text.strip()
-
-        # Skip hidden / background / non-survey variables
-        vtype = el.get('VariableType', '')
-        if vtype in ('Hidden', 'Background') or not _CONFIRMIT_VISIBLE_QID_RE.match(qid):
-            hidden_ct += 1
-            continue
-
-        # Type from element tag
-        q_type  = TYPE_MAP_CONFIRMIT_PROJECT.get(tag.lower(), 'UNKNOWN')
-
-        # Question text from <FormTexts>
-        text    = _confirmit_project_get_text(el)
-
-        # Answer options
-        options = []
-        tag_low = tag.lower()
-        ans_tag = _CONFIRMIT_PROJECT_ANSWERS_TAG.get(tag_low)
-        if ans_tag:
-            ans_el = el.find(ans_tag)
-            if ans_el is not None:
-                for ans in ans_el:
-                    atag = ans.tag.split('}')[-1]
-                    if atag in ('Answer', 'GridAnswer', 'HeaderAnswer'):
-                        precode  = ans.get('Precode') or ans.get('Code')
-                        opt_text = _confirmit_project_get_answer_text(ans)
-                        if opt_text:
-                            options.append(make_option(precode, opt_text))
-        # Grid/Scale types: also try <Scales><Scale> for column headers when rows are empty
-        if not options and tag_low in ('grid', 'gridmulti', 'gridnumeric', 'grid3d'):
-            scales_el = el.find('Scales')
-            if scales_el is not None:
-                for scale in scales_el:
-                    if scale.tag.split('}')[-1] == 'Scale':
-                        precode  = scale.get('Precode') or scale.get('Code')
-                        opt_text = _confirmit_project_get_answer_text(scale)
-                        if opt_text:
-                            options.append(make_option(precode, opt_text))
-
-        # Routing: prefer <QuestionMaskPredicate>, fall back to <Predicates>/<Expression>
-        routing = None
-        qmp = el.find('QuestionMaskPredicate')
-        if qmp is not None and qmp.text and qmp.text.strip():
-            routing = qmp.text.strip()
-        if not routing:
-            preds_el = el.find('Predicates')
-            if preds_el is not None:
-                exprs = [
-                    expr.text.strip()
-                    for expr in preds_el.iter()
-                    if expr.tag.split('}')[-1] == 'Expression'
-                    and expr.text and expr.text.strip()
-                ]
-                if exprs:
-                    routing = '; '.join(exprs)
-
-        raw_block = f"# Confirmit Project XML: {tag}\n" + ET.tostring(el, encoding='unicode')
-
-        q        = make_question(qid, text, q_type, options, routing)
-        triggers = _check_fallback_triggers(q)
-
-        if triggers:
-            llm_count += 1
-            log.info("_parse_confirmit_project_xml: LLM fallback QID=%s fields=%s", qid, triggers)
-            q = _llm_enrich(qid, raw_block, q, triggers)
-
-        visible.append(q)
-
-    log.info(
-        "_parse_confirmit_project_xml: %d visible, %d hidden/template, %d via LLM",
-        len(visible), hidden_ct, llm_count,
-    )
-    return visible, hidden_ct
 
 
 # ── Parser 2 — Decipher / Forsta Plus XML ─────────────────────────────────────
