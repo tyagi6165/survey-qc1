@@ -11469,37 +11469,7 @@ def retest_run(job_id):
 def home_landing():
     c = site_content
 
-    # Get rotating testimonials (pick 3)
-    tests = []
-    for i in range(1, 7):
-        if f'test{i}_name' in c:
-            tests.append({
-                'name': c[f'test{i}_name'],
-                'role': c[f'test{i}_role'],
-                'company': c[f'test{i}_company'],
-                'country': c[f'test{i}_country'],
-                'flag': c[f'test{i}_flag'],
-                'quote': c[f'test{i}_quote'],
-                'rating': int(c[f'test{i}_rating']),
-            })
-    # Show first 3 (admin can reorder by editing keys)
-    visible_tests = tests[:3]
-
-    test_cards = ''
-    for t in visible_tests:
-        stars = '<i class="ti ti-star-filled"></i>' * t['rating']
-        initials = ''.join([n[0] for n in t['name'].split()[:2]])
-        test_cards += f"""<div class="test-card">
-  <div class="test-stars">{stars}</div>
-  <div class="test-quote">"{t['quote']}"</div>
-  <div class="test-author">
-    <div class="test-avatar">{initials}</div>
-    <div>
-      <div class="test-name">{t['name']}</div>
-      <div class="test-role">{t['role']} at {t['company']} · {t['country']}</div>
-    </div>
-  </div>
-</div>"""
+    pass  # no pre-render needed
 
     page = """<!DOCTYPE html>
 <html lang="en">
@@ -11561,8 +11531,9 @@ img{max-width:100%}
 .hero-sub{font-size:clamp(16px,2vw,20px);color:var(--text2);max-width:600px;margin:0 auto 20px;line-height:1.7}
 .hero-tagline{display:inline-flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:100px;padding:8px 20px;font-size:13px;font-weight:600;color:var(--text);margin-bottom:36px}
 .hero-tagline .arrow{color:var(--accent);font-weight:800;font-size:15px}
-.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
-.hero-cta .btn-primary{padding:14px 28px;font-size:15px}
+.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:20px;align-items:stretch}
+.hero-cta .btn-primary{padding:16px 32px;font-size:16px}
+.hero-cta .btn-ghost{padding:16px 32px;font-size:16px}
 .hero-meta{font-size:13px;color:var(--text3);display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap}
 .hero-meta-item{display:flex;align-items:center;gap:6px}
 .hero-meta-item i{color:var(--success);font-size:15px}
@@ -11614,7 +11585,7 @@ img{max-width:100%}
 .how-tag i{font-size:13px}
 
 /* ── REPORT MOCK ── */
-.report-mock{max-width:820px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-lg)}
+.report-mock{max-width:980px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-lg)}
 .report-mock-header{background:var(--dark);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .report-mock-title{font-size:14px;font-weight:600;color:#E8DDD2;display:flex;align-items:center;gap:8px}
 .report-mock-stats{display:flex;gap:20px}
@@ -11627,8 +11598,8 @@ img{max-width:100%}
 .chk-badge.pass{background:#DCFCE7}.chk-badge.pass i{color:var(--success);font-size:12px}
 .chk-badge.fail{background:#FEE2E2}.chk-badge.fail i{color:var(--danger);font-size:12px}
 .chk-badge.warn{background:#FEF9C3}.chk-badge.warn i{color:var(--warn);font-size:12px}
-.chk-name{font-size:13px;font-weight:600;color:var(--text);flex:1}
-.chk-detail{font-size:12px;color:var(--text3)}
+.chk-name{font-size:14px;font-weight:600;color:var(--text);flex:1}
+.chk-detail{font-size:13px;color:var(--text3)}
 .report-mock-footer{padding:12px 20px 14px;border-top:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .report-mock-footer span{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:5px}
 
@@ -11674,7 +11645,7 @@ img{max-width:100%}
 .cmp-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)}
 .cmp-table th{padding:14px 16px;font-size:13px;font-weight:700;text-align:center;border-bottom:2px solid var(--border);white-space:nowrap}
 .cmp-table th:first-child{text-align:left;min-width:180px}
-.cmp-table th.hl{background:var(--dark);color:#F7F4EE}
+.cmp-table th.hl{background:var(--accent);color:#FFFFFF}
 .cmp-table td{padding:12px 16px;font-size:13px;text-align:center;border-bottom:1px solid var(--border2);color:var(--text2)}
 .cmp-table td:first-child{text-align:left;font-weight:600;color:var(--text)}
 .cmp-table td.hl{background:rgba(247,231,216,.25);font-weight:600;color:var(--text)}
@@ -11695,21 +11666,11 @@ img{max-width:100%}
 /* ── TRUST NUMBERS ── */
 .trust-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
 .trust-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:32px 24px;text-align:center}
-.trust-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(40px,5vw,58px);font-weight:800;color:var(--text);letter-spacing:-2px;line-height:1}
+.trust-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(56px,7vw,80px);font-weight:800;color:var(--text);letter-spacing:-3px;line-height:1}
 .trust-num .unit{font-size:0.52em;color:var(--accent)}
 .trust-label{font-size:14px;color:var(--text2);margin-top:10px;line-height:1.5}
 
-/* ── TESTIMONIALS ── */
-.test-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.test-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:30px;transition:all .3s}
-.test-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
-.test-stars{display:flex;gap:2px;margin-bottom:18px}
-.test-stars i{color:var(--warn);font-size:14px}
-.test-quote{font-size:15px;color:var(--text);line-height:1.65;margin-bottom:22px;font-weight:500}
-.test-author{display:flex;align-items:center;gap:12px;padding-top:18px;border-top:1px solid var(--border2)}
-.test-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
-.test-name{font-size:14px;font-weight:700;color:var(--text)}
-.test-role{font-size:12px;color:var(--text3);margin-top:1px}
+/* testimonial CSS removed — section replaced with credibility card */
 
 /* ── CTA BANNER ── */
 .cta-banner{padding:80px 24px}
@@ -12221,15 +12182,19 @@ img{max-width:100%}
   </div>
 </section>
 
-<!-- 15. TESTIMONIALS -->
+<!-- 15. BUILT FOR QC PROFESSIONALS -->
 <section class="section" style="background:var(--bg2)">
   <div class="container">
-    <div class="sec-head">
-      <span class="sec-tag">What users say</span>
-      <h2 class="sec-title">QC professionals trust SurveyQC.</h2>
-    </div>
-    <div class="test-grid">
-      """ + test_cards + """
+    <div style="max-width:780px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:48px 40px;text-align:center;box-shadow:var(--shadow)">
+      <div class="sec-tag" style="margin-bottom:20px">Who we built this for</div>
+      <h2 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-1px;margin-bottom:18px;color:var(--text)">Built for QC professionals at market research agencies.</h2>
+      <p style="font-size:16px;color:var(--text2);line-height:1.7;max-width:580px;margin:0 auto 36px">SurveyQC is a focused tool — designed around the daily workflow of QC managers, survey programmers, and project managers who need reliable, documented results, not a general-purpose AI.</p>
+      <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:var(--text)"><i class="ti ti-shield-check" style="color:var(--success);font-size:18px"></i>Deterministic checks</div>
+        <div style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:var(--text)"><i class="ti ti-certificate" style="color:var(--success);font-size:18px"></i>Audit-ready reports</div>
+        <div style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:var(--text)"><i class="ti ti-world" style="color:var(--success);font-size:18px"></i>80+ languages</div>
+        <div style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:var(--text)"><i class="ti ti-repeat" style="color:var(--success);font-size:18px"></i>Reproducible results</div>
+      </div>
     </div>
   </div>
 </section>
