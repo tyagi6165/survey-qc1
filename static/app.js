@@ -535,3 +535,150 @@
   window.renderPlatformBadges = renderPlatformBadges;
 
 })();
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   Drag-Drop Upload Zones — /new-qc page
+   Overrides inline template versions, which are broken by Python
+   f-string processing converting \' → ' in the onclick construction.
+   Runs last because app.js loads with <script defer>.
+═══════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  function _dzOk(file, accept) {
+    if (!accept) return true;
+    var ext = '.' + file.name.split('.').pop().toLowerCase();
+    return accept.toLowerCase().split(',')
+      .map(function (s) { return s.trim(); })
+      .some(function (t) { return t === ext; });
+  }
+
+  function dzOver(e, el) {
+    e.preventDefault();
+    el.classList.add('dz-over');
+  }
+
+  function dzLeave(el) {
+    el.classList.remove('dz-over');
+  }
+
+  function dzDrop(e, el, inpId, doneId, multi) {
+    e.preventDefault();
+    el.classList.remove('dz-over');
+    var inp = document.getElementById(inpId);
+    if (!inp || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    try {
+      var dt = new DataTransfer();
+      for (var i = 0; i < e.dataTransfer.files.length; i++) dt.items.add(e.dataTransfer.files[i]);
+      inp.files = dt.files;
+    } catch (ex) { return; }
+    dzPick(inp, el.id, doneId, multi);
+  }
+
+  function dzPick(inp, zoneId, doneId, multi) {
+    if (!inp || !inp.files || !inp.files[0]) return;
+    var zone = document.getElementById(zoneId);
+    if (!zone) return;
+    var done = doneId ? document.getElementById(doneId) : null;
+
+    if (!zone.dataset.dzOrig) zone.dataset.dzOrig = zone.innerHTML;
+
+    var files = inp.files, f = files[0];
+
+    if (inp.accept && !_dzOk(f, inp.accept)) {
+      zone.classList.remove('dz-ok', 'dz-over');
+      zone.classList.add('dz-err');
+      zone.innerHTML =
+        '<i class="ti ti-file-x" style="font-size:22px;color:#DC2626"></i>' +
+        '<p style="font-size:12px;font-weight:600;color:#DC2626;margin:5px 0 2px">Wrong file type</p>' +
+        '<p style="font-size:10px;color:#EF4444">Accepted: ' + inp.accept + '</p>';
+      try { inp.value = ''; inp.files = new DataTransfer().files; } catch (ex) {}
+      if (done) done.style.display = 'none';
+      setTimeout(function () {
+        if (zone.classList.contains('dz-err')) {
+          zone.classList.remove('dz-err');
+          if (zone.dataset.dzOrig) { zone.innerHTML = zone.dataset.dzOrig; delete zone.dataset.dzOrig; }
+        }
+      }, 2500);
+      return;
+    }
+
+    var sz = f.size < 1048576
+      ? (Math.round(f.size / 1024) + ' KB')
+      : (Math.round(f.size / 1048576 * 10) / 10 + ' MB');
+    var nameLabel = (multi && files.length > 1) ? (files.length + ' files selected') : f.name;
+    var sizeLabel = (multi && files.length > 1) ? 'Ready' : '(' + sz + ')';
+
+    zone.classList.remove('dz-err', 'dz-over');
+    zone.classList.add('dz-ok');
+
+    // Use DOM methods — avoids the f-string \' → ' quote-escaping bug
+    // that breaks string-concatenated onclick attributes in the inline version
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'display:flex;align-items:center;gap:9px;width:100%;padding:0 2px';
+
+    var checkIcon = document.createElement('i');
+    checkIcon.className = 'ti ti-circle-check';
+    checkIcon.style.cssText = 'font-size:24px;color:#16A34A;flex-shrink:0';
+
+    var info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0;text-align:left;overflow:hidden';
+
+    var nameLine = document.createElement('p');
+    nameLine.style.cssText = 'font-size:12px;font-weight:600;color:#1A1A2E;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;max-width:100%;display:block';
+    nameLine.textContent = nameLabel;
+
+    var sizeLine = document.createElement('p');
+    sizeLine.style.cssText = 'font-size:10px;color:#6B7280;margin:2px 0 0';
+    sizeLine.textContent = sizeLabel;
+
+    info.appendChild(nameLine);
+    info.appendChild(sizeLine);
+
+    var rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.title = 'Remove';
+    rmBtn.innerHTML = '&#215;';
+    rmBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:18px;padding:0 2px;flex-shrink:0;line-height:1;transition:color .15s';
+    rmBtn._dzInpId  = inp.id;
+    rmBtn._dzZoneId = zoneId;
+    rmBtn._dzDoneId = doneId || '';
+    rmBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      dzClear(this._dzInpId, this._dzZoneId, this._dzDoneId);
+    });
+    rmBtn.addEventListener('mouseenter', function () { this.style.color = '#DC2626'; });
+    rmBtn.addEventListener('mouseleave', function () { this.style.color = '#9CA3AF'; });
+
+    wrapper.appendChild(checkIcon);
+    wrapper.appendChild(info);
+    wrapper.appendChild(rmBtn);
+
+    zone.innerHTML = '';
+    zone.appendChild(wrapper);
+
+    if (done) done.style.display = 'none';
+    if (typeof window.updateMeter === 'function') window.updateMeter();
+  }
+
+  function dzClear(inpId, zoneId, doneId) {
+    var inp  = inpId  ? document.getElementById(inpId)  : null;
+    var zone = zoneId ? document.getElementById(zoneId) : null;
+    var done = doneId ? document.getElementById(doneId) : null;
+    if (inp) { try { inp.value = ''; inp.files = new DataTransfer().files; } catch (e) {} }
+    if (done) done.style.display = 'none';
+    if (zone) {
+      zone.classList.remove('dz-ok', 'dz-err');
+      if (zone.dataset.dzOrig) { zone.innerHTML = zone.dataset.dzOrig; delete zone.dataset.dzOrig; }
+    }
+    if (typeof window.updateMeter === 'function') window.updateMeter();
+  }
+
+  window.dzOver  = dzOver;
+  window.dzLeave = dzLeave;
+  window.dzDrop  = dzDrop;
+  window.dzPick  = dzPick;
+  window.dzClear = dzClear;
+
+})();

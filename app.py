@@ -145,6 +145,18 @@ class JobStore:
                     log_text     TEXT
                 )
             ''')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS issue_feedback (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id       TEXT,
+                    qid          TEXT,
+                    issue_type   TEXT,
+                    platform     TEXT,
+                    user_verdict TEXT,
+                    user_email   TEXT,
+                    created_at   TEXT
+                )
+            ''')
 
     def _load_from_db(self):
         """Load all persisted jobs into memory on startup."""
@@ -247,6 +259,38 @@ class JobStore:
 
     def __len__(self):
         return len(self._mem)
+
+    # ── Issue feedback (historical learning) ─────────────────────────────────
+
+    def load_feedback(self, platform: str = '') -> list:
+        """Return all issue_feedback rows, optionally filtered by platform."""
+        try:
+            with self._conn() as c:
+                if platform:
+                    rows = c.execute(
+                        'SELECT * FROM issue_feedback WHERE platform=?', (platform,)
+                    ).fetchall()
+                else:
+                    rows = c.execute('SELECT * FROM issue_feedback').fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def save_feedback(self, job_id: str, qid: str, issue_type: str,
+                      platform: str, verdict: str, user_email: str = '') -> None:
+        """Insert a user verdict for a specific issue."""
+        try:
+            from datetime import datetime as _dt
+            with self._conn() as c:
+                c.execute(
+                    '''INSERT INTO issue_feedback
+                       (job_id, qid, issue_type, platform, user_verdict, user_email, created_at)
+                       VALUES (?,?,?,?,?,?,?)''',
+                    (job_id, qid, issue_type, platform, verdict, user_email,
+                     _dt.now().strftime('%Y-%m-%d %H:%M:%S')),
+                )
+        except Exception:
+            pass
 
 
 # ── SQLite-backed User Store ──────────────────────────────────────────────────
@@ -1064,6 +1108,7 @@ def dashboard():
     saved = user.get('total_saved_hours', 0)
     reports_used = user.get('reports_used', 0)
     reports_limit = user.get('reports_limit', 5)
+    plan = user.get('plan', 'Free')
 
     user_jobs = [(jid, j) for jid, j in jobs.items()
                  if j.get('user_email') == session.get('user_email')]
@@ -1079,26 +1124,42 @@ def dashboard():
         doc_name = j.get('doc_name', 'Unknown')
         platform = j.get('platform', '-')
         issues = j.get('total_issues', 0)
-        created = j.get('created_at', '')[:16]
+        raw_dt = j.get('created_at', '')
+        try:
+            from datetime import datetime as _dt
+            created = _dt.strptime(raw_dt[:16], '%Y-%m-%d %H:%M').strftime('%d %b, %H:%M')
+        except Exception:
+            created = raw_dt[:16]
+        doc_display = (doc_name[:34] + '…') if len(doc_name) > 34 else doc_name
         if status == 'done':
-            badge = f'<span class="badge badge-{"red" if issues > 0 else "green"}">{issues} issues</span>'
+            badge = (f'<span class="badge badge-green">Passed</span>' if issues == 0
+                     else f'<span class="badge badge-amber">{issues} issue{"s" if issues!=1 else ""}</span>')
+            action = f'<a href="/report/{jid}" style="color:var(--accent);font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap">View →</a>'
         elif status == 'running':
-            badge = '<span class="badge badge-blue">Running</span>'
+            badge  = '<span class="badge badge-blue">Running</span>'
+            action = (f'<form method="POST" action="/stop/{jid}" style="margin:0">'
+                      f'<button type="submit" style="background:none;border:1px solid #E0E0E0;'
+                      f'color:var(--text2);font-size:11px;padding:3px 9px;border-radius:5px;'
+                      f'cursor:pointer;font-family:inherit">Stop</button></form>')
         else:
-            badge = '<span class="badge badge-amber">Error</span>'
-        recent_html += f"""
-        <tr>
-          <td class="primary"><i class="ti ti-file-text" style="color:var(--purple);margin-right:8px"></i>{doc_name[:30]}</td>
-          <td>{platform}</td>
-          <td>{badge}</td>
-          <td style="color:var(--text3)">{created}</td>
-          <td>
-            {'<a href="/report/' + jid + '" style="color:var(--purple);font-size:12px;text-decoration:none">View</a>' if status == 'done' else ''}
-          </td>
-        </tr>"""
+            badge  = '<span class="badge badge-red">Error</span>'
+            action = '<a href="/new-qc" style="color:var(--accent);font-size:12px;font-weight:600;text-decoration:none">Retry</a>'
+        recent_html += (
+            f'<tr class="report-row" onclick="window.location=\'/report/{jid}\'" style="cursor:pointer">'
+            f'<td class="primary" title="{doc_name}"><i class="ti ti-file-text" style="color:var(--accent);margin-right:8px"></i>{doc_display}</td>'
+            f'<td>{platform}</td>'
+            f'<td>{badge}</td>'
+            f'<td style="color:var(--text3);white-space:nowrap">{created}</td>'
+            f'<td onclick="event.stopPropagation()">{action}</td>'
+            f'</tr>'
+        )
 
     if not recent_html:
-        recent_html = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">No reports yet. <a href="/new-qc" style="color:var(--purple)">Run your first QC!</a></td></tr>'
+        recent_html = ('<tr><td colspan="5" style="text-align:center;padding:36px 16px">'
+                       '<p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No reports yet</p>'
+                       '<p style="font-size:13px;color:var(--text3);margin-bottom:16px">Run your first QC to see results here.</p>'
+                       '<a href="/new-qc" class="btn btn-primary btn-sm"><i class="ti ti-plus"></i>&#8594; New QC</a>'
+                       '</td></tr>')
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Dashboard — SurveyQC</title></head><body>
@@ -1116,6 +1177,8 @@ def dashboard():
       </div>
     </div>
 
+    {"<div style='background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:10px;padding:13px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px'><span style='font-size:13px;color:#92400E;font-weight:500'>&#9888; Free plan: " + str(reports_used) + "/" + str(reports_limit) + " reports used. Upgrade to continue.</span><a href='/billing' style='font-size:12px;font-weight:700;color:#92400E;text-decoration:none;white-space:nowrap;border:1.5px solid #F59E0B;padding:5px 12px;border-radius:6px'>Upgrade &#8594;</a></div>" if plan == 'Free' and reports_used >= reports_limit else ""}
+
     <div class="time-saved-banner">
       <div>
         {"<p style='font-size:11px;color:var(--text3);margin-bottom:5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase'>This month you saved</p><div style='display:flex;align-items:baseline;gap:10px;margin-bottom:4px'><p style='font-size:32px;font-weight:800;color:#2E8B57;font-family:Plus Jakarta Sans,sans-serif;letter-spacing:-0.5px'>" + str(reports_used * 8) + " hours</p><p style='font-size:13px;color:var(--green);font-weight:500'>= " + str(reports_used) + " full working days back in your life</p></div><p style='font-size:11px;color:var(--text3)'>" + str(reports_used) + " surveys completed — manual would take " + str(reports_used*8) + "h, SurveyQC did it in " + str(reports_used) + " mins</p>" if reports_used > 0 else "<p style='font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px'>Welcome to SurveyQC!</p><p style='font-size:13px;color:var(--text3);line-height:1.6'>Run your first QC to see how much time you save here.</p>"}
@@ -1127,7 +1190,7 @@ def dashboard():
       <div class="stat-card"><p class="stat-num">{len(done_jobs)}</p><p class="stat-label">Reports run</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#3F7D58">{passed_count}</p><p class="stat-label">Passed</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#C84B31">{issues_found}</p><p class="stat-label">Issues found</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#2E8B57">{saved}h</p><p class="stat-label">Time saved</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#2E8B57">{len(done_jobs) * 8}h</p><p class="stat-label">Time saved</p></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 280px;gap:16px">
@@ -1185,280 +1248,322 @@ def dashboard():
 @login_required
 def new_qc():
     user = get_current_user()
-    plan = user.get('plan','Free') if user else 'Free'
+    plan = user.get('plan', 'Free') if user else 'Free'
     sb = sidebar_html('new-qc')
-    is_pro = plan in ('Pro','Business','Enterprise')
+    is_pro = plan in ('Pro', 'Business', 'Enterprise')
+    _reports_used = user.get('reports_used', 0) if user else 0
+    _reports_limit = UserDB.PLAN_LIMITS.get(plan, 3)
+    _at_limit = not users_db.can_run_report(session['user_email'])
 
-    # Banner for redirects from expired retest jobs
     _msg_param = request.args.get('msg', '')
     _top_banner = ''
     if _msg_param == 'expired':
-        _top_banner = ('<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;'
-                       'padding:12px 18px;margin-bottom:20px;font-size:13px;color:#92400E">'
-                       '⚠️ <b>Previous job expired.</b> The report session is no longer in memory. '
-                       'Please upload your document again to run a new QC.</div>')
+        _top_banner = ('<div class="nqc-banner nqc-banner-warn">'
+                       '&#9888; <b>Previous job expired.</b> The report session is no longer '
+                       'in memory. Please upload your document again to run a new QC.</div>')
     elif _msg_param == 'nodoc':
-        _top_banner = ('<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;'
-                       'padding:12px 18px;margin-bottom:20px;font-size:13px;color:#92400E">'
-                       '⚠️ <b>Original document not found.</b> Please upload the .docx spec file again.</div>')
+        _top_banner = ('<div class="nqc-banner nqc-banner-warn">'
+                       '&#9888; <b>Original document not found.</b> '
+                       'Please upload the .docx spec file again.</div>')
 
-    # Screenshots card body — compact, plan-aware
-    if not is_pro:
-        ss_body = (
-            '<div style="display:flex;align-items:center;gap:7px;background:#FEF3E2;'
-            'border-radius:7px;padding:7px 10px;margin-bottom:8px">'
-            '<i class="ti ti-lock" style="font-size:13px;color:#C46A2B;flex-shrink:0"></i>'
-            '<p style="font-size:11px;color:#7C3D0A">Pro+ only. '
-            '<a href="/billing" style="color:#042C53;font-weight:600">Upgrade &rarr;</a></p></div>'
-            '<div class="dz dz-sm dz-off">'
-            '<i class="ti ti-camera" style="font-size:20px;color:#D1D5DB"></i>'
-            '<p style="font-size:11px;color:#9CA3AF;margin-top:4px">Upgrade to unlock</p></div>'
-            '<input type="file" name="screenshots" accept="image/*" multiple disabled style="display:none">'
+    # Recent reports for sidebar (last 3 for this user)
+    _user_jobs = [(jid, j) for jid, j in jobs.items()
+                  if j.get('user_email') == session.get('user_email')]
+    _user_jobs.sort(key=lambda x: x[1].get('created_at', ''), reverse=True)
+    _recent_rows = ''
+    for _jid, _j in _user_jobs[:3]:
+        _st = _j.get('status', 'running')
+        _dn = (_j.get('doc_name', 'Unknown'))[:34]
+        _iss = _j.get('total_issues', 0)
+        _dt = _j.get('created_at', '')[:10]
+        if _st == 'done':
+            _bdg = (f'<span class="sb-badge sb-green">Passed</span>' if _iss == 0
+                    else f'<span class="sb-badge sb-orange">{_iss} issue{"s" if _iss!=1 else ""}</span>')
+        elif _st == 'running':
+            _bdg = '<span class="sb-badge sb-blue">Running…</span>'
+        else:
+            _bdg = '<span class="sb-badge sb-red">Error</span>'
+        _lnk = (f'<a href="/report/{_jid}" class="sb-view-link">View →</a>'
+                if _st == 'done' else '')
+        _recent_rows += (
+            f'<div class="sb-row">'
+            f'<div class="sb-row-left">'
+            f'<span class="sb-row-name">{_dn}</span>'
+            f'<span class="sb-row-date">{_dt}</span>'
+            f'</div>'
+            f'<div class="sb-row-right">{_bdg}{_lnk}</div>'
+            f'</div>'
         )
-    else:
-        ss_body = (
+    if not _recent_rows:
+        _recent_rows = '<div class="sb-empty">No reports yet. Run your first QC!</div>'
+
+    # Checkboxes for advanced panel
+    _chk_items = [
+        ('chk_term', 'Termination'), ('chk_text', 'Question text'),
+        ('chk_words', 'Missing words'), ('chk_options', 'Options match'),
+        ('chk_mandatory', 'Mandatory'), ('chk_piping', 'Piping'),
+        ('chk_codes', 'Answer codes'), ('chk_order', 'Question order'),
+    ]
+    _chk_html = ''.join(
+        f'<label class="qc-chk"><input type="checkbox" name="{n}" value="1" checked>{lbl}</label>'
+        for n, lbl in _chk_items
+    )
+
+    # Screenshots field (advanced panel)
+    if is_pro:
+        _ss_field = (
             '<div class="dz dz-sm" id="ssZone"'
             ' onclick="document.getElementById(\'ssInput\').click()"'
             ' ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"'
             ' ondrop="dzDrop(event,this,\'ssInput\',\'ssDone\',true)">'
-            '<i class="ti ti-camera" style="font-size:20px;color:#9CA3AF"></i>'
-            '<p style="font-size:11px;color:#6B7280;margin-top:4px">'
-            'Drop screenshots or <span style="color:#C46A2B;text-decoration:underline">browse</span>'
-            ' <span style="color:#D1D5DB">&middot;</span> Multiple OK</p></div>'
+            '<i class="ti ti-camera" style="font-size:18px;color:#9CA3AF"></i>'
+            '<p style="font-size:11px;color:#6B7280;margin-top:3px">'
+            'Drop screenshots · Multiple OK</p></div>'
             '<input type="file" name="screenshots" id="ssInput" accept="image/*" multiple'
             ' style="display:none" onchange="dzPick(this,\'ssZone\',\'ssDone\',true)">'
             '<div id="ssDone" class="dz-done" style="display:none"></div>'
         )
+    else:
+        _ss_field = (
+            '<div style="display:flex;align-items:center;gap:6px;background:#FEF3E2;'
+            'border-radius:7px;padding:6px 10px">'
+            '<i class="ti ti-lock" style="font-size:12px;color:#C46A2B"></i>'
+            '<span style="font-size:11px;color:#7C3D0A">Pro+ only. '
+            '<a href="/billing" style="color:#042C53;font-weight:600">Upgrade →</a>'
+            '</span></div>'
+            '<input type="file" name="screenshots" accept="image/*" multiple '
+            'disabled style="display:none">'
+        )
 
-    pro_badge = ('<span style="font-size:10px;background:#E6F1FB;color:#0C447C;'
-                 'padding:2px 7px;border-radius:20px;font-weight:600;margin-left:4px">Pro+</span>'
-                 if not is_pro else '')
+    _ss_label = 'Optional' if is_pro else 'Pro+'
 
-    # Checkboxes
-    chk_items = [
-        ('chk_term','Termination'),('chk_text','Question text'),
-        ('chk_words','Missing words'),('chk_options','Options match'),
-        ('chk_mandatory','Mandatory'),('chk_piping','Piping'),
-        ('chk_codes','Answer codes'),('chk_order','Question order'),
-    ]
-    chk_html = ''.join(
-        f'<label class="qc-chk"><input type="checkbox" name="{n}" value="1" checked>{lbl}</label>'
-        for n, lbl in chk_items
-    )
-
-    page = SHARED_CSS + '''<!DOCTYPE html>
+    page = SHARED_CSS + f'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>New QC — SurveyQC</title>
+<title>New QC &#8212; SurveyQC</title>
 <style>
-/* ── compact 2-col new-qc ─────────────────────── */
-.nqc-outer{max-width:900px}
+/* ══ NEW QC PAGE ═══════════════════════════════════════════════════════ */
+body.new-qc-page .nqc-wrap{{max-width:1100px;margin:0 auto;padding:0 0 48px;min-width:0}}
+body.new-qc-page .nqc-banner{{border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13px;line-height:1.5}}
+body.new-qc-page .nqc-banner-warn{{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E}}
 
-/* 2-column grid */
-.nqc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px}
-.nqc-col{display:flex;flex-direction:column;gap:10px}
+/* 2-col layout: form + fixed 300px sidebar */
+body.new-qc-page .nqc-layout{{display:grid;grid-template-columns:1fr 300px;gap:1.5rem;align-items:start;max-width:1100px}}
 
-/* cards */
-.nc{background:white;border:1px solid #EEF0F3;border-radius:11px;
-  padding:13px 15px;box-shadow:0 1px 3px rgba(0,0,0,.04);
-  transition:border-color .15s}
-.nc:focus-within{border-color:#C46A2B;box-shadow:0 0 0 3px rgba(196,106,43,.07)}
-.nc-hdr{display:flex;align-items:center;gap:7px;margin-bottom:9px}
-.nc-step{width:20px;height:20px;border-radius:50%;background:#042C53;color:white;
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;font-weight:700;flex-shrink:0}
-.nc-step-opt{background:#9CA3AF}
-.nc-lbl{font-size:13px;font-weight:600;color:#1A1A2E;line-height:1}
-.nc-req{color:#E24B4A}
-.nc-acc{font-size:10px;font-weight:700;background:#DCFCE7;color:#166534;
-  padding:1px 7px;border-radius:20px;margin-left:3px}
-.nc-opt{font-size:11px;color:#9CA3AF;margin-left:2px}
+/* Form cards */
+body.new-qc-page .fc{{background:#fff;border:0.5px solid var(--border);border-radius:14px;padding:18px 20px;
+     transition:border-color .15s;display:flex;flex-direction:column}}
+body.new-qc-page .fc:focus-within{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(196,106,43,.07)}}
+body.new-qc-page .fc-label{{font-size:13px;font-weight:600;color:var(--text);
+           display:flex;align-items:center;gap:7px;margin-bottom:12px;flex-wrap:wrap}}
+body.new-qc-page .fc-req{{color:#E24B4A}}
+body.new-qc-page .fc-opt{{font-size:10px;font-weight:600;background:#F3F4F6;color:#6B7280;
+         padding:2px 8px;border-radius:20px;flex-shrink:0}}
 
-/* compact drop zones */
-.dz{border:1.5px dashed #D1D5DB;border-radius:8px;min-height:90px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  cursor:pointer;background:#FAFAFA;text-align:center;padding:8px 12px;
-  transition:border-color .15s,background .15s;user-select:none}
-.dz:hover{border-color:#C46A2B;background:#FEF9F5}
-.dz.dz-over{border-color:#C46A2B;background:#FEF3E2;border-style:solid}
-.dz.dz-sm{min-height:74px}
-.dz.dz-off{cursor:default;opacity:.7}
-.dz.dz-off:hover{border-color:#D1D5DB;background:#FAFAFA}
-.dz.dz-ok{border:1.5px solid #16A34A;background:#F0FAF4}
-.dz.dz-ok:hover{border-color:#16A34A;background:#E6F7EE}
-.dz.dz-err{border:1.5px solid #DC2626;background:#FFF5F5}
-.dz.dz-err:hover{border-color:#DC2626;background:#FFF5F5}
+/* Upload cards row */
+body.new-qc-page .upload-row{{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:14px;align-items:start}}
+body.new-qc-page .upload-row .fc{{height:180px;box-sizing:border-box;min-width:0}}
 
-/* uploaded strip */
-.dz-done{display:flex;align-items:center;gap:8px;padding:8px 10px;
-  background:#F0FAF4;border:1px solid #A7D7B8;border-radius:8px;
-  margin-top:0}
-.dz-dn{font-size:11px;font-weight:600;color:#1A1A2E;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
-.dz-dm{font-size:10px;color:#6B7280}
-.dz-rm{background:none;border:none;cursor:pointer;color:#9CA3AF;
-  font-size:14px;padding:0;flex-shrink:0;line-height:1}
-.dz-rm:hover{color:#DC2626}
+/* Drop zones */
+body.new-qc-page .dz{{border:1.5px dashed #D1D5DB;border-radius:10px;min-height:118px;flex:1;
+     display:flex;flex-direction:column;align-items:center;justify-content:center;
+     cursor:pointer;background:#FAFAFA;text-align:center;padding:14px 16px;
+     transition:border-color .15s,background .15s;user-select:none;width:100%;box-sizing:border-box}}
+body.new-qc-page .dz:hover{{border-color:var(--accent);background:#FEF9F5}}
+body.new-qc-page .dz.dz-over{{border-color:var(--accent);background:#FEF3E2;border-style:solid}}
+body.new-qc-page .dz.dz-sm{{min-height:72px}}
+body.new-qc-page .dz.dz-off{{cursor:default;opacity:.6}}
+body.new-qc-page .dz.dz-off:hover{{border-color:#D1D5DB;background:#FAFAFA}}
+body.new-qc-page .dz.dz-ok{{border:1.5px solid #16A34A!important;background:#F0FAF4}}
+body.new-qc-page .dz.dz-ok:hover{{background:#E6F7EE}}
+body.new-qc-page .dz.dz-err{{border:1.5px solid #DC2626;background:#FFF5F5}}
+body.new-qc-page .dz-icon{{font-size:28px;color:#C8C4BF;margin-bottom:6px}}
+body.new-qc-page .dz-hint{{font-size:12px;color:#6B7280;margin:0;line-height:1.5}}
+body.new-qc-page .dz-hint b{{color:var(--text)}}
+body.new-qc-page .dz-browse{{color:var(--accent);text-decoration:underline}}
+body.new-qc-page .dz-helper{{font-size:11px;color:#9CA3AF;margin-top:5px}}
+body.new-qc-page .dz-plus{{color:#16A34A;font-weight:600}}
+body.new-qc-page .dz-done{{display:flex;align-items:center;gap:8px;padding:7px 10px;
+          background:#F0FAF4;border:1px solid #A7D7B8;border-radius:8px;margin-top:0}}
+body.new-qc-page .dz-rm{{background:none;border:none;cursor:pointer;color:#9CA3AF;
+        font-size:15px;padding:0 2px;flex-shrink:0;line-height:1}}
+body.new-qc-page .dz-rm:hover{{color:#DC2626}}
 
 /* URL field */
-.url-inp{width:100%;padding:9px 11px;border:1px solid #DDE1E7;border-radius:8px;
-  font-size:13px;color:#374151;font-family:inherit;outline:none;
-  transition:border-color .15s;box-sizing:border-box}
-.url-inp:focus{border-color:#C46A2B;box-shadow:0 0 0 3px rgba(196,106,43,.08)}
-.plat-pills{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
-.pp{font-size:10px;background:#F3F4F6;color:#6B7280;padding:2px 8px;
-  border-radius:5px;cursor:pointer;border:none;font-family:inherit;
-  transition:background .12s}
-.pp:hover{background:#E5E7EB;color:#374151}
+body.new-qc-page .url-wrap{{display:flex;align-items:center;border:1px solid var(--border);border-radius:9px;
+           overflow:hidden;background:white;transition:border-color .15s}}
+body.new-qc-page .url-wrap:focus-within{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(196,106,43,.08)}}
+body.new-qc-page .url-icon{{padding:0 11px;color:#9CA3AF;font-size:15px;flex-shrink:0;display:flex;align-items:center}}
+body.new-qc-page .url-inp{{flex:1;padding:11px 11px 11px 0;border:none;outline:none;
+          font-size:13px;color:var(--text);font-family:inherit;background:transparent}}
+body.new-qc-page .plat-pills{{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}}
+body.new-qc-page .pp{{font-size:11px;background:#F3F4F6;color:#6B7280;padding:3px 10px;border-radius:20px;
+     cursor:pointer;border:none;font-family:inherit;transition:background .12s,color .12s}}
+body.new-qc-page .pp:hover{{background:#E8E1D8;color:var(--text)}}
+body.new-qc-page .plat-detect{{display:none;font-size:10px;font-weight:600;padding:2px 8px;
+              border-radius:5px;background:#DCFCE7;color:#166534;margin-left:auto}}
+
+/* Accuracy strip */
+body.new-qc-page .acc-strip{{display:flex;align-items:center;gap:10px;padding:8px 14px;background:white;
+            border:0.5px solid var(--border);border-radius:9px;margin:14px 0;
+            box-shadow:0 1px 2px rgba(0,0,0,.03)}}
+body.new-qc-page .acc-bar{{flex:1;height:4px;background:#F3F4F6;border-radius:99px;overflow:hidden}}
+body.new-qc-page .acc-fill{{height:100%;border-radius:99px;transition:width .4s ease,background .4s ease}}
+body.new-qc-page .acc-lbl{{font-size:11px;font-weight:600;white-space:nowrap;color:#9CA3AF}}
+
+/* Run button */
+body.new-qc-page .run-btn{{width:100%;padding:14px;font-size:15px;font-weight:700;border-radius:11px;
+          border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+          gap:8px;color:white;background:#1a1a1a;letter-spacing:-.1px;
+          box-shadow:0 4px 14px rgba(0,0,0,.18);
+          transition:background .2s,box-shadow .15s,transform .1s}}
+body.new-qc-page .run-btn:hover:not(:disabled){{box-shadow:0 6px 20px rgba(0,0,0,.25);transform:translateY(-1px)}}
+body.new-qc-page .run-btn:active:not(:disabled){{transform:translateY(0)}}
+body.new-qc-page .run-btn:disabled{{opacity:.5;cursor:not-allowed}}
+body.new-qc-page .run-btn.btn-warm{{background:linear-gradient(135deg,#C46A2B,#D97706);
+                   box-shadow:0 4px 14px rgba(196,106,43,.3)}}
+body.new-qc-page .run-btn.btn-full{{background:linear-gradient(135deg,#1B4332,#1a1a1a);
+                   box-shadow:0 4px 14px rgba(27,67,50,.3)}}
+body.new-qc-page .run-sub{{font-size:12px;color:#9CA3AF;text-align:center;margin-top:8px;
+          display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}}
+body.new-qc-page .adv-lnk{{background:none;border:none;cursor:pointer;font-size:12px;color:#9CA3AF;
+          font-family:inherit;padding:0;text-decoration:underline;text-underline-offset:2px}}
+body.new-qc-page .adv-lnk:hover{{color:var(--text)}}
+
+/* Advanced panel */
+body.new-qc-page .adv-panel{{margin-top:12px;padding:16px;background:#F8F7F4;
+            border-radius:10px;border:0.5px solid var(--border)}}
+body.new-qc-page .adv-lbl{{font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:block}}
+body.new-qc-page .qc-chk{{display:flex;align-items:center;gap:6px;font-size:11px;color:#374151;cursor:pointer}}
+body.new-qc-page .qc-chk input{{accent-color:#1a1a1a;width:12px;height:12px;flex-shrink:0}}
+body.new-qc-page .chk-grid{{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:12px}}
 
 /* xml tooltip */
-.xml-tb{background:none;border:none;cursor:pointer;color:#9CA3AF;
-  font-size:10px;font-family:inherit;padding:0;margin-left:auto;
-  display:flex;align-items:center;gap:2px}
-.xml-tb:hover{color:#374151}
-.xml-tip{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:7px;
-  padding:9px 11px;margin-bottom:8px;font-size:11px;color:#1E3A5F;line-height:1.5}
-.xml-tip ul{margin:3px 0 0;padding-left:15px}
+body.new-qc-page .xml-tip{{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;
+          padding:9px 12px;margin-bottom:10px;font-size:11px;color:#1E3A5F;line-height:1.6}}
+body.new-qc-page .xml-tip ul{{margin:4px 0 0;padding-left:14px}}
+body.new-qc-page .xml-tb{{background:none;border:none;cursor:pointer;font-size:11px;color:#9CA3AF;
+         font-family:inherit;padding:0;margin-left:auto;display:flex;align-items:center;gap:3px}}
+body.new-qc-page .xml-tb:hover{{color:var(--text)}}
 
-/* slim accuracy strip */
-.acc-strip{display:flex;align-items:center;gap:10px;padding:7px 13px;
-  background:white;border:1px solid #EEF0F3;border-radius:8px;
-  margin-bottom:9px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
-.acc-bar{flex:1;height:4px;background:#F3F4F6;border-radius:99px;overflow:hidden}
-.acc-fill{height:100%;border-radius:99px;transition:width .4s ease,background .4s ease}
-.acc-lbl{font-size:11px;font-weight:600;white-space:nowrap}
+/* ── SIDEBAR ───────────────────────────────────────────────────────── */
+body.new-qc-page .sb-card{{background:#fff;border:0.5px solid var(--border);border-radius:14px;
+          padding:16px 18px;margin-bottom:14px}}
+body.new-qc-page .sb-card:last-child{{margin-bottom:0}}
+body.new-qc-page .sb-card-hdr{{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}}
+body.new-qc-page .sb-card-title{{font-size:13px;font-weight:700;color:var(--text)}}
+body.new-qc-page .sb-view-all{{font-size:12px;color:var(--accent);text-decoration:none;font-weight:500}}
+body.new-qc-page .sb-view-all:hover{{text-decoration:underline}}
+body.new-qc-page .sb-row{{display:flex;align-items:center;justify-content:space-between;
+         padding:8px 0;border-bottom:0.5px solid var(--border)}}
+body.new-qc-page .sb-row:last-child{{border-bottom:none;padding-bottom:0}}
+body.new-qc-page .sb-row:first-child{{padding-top:0}}
+body.new-qc-page .sb-row-left{{flex:1;min-width:0;margin-right:8px}}
+body.new-qc-page .sb-row-name{{display:block;font-size:12px;font-weight:600;color:var(--text);
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+body.new-qc-page .sb-row-date{{font-size:10px;color:var(--text3);display:block;margin-top:1px}}
+body.new-qc-page .sb-row-right{{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}}
+body.new-qc-page .sb-badge{{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;white-space:nowrap}}
+body.new-qc-page .sb-green{{background:#DCFCE7;color:#15803D}}
+body.new-qc-page .sb-orange{{background:#FEF3C7;color:#B45309}}
+body.new-qc-page .sb-blue{{background:#DBEAFE;color:#1D4ED8}}
+body.new-qc-page .sb-red{{background:#FEE2E2;color:#DC2626}}
+body.new-qc-page .sb-view-link{{font-size:11px;color:var(--accent);text-decoration:none;font-weight:500}}
+body.new-qc-page .sb-view-link:hover{{text-decoration:underline}}
+body.new-qc-page .sb-empty{{font-size:12px;color:var(--text3);text-align:center;padding:8px 0}}
+body.new-qc-page .sb-checklist{{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}}
+body.new-qc-page .sb-checklist li{{display:flex;align-items:flex-start;gap:8px;font-size:12px;
+                  color:var(--text2);line-height:1.4}}
+body.new-qc-page .sb-check-icon{{color:#16A34A;font-size:14px;flex-shrink:0}}
+body.new-qc-page .sb-plat-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
+body.new-qc-page .sb-plat{{display:flex;align-items:center;gap:8px;padding:8px 10px;
+          background:var(--bg);border-radius:9px;border:0.5px solid var(--border)}}
+body.new-qc-page .sb-plat-icon{{width:28px;height:28px;border-radius:7px;display:flex;
+               align-items:center;justify-content:center;font-size:14px;flex-shrink:0}}
+body.new-qc-page .sb-plat-name{{font-size:11px;font-weight:600;color:var(--text)}}
+body.new-qc-page .sb-more{{font-size:11px;color:var(--text3);text-align:center;margin-top:8px}}
+body.new-qc-page .sb-tips{{display:flex;flex-direction:column;gap:9px}}
+body.new-qc-page .sb-tip{{display:flex;align-items:flex-start;gap:8px;font-size:12px;
+         color:var(--text2);line-height:1.45}}
+body.new-qc-page .sb-tip-arr{{color:var(--accent);flex-shrink:0;font-weight:700;margin-top:1px}}
 
-/* run button */
-.run-btn{width:100%;padding:13px;font-size:14px;font-weight:700;border-radius:9px;
-  border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
-  gap:8px;color:white;background:#042C53;
-  box-shadow:0 3px 10px rgba(4,44,83,.22);
-  transition:background .3s,box-shadow .15s,transform .1s}
-.run-btn:hover{box-shadow:0 5px 16px rgba(4,44,83,.3);transform:translateY(-1px)}
-.run-btn:active{transform:translateY(0)}
-.run-btn.btn-warm{background:linear-gradient(135deg,#C46A2B,#D97706);
-  box-shadow:0 3px 10px rgba(196,106,43,.28)}
-.run-btn.btn-full{background:linear-gradient(135deg,#0F5132,#042C53);
-  box-shadow:0 3px 10px rgba(15,81,50,.28)}
-
-/* sub row */
-.run-sub{font-size:11px;color:#9CA3AF;text-align:center;margin-top:7px;
-  display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
-.adv-lnk{background:none;border:none;cursor:pointer;font-size:11px;color:#9CA3AF;
-  font-family:inherit;padding:0;text-decoration:underline;text-underline-offset:2px}
-.adv-lnk:hover{color:#374151}
-
-/* advanced panel */
-.adv-panel{margin-top:10px;padding:13px;background:#F8F9FA;
-  border-radius:8px;border:1px solid #EEF0F3}
-.qc-chk{display:flex;align-items:center;gap:6px;font-size:11px;
-  color:#374151;cursor:pointer}
-.qc-chk input{accent-color:#042C53;width:12px;height:12px;flex-shrink:0}
-.chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px}
-
-@media(max-width:1024px){
-  .nqc-grid{grid-template-columns:1fr}
-  .nqc-outer{max-width:540px}
-}
-@media(max-width:640px){
-  .chk-grid{grid-template-columns:1fr}
-  .adv-2col{grid-template-columns:1fr !important}
-}
+@media(max-width:960px){{
+  body.new-qc-page .nqc-layout{{grid-template-columns:1fr}}
+  body.new-qc-page .nqc-wrap{{max-width:640px}}
+}}
+@media(max-width:520px){{
+  body.new-qc-page .upload-row{{grid-template-columns:1fr}}
+  body.new-qc-page .chk-grid{{grid-template-columns:1fr}}
+}}
 </style>
 </head>
-<body>
-''' + f'<div class="app-layout">{sb}<div class="main-content" style="padding-top:0">' + '''
+<body class="new-qc-page">
+<div class="app-layout">{sb}<div class="main-content" style="padding-top:0">
 
-<div class="topbar" style="padding-top:16px;padding-bottom:10px">
+<div class="topbar" style="padding-top:16px;padding-bottom:12px">
   <div>
-    <p class="page-title" style="font-size:19px;margin-bottom:1px">New QC</p>
-    <p class="page-sub" style="font-size:12px">Upload your files. AI handles everything.</p>
+    <p class="page-title" style="font-size:20px;margin-bottom:2px">New QC check</p>
+    <p class="page-sub" style="font-size:13px">Upload your files. AI handles everything.</p>
   </div>
 </div>
-''' + _top_banner + '''
-<div class="nqc-outer">
-<form action="/run-qc" method="POST" enctype="multipart/form-data" id="qcForm">
 
-  <div class="nqc-grid">
+{_top_banner}
+<div class="nqc-wrap">
+<form action="/run-qc" method="POST" enctype="multipart/form-data" id="qcForm" data-at-limit="{'1' if _at_limit else '0'}">
+<div class="nqc-layout">
 
-    <!-- ── LEFT COLUMN ── -->
-    <div class="nqc-col">
+  <!-- ══ LEFT — FORM ════════════════════════════════════════════════ -->
+  <div>
 
-      <!-- 1: Spec Doc -->
-      <div class="nc">
-        <div class="nc-hdr">
-          <div class="nc-step">1</div>
-          <span class="nc-lbl">Spec Document <span class="nc-req">*</span></span>
+    <!-- Upload cards: doc + export side by side -->
+    <div class="upload-row">
+
+      <!-- Spec Document -->
+      <div class="fc">
+        <div class="fc-label">
+          <i class="ti ti-file-word" style="color:var(--accent);font-size:15px"></i>
+          Spec Document <span class="fc-req">*</span>
         </div>
         <div class="dz" id="docZone"
              onclick="document.getElementById('docInput').click()"
              ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
              ondrop="dzDrop(event,this,'docInput','docDone')">
-          <i class="ti ti-file-word" style="font-size:22px;color:#9CA3AF"></i>
-          <p style="font-size:12px;color:#6B7280;margin-top:5px">
-            Drop <b>.docx</b> or <span style="color:#C46A2B;text-decoration:underline">browse</span>
-          </p>
+          <i class="ti ti-cloud-upload dz-icon"></i>
+          <p class="dz-hint">Drop <b>.docx</b> here or<br>
+            <span class="dz-browse">browse files</span></p>
         </div>
-        <input type="file" name="doc" id="docInput" accept=".docx" required style="display:none"
-               onchange="dzPick(this,'docZone','docDone')">
+        <input type="file" name="doc" id="docInput" accept=".docx" required
+               style="display:none" onchange="dzPick(this,'docZone','docDone');updateMeter()">
         <div id="docDone" class="dz-done" style="display:none"></div>
       </div>
 
-      <!-- 2: URL -->
-      <div class="nc">
-        <div class="nc-hdr">
-          <div class="nc-step">2</div>
-          <span class="nc-lbl">Live Survey URL <span class="nc-req">*</span></span>
-          <span id="platBadge" style="display:none;font-size:10px;font-weight:600;
-            padding:1px 7px;border-radius:5px;background:#DCFCE7;color:#166534;
-            margin-left:auto;white-space:nowrap"></span>
-        </div>
-        <input type="url" name="url" id="urlInput" required class="url-inp"
-               placeholder="https://survey.confirmit.com/..."
-               oninput="detectPlat(this.value);updateMeter()">
-        <div class="plat-pills">
-          <button type="button" class="pp" onclick="setUrlHint('confirmit')">Confirmit</button>
-          <button type="button" class="pp" onclick="setUrlHint('decipher')">Decipher</button>
-          <button type="button" class="pp" onclick="setUrlHint('forsta')">Forsta</button>
-          <button type="button" class="pp" onclick="setUrlHint('qualtrics')">Qualtrics</button>
-        </div>
-      </div>
-
-    </div><!-- /LEFT -->
-
-    <!-- ── RIGHT COLUMN ── -->
-    <div class="nqc-col">
-
-      <!-- 3: XML Export -->
-      <div class="nc">
-        <div class="nc-hdr">
-          <div class="nc-step">3</div>
-          <span class="nc-lbl">Survey Export <span class="nc-req">*</span></span>
-          <span class="nc-acc">&#9889; +15%</span>
+      <!-- Survey Export -->
+      <div class="fc">
+        <div class="fc-label">
+          <i class="ti ti-file-code" style="color:#3B82F6;font-size:15px"></i>
+          Survey Export <span class="fc-req">*</span>
           <button type="button" class="xml-tb" onclick="toggleXmlTip()">
-            <i class="ti ti-info-circle" style="font-size:11px"></i> How to get
+            <i class="ti ti-info-circle"></i> How?
           </button>
         </div>
         <div id="xmlTipBox" class="xml-tip" style="display:none">
           <b>Export from your platform:</b>
           <ul>
-            <li><b>Confirmit:</b> Designer &rarr; Export Survey Definition (.zip)</li>
-            <li><b>Decipher:</b> Survey settings &rarr; Download XML</li>
-            <li><b>Forsta:</b> Survey settings &rarr; Export XML</li>
-            <li><b>Qualtrics:</b> Tools &rarr; Import/Export &rarr; Export QSF</li>
+            <li><b>Confirmit:</b> Designer &#8594; Export Survey Definition (.zip)</li>
+            <li><b>Decipher:</b> Survey settings &#8594; Download XML</li>
+            <li><b>Forsta:</b> Survey settings &#8594; Export XML</li>
+            <li><b>Qualtrics:</b> Tools &#8594; Import/Export &#8594; Export QSF</li>
           </ul>
         </div>
         <div class="dz" id="xmlZone"
              onclick="document.getElementById('xmlInput').click()"
              ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
              ondrop="dzDrop(event,this,'xmlInput','xmlDone')">
-          <i class="ti ti-file-code" style="font-size:22px;color:#9CA3AF"></i>
-          <p style="font-size:12px;color:#6B7280;margin-top:5px">
-            Drop <b>.xml</b> / <b>.qsf</b> / <b>.zip</b> or
-            <span style="color:#C46A2B;text-decoration:underline">browse</span>
-          </p>
+          <i class="ti ti-cloud-upload dz-icon"></i>
+          <p class="dz-hint" style="white-space:nowrap">Drop <b>.xml</b> / <b>.qsf</b> / <b>.zip</b></p>
+          <p class="dz-hint"><span class="dz-browse">or browse files</span></p>
         </div>
         <input type="file" name="xml_export" id="xmlInput" accept=".xml,.qsf,.zip" required
                style="display:none"
@@ -1466,338 +1571,306 @@ def new_qc():
         <div id="xmlDone" class="dz-done" style="display:none"></div>
       </div>
 
-      <!-- 4: Export Schema collapsible -->
-      <div>
-        <button type="button" onclick="toggleExport()" id="exportToggleBtn"
-          style="display:flex;align-items:center;gap:6px;background:#FAFAFA;border:1px solid #EEF0F3;border-radius:8px;padding:8px 12px;cursor:pointer;width:100%;font-family:inherit;transition:background .12s">
-          <div class="nc-step nc-step-opt" style="width:18px;height:18px;font-size:9px">4</div>
-          <span style="font-size:12px;font-weight:600;color:#6B7280">Data Export Schema</span>
-          <span class="nc-opt" style="font-size:11px">(Optional)</span>
-          <span style="font-size:10px;background:#F0FDF4;color:#15803D;padding:1px 7px;border-radius:20px;font-weight:600;margin-left:3px;white-space:nowrap">New ✦</span>
-          <span id="exportChev" style="margin-left:auto;color:#9CA3AF;font-size:11px">&#9660;</span>
-        </button>
-        <div id="exportPanel" style="display:none;margin-top:6px" class="nc">
-          <p style="font-size:11px;color:#6B7280;margin-bottom:8px;line-height:1.4">
-            Validate variable names, codes, and types match the survey spec.<br>
-            Catches export bugs <b>before</b> data collection — no competitor checks this.
-          </p>
-          <div class="dz dz-sm" id="exportZone"
-               onclick="document.getElementById('exportFileInput').click()"
-               ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
-               ondrop="dzDrop(event,this,'exportFileInput','exportFileDone')">
-            <i class="ti ti-table" style="font-size:20px;color:#9CA3AF"></i>
-            <p style="font-size:11px;color:#6B7280;margin-top:4px">
-              Drop <b>.csv</b> / <b>.txt</b> / <b>.xlsx</b> or
-              <span style="color:#C46A2B;text-decoration:underline">browse</span>
-            </p>
-          </div>
-          <input type="file" name="export_schema_file" id="exportFileInput"
-                 accept=".csv,.txt,.xlsx"
-                 style="display:none"
-                 onchange="dzPick(this,'exportZone','exportFileDone');onExportFile(this)">
-          <div id="exportFileDone" class="dz-done" style="display:none"></div>
-          <div style="display:flex;align-items:center;gap:8px;margin:8px 0">
-            <div style="flex:1;height:1px;background:#EEF0F3"></div>
-            <span style="font-size:10px;color:#9CA3AF">or paste headers</span>
-            <div style="flex:1;height:1px;background:#EEF0F3"></div>
-          </div>
-          <textarea name="export_headers_text" id="exportHeadersText"
-            placeholder="R0, R1, S1, S2, Q14_1, Q14_2, Q14_3, SPECIALTY..."
-            style="width:100%;height:60px;padding:8px 10px;border:1px solid #DDE1E7;
-                   border-radius:8px;font-size:11px;font-family:monospace;resize:vertical;
-                   outline:none;box-sizing:border-box;color:#374151;line-height:1.5"
-            onfocus="this.style.borderColor=\'#C46A2B\'"
-            onblur="this.style.borderColor=\'#DDE1E7\'"></textarea>
-          <p style="font-size:10px;color:#9CA3AF;margin-top:4px">
-            Checks R031–R038: missing variables, type mismatches, code gaps, piping vars
-          </p>
-        </div>
+    </div><!-- /upload-row -->
+
+    <!-- Live Survey URL (optional — adds ADVANCED QC live verification) -->
+    <div class="fc" style="margin-bottom:14px">
+      <div class="fc-label">
+        <i class="ti ti-link" style="color:var(--text3);font-size:15px"></i>
+        Live Survey URL <span class="fc-opt" style="background:#EFF6FF;color:#1D4ED8">Optional</span>
+        <span style="font-size:10px;color:#6B7280;margin-left:2px">— add for ADVANCED QC live verification</span>
+        <span id="platBadge" class="plat-detect"></span>
       </div>
-
-      <!-- 5: Screenshots collapsible -->
-      <div>
-        <button type="button" onclick="toggleSS()" id="ssToggleBtn"
-          style="display:flex;align-items:center;gap:6px;background:#FAFAFA;border:1px solid #EEF0F3;border-radius:8px;padding:8px 12px;cursor:pointer;width:100%;font-family:inherit;transition:background .12s">
-          <div class="nc-step nc-step-opt" style="width:18px;height:18px;font-size:9px">5</div>
-          <span style="font-size:12px;font-weight:600;color:#6B7280">Screenshots</span>
-          <span class="nc-opt" style="font-size:11px">(Optional)</span>
-          ''' + pro_badge + '''
-          <span id="ssChev" style="margin-left:auto;color:#9CA3AF;font-size:11px">&#9660;</span>
-        </button>
-        <div id="ssPanel" style="display:none;margin-top:6px" class="nc">
-          ''' + ss_body + '''
-        </div>
+      <div class="url-wrap">
+        <span class="url-icon"><i class="ti ti-world"></i></span>
+        <input type="url" name="url" id="urlInput" class="url-inp"
+               placeholder="https://survey.confirmit.com/... (optional)"
+               oninput="detectPlat(this.value);updateMeter()">
       </div>
-
-    </div><!-- /RIGHT -->
-
-  </div><!-- /nqc-grid -->
-
-  <!-- Slim accuracy strip -->
-  <div class="acc-strip">
-    <div class="acc-bar">
-      <div class="acc-fill" id="accFill" style="width:0%;background:#E5E7EB"></div>
+      <div class="plat-pills">
+        <button type="button" class="pp" onclick="setUrlHint('confirmit')">Confirmit</button>
+        <button type="button" class="pp" onclick="setUrlHint('decipher')">Decipher</button>
+        <button type="button" class="pp" onclick="setUrlHint('forsta')">Forsta</button>
+        <button type="button" class="pp" onclick="setUrlHint('qualtrics')">Qualtrics</button>
+        <button type="button" class="pp" onclick="setUrlHint('surveymonkey')">SurveyMonkey</button>
+      </div>
     </div>
-    <span class="acc-lbl" id="accLbl" style="color:#9CA3AF">Fill in fields above</span>
-  </div>
 
-  <!-- Run button -->
-  <button type="submit" class="run-btn" id="runBtn">
-    <i class="ti ti-player-play" style="font-size:15px"></i>
-    <span id="runBtnText">Run QC &#8212; Takes 3-5 minutes</span>
-  </button>
+    <!-- QC Mode meter -->
+    <div class="acc-strip">
+      <div class="acc-bar">
+        <div class="acc-fill" id="accFill" style="width:0%;background:#E5E7EB"></div>
+      </div>
+      <span class="acc-lbl" id="accLbl">Upload Spec Document + Survey Export to run</span>
+    </div>
 
-  <!-- Sub row: hint + advanced link -->
-  <div class="run-sub">
-    <span id="runBtnSub">You&#39;ll get a Word report</span>
-    <span style="color:#DDE1E7">|</span>
-    <button type="button" class="adv-lnk" onclick="toggleAdv()">
-      Advanced <span id="advChev">&#9660;</span>
+    <!-- Run QC button -->
+    <button type="submit" class="run-btn" id="runBtn" disabled>
+      <i class="ti ti-player-play" style="font-size:16px"></i>
+      <span id="runBtnText">&#9654; Run QC &#8212; Upload files above</span>
     </button>
-  </div>
+    <div class="run-sub">
+      <span id="runBtnSub">Upload Spec Document + Survey Export to run</span>
+      <span style="color:#DDE1E7">|</span>
+      <button type="button" class="adv-lnk" onclick="toggleAdv()">
+        Advanced options <span id="advChev">&#9662;</span>
+      </button>
+    </div>
 
-  <!-- Advanced panel (hidden by default) -->
-  <div id="advPanel" style="display:none" class="adv-panel">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px" class="adv-2col">
-      <div>
-        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Country (screener)</label>
-        <input type="text" name="country" placeholder="e.g. United Kingdom"
-               style="width:100%;padding:7px 10px;border:1px solid #DDE1E7;border-radius:7px;
-               font-size:12px;font-family:inherit;outline:none;box-sizing:border-box"
-               onfocus="this.style.borderColor='#C46A2B'" onblur="this.style.borderColor='#DDE1E7'">
+    <!-- Advanced panel (hidden by default) -->
+    <div id="advPanel" style="display:none" class="adv-panel">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label class="adv-lbl">Country (screener)</label>
+          <input type="text" name="country" placeholder="e.g. United Kingdom"
+                 style="width:100%;padding:7px 10px;border:1px solid var(--border);
+                 border-radius:7px;font-size:12px;font-family:inherit;outline:none;
+                 box-sizing:border-box;background:white"
+                 onfocus="this.style.borderColor=\'#C46A2B\'"
+                 onblur="this.style.borderColor=\'var(--border)\'">
+        </div>
+        <div>
+          <label class="adv-lbl">Specific QIDs only</label>
+          <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12"
+                 style="width:100%;padding:7px 10px;border:1px solid var(--border);
+                 border-radius:7px;font-size:12px;font-family:inherit;outline:none;
+                 box-sizing:border-box;background:white"
+                 onfocus="this.style.borderColor=\'#C46A2B\'"
+                 onblur="this.style.borderColor=\'var(--border)\'">
+        </div>
       </div>
-      <div>
-        <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Specific QIDs only</label>
-        <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12"
-               style="width:100%;padding:7px 10px;border:1px solid #DDE1E7;border-radius:7px;
-               font-size:12px;font-family:inherit;outline:none;box-sizing:border-box"
-               onfocus="this.style.borderColor='#C46A2B'" onblur="this.style.borderColor='#DDE1E7'">
+      <span class="adv-lbl">Checks to run</span>
+      <div class="chk-grid">{_chk_html}</div>
+      <span class="adv-lbl" style="margin-top:8px">
+        Data Export Schema <span class="fc-opt">Optional</span>
+      </span>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:7px;line-height:1.4">
+        Validates variable names, codes, and types against the spec doc.
+      </p>
+      <div class="dz dz-sm" id="exportZone"
+           onclick="document.getElementById('exportFileInput').click()"
+           ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
+           ondrop="dzDrop(event,this,'exportFileInput','exportFileDone')">
+        <i class="ti ti-table" style="font-size:18px;color:#9CA3AF"></i>
+        <p style="font-size:11px;color:#6B7280;margin-top:3px">
+          Drop <b>.csv</b> / <b>.txt</b> / <b>.xlsx</b> or
+          <span class="dz-browse" style="font-size:11px">browse</span>
+        </p>
+      </div>
+      <input type="file" name="export_schema_file" id="exportFileInput"
+             accept=".csv,.txt,.xlsx" style="display:none"
+             onchange="dzPick(this,'exportZone','exportFileDone');onExportFile(this)">
+      <div id="exportFileDone" class="dz-done" style="display:none"></div>
+      <textarea name="export_headers_text" id="exportHeadersText"
+        placeholder="Or paste headers: R0, R1, S1, S2, Q14_1, Q14_2..."
+        style="width:100%;height:52px;padding:7px 10px;border:1px solid var(--border);
+               margin-top:8px;border-radius:8px;font-size:11px;font-family:monospace;
+               resize:vertical;outline:none;box-sizing:border-box;
+               color:var(--text);line-height:1.5;background:white"
+        onfocus="this.style.borderColor=\'#C46A2B\'"
+        onblur="this.style.borderColor=\'var(--border)\'"></textarea>
+      <span class="adv-lbl" style="margin-top:12px">
+        Screenshots <span class="fc-opt">{_ss_label}</span>
+      </span>
+      {_ss_field}
+    </div>
+
+  </div><!-- /left col -->
+
+  <!-- ══ RIGHT — SIDEBAR ═════════════════════════════════════════════ -->
+  <div>
+
+    <!-- Recent Reports -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">Recent Reports</span>
+        <a href="/reports" class="sb-view-all">View all &#8594;</a>
+      </div>
+      {_recent_rows}
+    </div>
+
+    <!-- Why SurveyQC -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">Why use SurveyQC?</span>
+      </div>
+      <ul class="sb-checklist">
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Standard QC: Doc + XML (no live URL needed)</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Advanced QC: Add live URL for full verification</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>32+ quality checks automated</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Smart issue detection &amp; evidence</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Downloadable Word report</li>
+      </ul>
+    </div>
+
+    <!-- Supported Platforms -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">Supported Platforms</span>
+      </div>
+      <div class="sb-plat-grid">
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#EBF5FF">
+            <i class="ti ti-chart-bar" style="color:#1D6FAE"></i>
+          </div>
+          <span class="sb-plat-name">Confirmit</span>
+        </div>
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#FFF4E6">
+            <i class="ti ti-analyze" style="color:#C46A2B"></i>
+          </div>
+          <span class="sb-plat-name">Decipher</span>
+        </div>
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#F0FDF4">
+            <i class="ti ti-sitemap" style="color:#16A34A"></i>
+          </div>
+          <span class="sb-plat-name">Forsta</span>
+        </div>
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#FDF4FF">
+            <i class="ti ti-clipboard-list" style="color:#9333EA"></i>
+          </div>
+          <span class="sb-plat-name">Qualtrics</span>
+        </div>
+      </div>
+      <p class="sb-more">and more&#8230;</p>
+    </div>
+
+    <!-- Tips -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">
+          <i class="ti ti-bulb" style="color:#F59E0B;margin-right:4px"></i>Tips
+        </span>
+      </div>
+      <div class="sb-tips">
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          <b>Standard QC</b>: Doc + XML only — no live URL needed, 85-95% accuracy
+        </div>
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          <b>Advanced QC</b>: Add live survey URL to verify routing, piping &amp; mandatory
+        </div>
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          XML export must be from same survey version as the spec doc
+        </div>
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          If using a live URL, make sure it is publicly accessible (no login)
+        </div>
       </div>
     </div>
-    <p style="font-size:11px;font-weight:600;color:#374151;margin-bottom:5px">Checks to run</p>
-    <div class="chk-grid">''' + chk_html + '''</div>
-  </div>
 
+  </div><!-- /sidebar col -->
+
+</div><!-- /nqc-layout -->
 </form>
-</div><!-- /nqc-outer -->
+</div><!-- /nqc-wrap -->
 
-<div class="mobile-nav"><div class="mobile-nav-inner">
-  <a href="/dashboard" class="mobile-nav-item"><i class="ti ti-home"></i><span>Home</span></a>
-  <a href="/new-qc" class="mobile-nav-item active"><i class="ti ti-plus"></i><span>New QC</span></a>
-  <a href="/reports" class="mobile-nav-item"><i class="ti ti-file-text"></i><span>Reports</span></a>
-  <a href="/settings" class="mobile-nav-item"><i class="ti ti-settings"></i><span>Settings</span></a>
+<!-- Mobile bottom nav -->
+<div style="display:none;position:fixed;bottom:0;left:0;right:0;background:white;
+     padding:10px 20px;justify-content:space-around;align-items:center;z-index:1000;
+     border-top:1px solid var(--border)" class="mobile-bottom-nav">
+  <a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;gap:3px;
+     text-decoration:none;color:var(--text3)">
+    <i class="ti ti-home" style="font-size:20px"></i>
+    <span style="font-size:10px">Home</span>
+  </a>
+  <a href="/new-qc" style="display:flex;flex-direction:column;align-items:center;gap:3px;
+     text-decoration:none;color:var(--accent)">
+    <i class="ti ti-plus" style="font-size:20px"></i>
+    <span style="font-size:10px">New QC</span>
+  </a>
+  <a href="/reports" style="display:flex;flex-direction:column;align-items:center;gap:3px;
+     text-decoration:none;color:var(--text3)">
+    <i class="ti ti-file-text" style="font-size:20px"></i>
+    <span style="font-size:10px">Reports</span>
+  </a>
+  <a href="/settings" style="display:flex;flex-direction:column;align-items:center;gap:3px;
+     text-decoration:none;color:var(--text3)">
+    <i class="ti ti-settings" style="font-size:20px"></i>
+    <span style="font-size:10px">Settings</span>
+  </a>
+</div>
+<style>
+@media(max-width:768px){{.mobile-bottom-nav{{display:flex !important}}
+  .main-content{{padding-bottom:70px}}}}
+</style>
+
 </div></div>
 
-</div></div>
+<script src="/static/new_qc.js"></script>
 
-<script>
-/* ── drag-drop ───────────────────────── */
-function dzOver(e,el){e.preventDefault();el.classList.add('dz-over')}
-function dzLeave(el){el.classList.remove('dz-over')}
+<!-- ── Upgrade modal ───────────────────────────────────────────────── -->
+<div id="upgradeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
+     z-index:9000;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;max-width:560px;width:100%;
+       box-shadow:0 24px 60px rgba(0,0,0,.18);overflow:hidden">
+    <!-- header -->
+    <div style="background:#042C53;padding:28px 28px 20px;position:relative">
+      <button onclick="document.getElementById('upgradeModal').style.display='none'"
+              style="position:absolute;top:14px;right:16px;background:rgba(255,255,255,.15);
+              border:none;color:#fff;width:28px;height:28px;border-radius:50%;font-size:16px;
+              cursor:pointer;display:flex;align-items:center;justify-content:center;
+              line-height:1">&#215;</button>
+      <p style="font-size:18px;font-weight:700;color:#fff;margin-bottom:6px">
+        You&#8217;ve used all {_reports_limit} free reports</p>
+      <p style="font-size:14px;color:rgba(255,255,255,.75)">
+        Upgrade to continue running QC checks</p>
+    </div>
+    <!-- plan cards -->
+    <div style="padding:24px 28px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <!-- Pro -->
+      <div style="border:1.5px solid #7C3AED;border-radius:12px;padding:20px;display:flex;
+           flex-direction:column;gap:8px">
+        <p style="font-size:15px;font-weight:700;color:#1A1A2E">Pro</p>
+        <p style="font-size:22px;font-weight:800;color:#7C3AED">$29<span style="font-size:13px;
+           font-weight:500;color:#6B7280">/mo</span></p>
+        <ul style="margin:4px 0 12px;padding-left:18px;font-size:13px;
+            color:#374151;line-height:1.8;list-style:none;padding:0">
+          <li style="padding:2px 0">&#10003; 25 reports / month</li>
+          <li style="padding:2px 0">&#10003; Word report export</li>
+          <li style="padding:2px 0">&#10003; All platforms</li>
+        </ul>
+        <a href="/billing?plan=pro" style="display:block;text-align:center;
+           background:#7C3AED;color:#fff;padding:10px 0;border-radius:8px;
+           font-size:13px;font-weight:600;text-decoration:none;margin-top:auto">
+          Upgrade &#8594;</a>
+      </div>
+      <!-- Business -->
+      <div style="border:1.5px solid #042C53;border-radius:12px;padding:20px;display:flex;
+           flex-direction:column;gap:8px;background:#F0F4FA">
+        <p style="font-size:15px;font-weight:700;color:#1A1A2E">Business</p>
+        <p style="font-size:22px;font-weight:800;color:#042C53">$299<span style="font-size:13px;
+           font-weight:500;color:#6B7280">/mo</span></p>
+        <ul style="margin:4px 0 12px;padding-left:18px;font-size:13px;
+            color:#374151;line-height:1.8;list-style:none;padding:0">
+          <li style="padding:2px 0">&#10003; Unlimited reports</li>
+          <li style="padding:2px 0">&#10003; Everything in Pro</li>
+          <li style="padding:2px 0">&#10003; Priority support</li>
+        </ul>
+        <a href="/billing?plan=business" style="display:block;text-align:center;
+           background:#042C53;color:#fff;padding:10px 0;border-radius:8px;
+           font-size:13px;font-weight:600;text-decoration:none;margin-top:auto">
+          Upgrade &#8594;</a>
+      </div>
+    </div>
+    <!-- footer -->
+    <div style="border-top:1px solid #E5E7EB;padding:14px 28px;text-align:center">
+      <p style="font-size:12px;color:#9CA3AF">Questions?
+        <a href="mailto:support@surveyqc.com" style="color:#7C3AED;text-decoration:none">Contact us</a>
+      </p>
+    </div>
+  </div>
+</div>
 
-/* Returns true if file extension is in the comma-separated accept string */
-function _dzOk(file,accept){
-  if(!accept) return true;
-  var ext='.'+file.name.split('.').pop().toLowerCase();
-  return accept.toLowerCase().split(',').map(function(s){return s.trim();})
-               .some(function(t){return t===ext;});
-}
-
-function dzDrop(e,el,inpId,doneId,multi){
-  e.preventDefault();el.classList.remove('dz-over');
-  var inp=document.getElementById(inpId);
-  if(e.dataTransfer&&e.dataTransfer.files.length){
-    var dt=new DataTransfer();
-    for(var i=0;i<e.dataTransfer.files.length;i++) dt.items.add(e.dataTransfer.files[i]);
-    inp.files=dt.files;
-    dzPick(inp,el.id,doneId,multi);
-  }
-}
-
-function dzPick(inp,zoneId,doneId,multi){
-  if(!inp.files||!inp.files[0]) return;
-  var zone=document.getElementById(zoneId);
-  if(!zone) return;
-  var done=doneId?document.getElementById(doneId):null;
-
-  /* Stash original markup once so dzClear can fully restore it */
-  if(!zone.dataset.dzOrig) zone.dataset.dzOrig=zone.innerHTML;
-
-  var files=inp.files, f=files[0];
-
-  /* ── Wrong file type ── */
-  if(inp.accept&&!_dzOk(f,inp.accept)){
-    zone.classList.remove('dz-ok','dz-over');
-    zone.classList.add('dz-err');
-    zone.innerHTML=
-      '<i class="ti ti-file-x" style="font-size:22px;color:#DC2626"></i>'
-      +'<p style="font-size:12px;font-weight:600;color:#DC2626;margin:5px 0 2px">Wrong file type</p>'
-      +'<p style="font-size:10px;color:#EF4444;opacity:.8">Accepted: '+inp.accept+'</p>';
-    try{inp.value='';inp.files=new DataTransfer().files;}catch(ex){}
-    if(done) done.style.display='none';
-    /* Auto-restore after 2.5 s */
-    var _z=zone;
-    setTimeout(function(){
-      if(_z.classList.contains('dz-err')){
-        _z.classList.remove('dz-err');
-        if(_z.dataset.dzOrig){_z.innerHTML=_z.dataset.dzOrig;delete _z.dataset.dzOrig;}
-      }
-    },2500);
-    return;
-  }
-
-  /* ── Success state ── */
-  var sz=f.size<1048576?(Math.round(f.size/1024)+' KB')
-                       :(Math.round(f.size/1048576*10)/10+' MB');
-  var nameLabel=(multi&&files.length>1)?(files.length+' files selected'):('✓ '+f.name);
-  var sizeLabel=(multi&&files.length>1)?'Ready':'('+sz+')';
-  zone.classList.remove('dz-err','dz-over');
-  zone.classList.add('dz-ok');
-  zone.innerHTML=
-    '<div style="display:flex;align-items:center;gap:9px;width:100%;padding:0 2px">'
-   +'<i class="ti ti-circle-check" style="font-size:22px;color:#16A34A;flex-shrink:0"></i>'
-   +'<div style="flex:1;min-width:0;text-align:left">'
-   +'<p style="font-size:12px;font-weight:600;color:#1A1A2E;margin:0;white-space:nowrap;'
-   +'overflow:hidden;text-overflow:ellipsis">'+nameLabel+'</p>'
-   +'<p style="font-size:10px;color:#6B7280;margin:2px 0 0">'+sizeLabel+'</p>'
-   +'</div>'
-   +'<button type="button" class="dz-rm"'
-   +' onclick="event.stopPropagation();dzClear(this.dataset.inp,this.dataset.zone,this.dataset.done);updateMeter()"'
-   +' data-inp="'+inp.id+'" data-zone="'+zoneId+'" data-done="'+(doneId||'')+'"'
-   +' style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:18px;'
-   +'padding:0 2px;flex-shrink:0;line-height:1" title="Remove">&#215;</button>'
-   +'</div>';
-
-  if(done) done.style.display='none';
-  updateMeter();
-}
-
-function dzClear(inpId,zoneId,doneId){
-  var inp=inpId?document.getElementById(inpId):null;
-  var zone=zoneId?document.getElementById(zoneId):null;
-  var done=doneId?document.getElementById(doneId):null;
-  if(inp){try{inp.value='';inp.files=new DataTransfer().files;}catch(e){}}
-  if(done) done.style.display='none';
-  if(zone){
-    zone.classList.remove('dz-ok','dz-err');
-    if(zone.dataset.dzOrig){zone.innerHTML=zone.dataset.dzOrig;delete zone.dataset.dzOrig;}
-  }
-  updateMeter();
-}
-
-/* ── accuracy meter + button ─────────── */
-function updateMeter(){
-  var hasDoc=!!(document.getElementById('docInput')&&document.getElementById('docInput').files.length);
-  var hasXml=!!(document.getElementById('xmlInput')&&document.getElementById('xmlInput').files.length);
-  var urlVal=((document.getElementById('urlInput')||{}).value||'').trim();
-  var fill=document.getElementById('accFill');
-  var lbl=document.getElementById('accLbl');
-  var btn=document.getElementById('runBtn');
-  var sub=document.getElementById('runBtnSub');
-  var txt=document.getElementById('runBtnText');
-  if(!fill||!lbl||!btn) return;
-  if(hasDoc&&hasXml&&urlVal){
-    fill.style.width='91%';fill.style.background='#16A34A';
-    lbl.textContent='91% — Maximum ⚡';lbl.style.color='#16A34A';
-    txt.textContent='Run QC — Enhanced accuracy (~91%)';
-    if(sub) sub.textContent='With XML: 3-5 min · Word report';
-    btn.className='run-btn btn-full';
-  } else if(hasDoc&&urlVal){
-    fill.style.width='75%';fill.style.background='#EAB308';
-    lbl.textContent='75% — Add XML for 91%';lbl.style.color='#CA8A04';
-    txt.textContent='Run QC — Standard accuracy (~75%)';
-    if(sub) sub.textContent='Without XML: 5-10 min · Word report';
-    btn.className='run-btn btn-warm';
-  } else if(hasDoc){
-    fill.style.width='40%';fill.style.background='#9CA3AF';
-    lbl.textContent='40% — Add URL to compare';lbl.style.color='#9CA3AF';
-    txt.textContent='Run QC — Takes 3-5 minutes';
-    if(sub) sub.textContent="You'll get a Word report";
-    btn.className='run-btn';
-  } else {
-    fill.style.width='0%';fill.style.background='#E5E7EB';
-    lbl.textContent='Fill in fields above';lbl.style.color='#9CA3AF';
-    txt.textContent='Run QC — Takes 3-5 minutes';
-    if(sub) sub.textContent="You'll get a Word report";
-    btn.className='run-btn';
-  }
-}
-
-/* ── platform detection ──────────────── */
-var platMap=[[/confirmit/i,'Confirmit'],[/decipher/i,'Decipher'],
-  [/forsta/i,'Forsta'],[/qualtrics/i,'Qualtrics']];
-function detectPlat(v){
-  var b=document.getElementById('platBadge');if(!b)return;
-  var found='';for(var i=0;i<platMap.length;i++){if(platMap[i][0].test(v)){found=platMap[i][1];break;}}
-  if(found){b.textContent='✓ '+found;b.style.display='inline-block';}else b.style.display='none';
-}
-function setUrlHint(p){
-  var h={confirmit:'https://survey.confirmit.com/wix/',decipher:'https://survey.decipherinc.com/',
-    forsta:'https://survey.forsta.com/',qualtrics:'https://survey.qualtrics.com/'};
-  var inp=document.getElementById('urlInput');
-  if(inp&&!inp.value&&h[p]) inp.placeholder='e.g. '+h[p]+'...';
-  detectPlat(p);
-}
-
-/* ── toggles ─────────────────────────── */
-function toggleExport(){
-  var p=document.getElementById('exportPanel');
-  var c=document.getElementById('exportChev');
-  if(!p) return;
-  var open=p.style.display==='none';
-  p.style.display=open?'block':'none';
-  if(c) c.innerHTML=open?'&#9650;':'&#9660;';
-}
-function onExportFile(inp){
-  /* When a CSV/TXT file is picked, read first row and populate the textarea */
-  if(!inp.files||!inp.files[0]) return;
-  var f=inp.files[0];
-  var ext=f.name.split('.').pop().toLowerCase();
-  if(ext==='xlsx') return; /* XLSX handled server-side */
-  var reader=new FileReader();
-  reader.onload=function(e){
-    var text=(e.target.result||'').trim();
-    /* Take only the first line (header row) */
-    var firstLine=text.split(/\\r?\\n/)[0];
-    var ta=document.getElementById('exportHeadersText');
-    if(ta&&firstLine) ta.value=firstLine;
-  };
-  reader.readAsText(f);
-}
-function toggleSS(){
-  var p=document.getElementById('ssPanel');
-  var c=document.getElementById('ssChev');
-  if(!p) return;
-  var open=p.style.display==='none';
-  p.style.display=open?'block':'none';
-  if(c) c.innerHTML=open?'&#9650;':'&#9660;';
-}
-function toggleXmlTip(){
-  var t=document.getElementById('xmlTipBox');
-  if(t) t.style.display=t.style.display==='none'?'block':'none';
-}
-function toggleAdv(){
-  var p=document.getElementById('advPanel');
-  var c=document.getElementById('advChev');
-  if(!p) return;
-  var open=p.style.display==='none';
-  p.style.display=open?'block':'none';
-  if(c) c.innerHTML=open?'&#9650;':'&#9660;';
-}
-
-/* ── submit loading ──────────────────── */
-document.getElementById('qcForm').addEventListener('submit',function(){
-  var btn=document.getElementById('runBtn');
-  var txt=document.getElementById('runBtnText');
-  if(btn){btn.disabled=true;btn.style.opacity='.7';}
-  if(txt) txt.textContent='Processing…';
-});
-
-document.addEventListener('DOMContentLoaded',updateMeter);
-</script>
 </body></html>'''
 
     return render_template_string(page)
+
 
 
 @app.route('/run-qc', methods=['POST'])
@@ -1825,8 +1898,8 @@ def run_qc_submit():
 
     if not doc_file or not doc_file.filename:
         return _validation_error("Please upload a .docx spec document.")
-    if not survey_url:
-        return _validation_error("Please enter the live survey URL.")
+    # URL is optional: absent → STANDARD QC (DOC+XML only), present → ADVANCED QC
+    qc_mode = 'ADVANCED' if survey_url else 'STANDARD'
 
     # Plan-limit gate — checked before creating the job
     _email = session['user_email']
@@ -1834,27 +1907,7 @@ def run_qc_submit():
         _u = users_db.get(_email, {})
         _plan = _u.get('plan', 'Free')
         _limit = UserDB.PLAN_LIMITS.get(_plan, 3)
-        return render_template_string(SHARED_CSS + f"""
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Limit Reached — SurveyQC</title></head><body>
-<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F8F9FA">
-  <div style="background:white;border:0.5px solid #DDE1E7;border-radius:12px;padding:36px;max-width:460px;text-align:center">
-    <div style="width:48px;height:48px;background:#FEF3C7;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
-      <i class="ti ti-crown" style="font-size:24px;color:#D97706"></i>
-    </div>
-    <p style="font-size:16px;font-weight:600;color:#1A1A2E;margin-bottom:8px">Report limit reached</p>
-    <p style="font-size:14px;color:#6B7280;margin-bottom:6px">Your <b>{_plan}</b> plan includes <b>{_limit} reports</b>.</p>
-    <p style="font-size:13px;color:#9CA3AF;margin-bottom:24px">Upgrade to Pro (25 reports) or Business (unlimited) to continue.</p>
-    <div style="display:flex;gap:10px;justify-content:center">
-      <a href="/billing" style="display:inline-flex;align-items:center;gap:6px;background:#7C3AED;color:white;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none">
-        <i class="ti ti-arrow-up-circle" style="font-size:14px"></i> Upgrade plan
-      </a>
-      <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;background:#F3F4F6;color:#374151;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none">
-        Dashboard
-      </a>
-    </div>
-  </div>
-</div>
-</body></html>"""), 403
+        return jsonify({"upgrade_required": True, "plan": _plan, "limit": _limit, "error": "Report limit reached"}), 403
 
     job_id = str(uuid.uuid4())[:8]
     job_dir = f"{UPLOAD_FOLDER}/{job_id}"
@@ -1873,7 +1926,9 @@ def run_qc_submit():
 
     xml_file = request.files.get('xml_export')
     if not xml_file or not xml_file.filename:
-        return _validation_error("Please upload the survey export file (XML/QSF/ZIP). Get this from your survey platform admin panel.")
+        return _validation_error("Survey Export is required. Please upload your XML/QSF file. "
+                                 "Get it from your platform: Confirmit → Export Survey Definition, "
+                                 "Decipher → Download XML, Qualtrics → Export QSF.")
     xml_ext = os.path.splitext(secure_filename(xml_file.filename))[1].lower() or '.xml'
     xml_path = f"{job_dir}/survey_export{xml_ext}"
     xml_file.save(xml_path)
@@ -1920,6 +1975,7 @@ def run_qc_submit():
         'doc_name': doc_filename,
         'doc_path': doc_path,
         'survey_url': survey_url,
+        'qc_mode': qc_mode,
         'xml_path': xml_path,
         'platform': request.form.get('platform', 'Confirmit'),
         'country': request.form.get('country', ''),
@@ -1967,6 +2023,9 @@ def progress_page(job_id):
         return redirect('/reports')
     j = jobs[job_id]
     doc_name = j.get('doc_name', 'Unknown')
+    _prog_qc_mode = j.get('qc_mode', 'STANDARD')
+    _prog_mode_label = ('Advanced QC — DOC + XML + LIVE' if _prog_qc_mode == 'ADVANCED'
+                        else 'Standard QC — DOC + XML')
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Running QC — SurveyQC</title>
@@ -1978,7 +2037,7 @@ def progress_page(job_id):
     <div class="topbar">
       <div>
         <p class="page-title">Running QC Analysis</p>
-        <p class="page-sub">{doc_name}</p>
+        <p class="page-sub">{doc_name} &nbsp;<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;background:{'#DCFCE7;color:#15803D' if _prog_qc_mode=='ADVANCED' else '#DBEAFE;color:#1D4ED8'}">{_prog_mode_label}</span></p>
       </div>
       <span id="status-badge" class="badge badge-blue">Running</span>
       <button onclick="stopJob()" id="stop-btn" style="margin-left:12px;background:#dc2626;color:white;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">⏹ Stop</button>
@@ -2089,25 +2148,51 @@ def report_detail(job_id):
     verdict = j.get('verdict', 'REVIEW')
     ai_summary = j.get('ai_summary', '')
     doc_qids = j.get('doc_qids', 0)
+    re_findings     = j.get('rule_engine_findings', [])
+    re_summary      = j.get('rule_engine_summary', {})
+    re_term_matrix  = j.get('termination_matrix', [])
+    consensus       = j.get('consensus', {})
+    health_score    = j.get('health_score')
     live_qids = j.get('live_qids', 0)
+    xml_qids = j.get('xml_qids', 0)
     term_passed = j.get('term_passed', 0)
     term_review = j.get('term_review', 0)
     term_total = j.get('term_total', 0)
     total_issues = j.get('total_issues', 0)
     created = j.get('created_at', '')[:16]
+    qc_mode = j.get('qc_mode', 'STANDARD')
 
     verdict_class = 'badge-red' if verdict == 'FAIL' else ('badge-green' if verdict == 'PASS' else 'badge-amber')
     verdict_icon = 'ti-x' if verdict == 'FAIL' else ('ti-check' if verdict == 'PASS' else 'ti-alert-triangle')
     verdict_msg = 'Fix required before going live' if verdict == 'FAIL' else ('All good — ready to launch!' if verdict == 'PASS' else 'Review needed before launch')
+
+    # Mode badge HTML
+    if qc_mode == 'ADVANCED':
+        _mode_badge = ('<span style="font-size:10px;font-weight:700;padding:2px 9px;'
+                       'border-radius:20px;background:#DCFCE7;color:#15803D;white-space:nowrap">'
+                       '&#10003; ADVANCED QC &mdash; DOC + XML + LIVE</span>')
+        _mode_note = 'Live verification enabled — lower false-positive rate'
+    else:
+        _mode_badge = ('<span style="font-size:10px;font-weight:700;padding:2px 9px;'
+                       'border-radius:20px;background:#DBEAFE;color:#1D4ED8;white-space:nowrap">'
+                       '&#9632; STANDARD QC &mdash; DOC + XML</span>')
+        _mode_note = 'XML-based QC — add live survey URL for full advanced verification'
 
     issues_html = ''
     _ui_type_names = {
         'WORDS MISSING': 'Missing words',
         'TEXT MISMATCH': 'Text mismatch',
         'OPTIONS MISMATCH': 'Options missing',
+        'OPTIONS COUNT MISMATCH': 'Option count differs (doc vs XML)',
+        'OPTION TEXT MISSING IN XML': 'Option not found in XML',
+        'CODE MISMATCH': 'Answer codes differ (doc vs XML)',
+        'ROUTING IN XML NOT IN DOC': 'Routing not in spec',
+        'PIPING IN DOC NOT IN XML': 'Piping not in XML',
+        'IN_XML_NOT_IN_DOC': 'In XML, missing from spec',
         'MANDATORY MISSING': 'Mandatory marker',
         'PIPING NOT RESOLVED': 'Piping issue',
-        'MISSING IN LIVE': 'Question missing',
+        'MISSING IN LIVE': 'Missing from platform',
+        'IN_XML_NOT_VERIFIED_IN_LIVE': 'In XML — not verified in live (routing/conditional)',
         'NAMING MISMATCH': 'Naming mismatch',
         'ERROR PAGE': 'Page error',
     }
@@ -2121,6 +2206,8 @@ def report_detail(job_id):
             conf_cls = 'badge-green'
         elif conf_lvl == 'MEDIUM':
             conf_cls = 'badge-amber'
+        elif conf_lvl == 'NEEDS_MANUAL':
+            conf_cls = 'badge-blue'
         else:
             conf_cls = 'badge-blue'
         conf_title = f'{conf_pct}% — {conf_label}' if conf_label else f'{conf_pct}%'
@@ -2154,6 +2241,382 @@ def report_detail(job_id):
           <td style="font-size:11px;color:var(--text3)">{r.get('details','')[:80]}</td>
         </tr>"""
 
+    # ── Rule Engine Findings HTML ──────────────────────────────────────────
+    _re_group_labels = {
+        1:'G1 Routing', 2:'G2 Termination', 3:'G3 Mandatory', 4:'G4 Piping',
+        5:'G5 Loop', 6:'G6 Variable', 7:'G7 Type', 8:'G8 Option/Code',
+        9:'G9 Graph', 10:'G10 Export',
+    }
+    _re_category_map2 = {
+        1: ('#1D4ED8', 'ti-route'),
+        2: ('#C84B31', 'ti-hand-stop'),
+        3: ('#D97706', 'ti-asterisk'),
+        4: ('#7C3AED', 'ti-arrows-right-left'),
+        5: ('#0891B2', 'ti-repeat'),
+        6: ('#059669', 'ti-variable'),
+        7: ('#9333EA', 'ti-list-check'),
+        8: ('#DC2626', 'ti-123'),
+        9: ('#1E40AF', 'ti-sitemap'),
+        10:('#6B7280', 'ti-file-export'),
+    }
+    _re_sev_cls = {'HIGH': 'badge-red', 'MEDIUM': 'badge-amber',
+                   'LOW': 'badge-blue', 'INFO': 'badge-grey'}
+    _re_display = [f for f in re_findings if f.get('severity') not in ('INFO',)]
+    _re_by_grp: dict = {}
+    for _rf in _re_display:
+        _gn = _rf.get('rule_group', 0)
+        _re_by_grp.setdefault(_gn, []).append(_rf)
+
+    re_html = ''
+    re_group_badges = ''
+    for _gn in sorted(_re_by_grp.keys()):
+        _gfindings = _re_by_grp[_gn]
+        _ghigh   = sum(1 for f in _gfindings if f.get('severity') == 'HIGH')
+        _gmedium = sum(1 for f in _gfindings if f.get('severity') == 'MEDIUM')
+        _glow    = sum(1 for f in _gfindings if f.get('severity') == 'LOW')
+        _glabel  = _re_group_labels.get(_gn, f'Group {_gn}')
+        _gcolor  = '#C00000' if _ghigh else ('#BA7517' if _gmedium else '#1D4ED8')
+        re_group_badges += (
+            f'<span style="display:inline-flex;align-items:center;gap:4px;'
+            f'background:rgba(109,40,217,.08);border:1px solid rgba(109,40,217,.2);'
+            f'border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;'
+            f'color:{_gcolor};margin:2px">{_glabel} ({len(_gfindings)})</span>'
+        )
+        _cat_color2 = _re_category_map2.get(_gn, ('#6B7280', 'ti-alert'))
+        for _rf in _gfindings:
+            _rsev  = _rf.get('severity', 'INFO')
+            _rcls  = _re_sev_cls.get(_rsev, 'badge-blue')
+            _rqid  = _rf.get('qid', '')
+            _rtype = _rf.get('issue_type', '')
+            _rconf = _rf.get('confidence', '')
+            _rev   = str(_rf.get('evidence', ''))[:120]
+            _rrec  = str(_rf.get('recommendation', ''))[:100]
+            re_html += (
+                f'<tr>'
+                f'<td class="primary">{_rqid}</td>'
+                f'<td style="font-size:11px;color:{_cat_color2[0]};font-weight:600">{_glabel}</td>'
+                f'<td><span class="badge {_rcls}">{_rsev}</span>&nbsp;'
+                f'<span style="font-size:10px;color:var(--text3)">{_rconf}%</span></td>'
+                f'<td style="font-size:11px;color:var(--text2)">{_rtype}</td>'
+                f'<td style="font-size:10px;color:var(--text3)">{_rev}</td>'
+                f'<td style="font-size:10px;color:#059669;font-style:italic" title="{_rrec}">{_rrec[:80]}</td>'
+                f'</tr>'
+            )
+
+    re_total_display = len(_re_display)
+
+    # ── Termination Matrix HTML ───────────────────────────────────────────
+    _tm_html = ''
+    _tm_card_html = ''
+    if re_term_matrix:
+        _tm_rows = ''
+        for _tm in re_term_matrix:
+            _tm_qid    = _tm.get('qid', '')
+            _tm_status = _tm.get('status', '')
+            _tm_dcodes = ', '.join(_tm.get('doc_codes', [])) or '—'
+            _tm_xcond  = (_tm.get('xml_condition') or '—')[:80]
+            _tm_miss   = ', '.join(_tm.get('missing_in_xml', [])) or '—'
+            _tm_extra  = ', '.join(_tm.get('extra_in_xml', [])) or '—'
+            if _tm_status == 'MATCH':
+                _tm_scls = 'badge-green'; _tm_slbl = '✓ MATCH'
+            elif _tm_status == 'MISMATCH':
+                _tm_scls = 'badge-red'; _tm_slbl = '✗ MISMATCH'
+            elif _tm_status == 'DOC_ONLY':
+                _tm_scls = 'badge-amber'; _tm_slbl = '⚠ DOC ONLY'
+            elif _tm_status == 'XML_ONLY':
+                _tm_scls = 'badge-blue'; _tm_slbl = '◈ XML ONLY'
+            else:
+                _tm_scls = 'badge-grey'; _tm_slbl = _tm_status
+            _tm_rows += (
+                f'<tr>'
+                f'<td class="primary">{_tm_qid}</td>'
+                f'<td><span class="badge {_tm_scls}">{_tm_slbl}</span></td>'
+                f'<td style="font-size:11px;color:var(--text3)">{_tm_dcodes}</td>'
+                f'<td style="font-size:11px;color:var(--text3)">{_tm_xcond}</td>'
+                f'<td style="font-size:11px;color:#C84B31">{_tm_miss if _tm_miss != "—" else ""}</td>'
+                f'<td style="font-size:11px;color:#3F7D58">{_tm_extra if _tm_extra != "—" else ""}</td>'
+                f'</tr>'
+            )
+        _tm_match   = sum(1 for r in re_term_matrix if r.get('status') == 'MATCH')
+        _tm_mismatch = sum(1 for r in re_term_matrix if r.get('status') == 'MISMATCH')
+        _tm_doconly  = sum(1 for r in re_term_matrix if r.get('status') == 'DOC_ONLY')
+        _tm_xmlonly  = sum(1 for r in re_term_matrix if r.get('status') == 'XML_ONLY')
+        _tm_card_html = f"""
+    <div class="card" style="margin-top:16px;border-left:3px solid #C84B31">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:14px;font-weight:700;color:#C84B31">&#9888; Termination Matrix</span>
+          <span style="font-size:11px;background:rgba(200,75,49,.1);color:#C84B31;border-radius:4px;padding:2px 8px;font-weight:600">{len(re_term_matrix)} termination point(s)</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="badge badge-green">MATCH {_tm_match}</span>
+          <span class="badge badge-red">MISMATCH {_tm_mismatch}</span>
+          <span class="badge badge-amber">DOC ONLY {_tm_doconly}</span>
+          <span class="badge badge-blue">XML ONLY {_tm_xmlonly}</span>
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:10px">
+        Generated from doc termination rules vs XML termination conditions.
+        MISMATCH = doc and XML disagree on which codes terminate.
+        DOC ONLY = spec defines termination but not in XML.
+      </p>
+      <table class="data-table">
+        <thead><tr>
+          <th>QID</th><th>Status</th><th>Doc Codes</th>
+          <th>XML Condition</th><th>Missing in XML</th><th>Extra in XML</th>
+        </tr></thead>
+        <tbody>{_tm_rows}</tbody>
+      </table>
+    </div>"""
+
+    # ── Rule Engine Findings HTML (enhanced grouped view) ─────────────────
+    # Build category group map for display
+    _re_category_map = {
+        1: ('Routing',     '#1D4ED8', 'ti-route'),
+        2: ('Termination', '#C84B31', 'ti-hand-stop'),
+        3: ('Mandatory',   '#D97706', 'ti-asterisk'),
+        4: ('Piping',      '#7C3AED', 'ti-arrows-right-left'),
+        5: ('Loop',        '#0891B2', 'ti-repeat'),
+        6: ('Variable',    '#059669', 'ti-variable'),
+        7: ('Question Type','#9333EA','ti-list-check'),
+        8: ('Options/Code','#DC2626', 'ti-123'),
+        9: ('Graph',       '#1E40AF', 'ti-sitemap'),
+        10:('Export',      '#6B7280', 'ti-file-export'),
+    }
+
+    re_card_html = ''
+    if re_findings or re_term_matrix:
+        re_high   = re_summary.get('high', 0)
+        re_medium = re_summary.get('medium', 0)
+        re_low    = re_summary.get('low', 0)
+
+        # Build per-group mini-badges with color
+        _re_group_pill_html = ''
+        for _gn in sorted(_re_by_grp.keys()):
+            _gfindings = _re_by_grp[_gn]
+            if not _gfindings:
+                continue
+            _cat_name, _cat_color, _cat_icon = _re_category_map.get(_gn, (f'Group {_gn}', '#6B7280', 'ti-alert'))
+            _ghigh = sum(1 for f in _gfindings if f.get('severity') == 'HIGH')
+            _gcolor = '#C00000' if _ghigh else ('#BA7517' if any(f.get('severity')=='MEDIUM' for f in _gfindings) else '#1D4ED8')
+            _re_group_pill_html += (
+                f'<span style="display:inline-flex;align-items:center;gap:4px;'
+                f'background:rgba(109,40,217,.06);border:1px solid rgba(109,40,217,.18);'
+                f'border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;'
+                f'color:{_gcolor};margin:2px">'
+                f'<i class="ti {_cat_icon}" style="font-size:11px"></i>'
+                f' {_cat_name} ({len(_gfindings)})</span>'
+            )
+
+        re_card_html = f"""
+    <div class="card" style="margin-top:16px;border-left:3px solid #6D28D9">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-engine" style="font-size:16px;color:#6D28D9"></i>
+          <span style="font-size:14px;font-weight:700;color:#6D28D9">Rule Engine Findings</span>
+          <span style="font-size:11px;background:rgba(109,40,217,.1);color:#6D28D9;border-radius:4px;padding:2px 8px;font-weight:600">{re_total_display} findings</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <span class="badge badge-red">HIGH {re_high}</span>
+          <span class="badge badge-amber">MED {re_medium}</span>
+          <span class="badge badge-blue">LOW {re_low}</span>
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:10px">
+        10-group deterministic rule engine &mdash; runs directly on survey model (no DOM, no Playwright).
+        Groups: Routing · Termination · Mandatory · Piping · Loop · Variable · Type · Options · Graph · Export
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">{_re_group_pill_html}</div>
+      {f"<table class='data-table'><thead><tr><th>QID</th><th>Group</th><th>Severity</th><th>Rule</th><th>Evidence</th><th>Recommendation</th></tr></thead><tbody>" + re_html + "</tbody></table>" if re_html else "<p style='color:var(--text3);text-align:center;padding:16px'>No rule violations found — survey model is clean.</p>"}
+    </div>
+    {_tm_card_html}"""
+    elif re_term_matrix:
+        re_card_html = _tm_card_html
+    # ─────────────────────────────────────────────────────────────────────
+
+    # ── Section 1: Executive Summary + Health Score ───────────────────────────
+    _hs_confirmed  = consensus.get('confirmed_count', 0)
+    _hs_likely     = consensus.get('likely_count', 0)
+    _hs_review     = consensus.get('review_count', 0)
+    _hs_suppressed = consensus.get('suppressed_count', 0)
+    _hs_by_cat     = consensus.get('health_by_category', {})
+    _hs_reasons    = consensus.get('suppressed_reasons', {})
+
+    _exec_summary_html = ''
+    if health_score is not None:
+        _hs_color  = '#15803D' if health_score >= 80 else ('#D97706' if health_score >= 60 else '#DC2626')
+        _hs_bg     = '#DCFCE7' if health_score >= 80 else ('#FFFBEB' if health_score >= 60 else '#FEF2F2')
+        _hs_pct    = health_score
+        # CSS conic-gradient ring
+        _hs_ring   = f'conic-gradient({_hs_color} {_hs_pct}%, #E5E7EB {_hs_pct}% 100%)'
+        _cat_bars  = ''
+        for _cat in ('Routing', 'Termination', 'Piping', 'Options', 'Variables'):
+            _cs = _hs_by_cat.get(_cat, 100)
+            _cc = '#15803D' if _cs >= 80 else ('#D97706' if _cs >= 60 else '#DC2626')
+            _cat_bars += (
+                f'<div>'
+                f'<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">'
+                f'<span style="color:var(--text3)">{_cat}</span>'
+                f'<span style="color:{_cc};font-weight:700">{_cs}%</span></div>'
+                f'<div style="background:#E5E7EB;border-radius:4px;height:5px">'
+                f'<div style="width:{_cs}%;background:{_cc};border-radius:4px;height:5px"></div>'
+                f'</div></div>'
+            )
+        _exec_summary_html = (
+            f'<div class="card" style="margin-bottom:16px;border-left:3px solid #6D28D9">'
+            f'<div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">'
+            # Health gauge
+            f'<div style="text-align:center;min-width:100px">'
+            f'<div style="width:88px;height:88px;border-radius:50%;background:{_hs_ring};'
+            f'display:flex;align-items:center;justify-content:center;margin:0 auto">'
+            f'<div style="width:68px;height:68px;border-radius:50%;background:var(--card);'
+            f'display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:{_hs_color}">'
+            f'{_hs_pct}</div></div>'
+            f'<p style="font-size:10px;font-weight:700;color:{_hs_color};margin-top:5px;text-transform:uppercase">Health Score</p>'
+            f'</div>'
+            # Tier counts
+            f'<div style="flex:1;min-width:220px">'
+            f'<p style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">'
+            f'<i class="ti ti-chart-bar" style="color:#6D28D9;margin-right:6px"></i>Executive Summary</p>'
+            f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">'
+            f'<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:8px;text-align:center">'
+            f'<p style="font-size:20px;font-weight:800;color:#DC2626">{_hs_confirmed}</p>'
+            f'<p style="font-size:9px;color:#DC2626;font-weight:700;text-transform:uppercase">Confirmed</p></div>'
+            f'<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;text-align:center">'
+            f'<p style="font-size:20px;font-weight:800;color:#D97706">{_hs_likely}</p>'
+            f'<p style="font-size:9px;color:#D97706;font-weight:700;text-transform:uppercase">Likely Bugs</p></div>'
+            f'<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:8px;text-align:center">'
+            f'<p style="font-size:20px;font-weight:800;color:#2563EB">{_hs_review}</p>'
+            f'<p style="font-size:9px;color:#2563EB;font-weight:700;text-transform:uppercase">Needs Review</p></div>'
+            f'<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:8px;text-align:center">'
+            f'<p style="font-size:20px;font-weight:800;color:#6B7280">{_hs_suppressed}</p>'
+            f'<p style="font-size:9px;color:#6B7280;font-weight:700;text-transform:uppercase">Suppressed</p></div>'
+            f'</div>'
+            # Category health bars
+            f'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">'
+            f'{_cat_bars}'
+            f'</div>'
+            f'</div>'
+            f'</div>'
+            f'</div>'
+        )
+
+    # ── Tiered issue sections (2-5) ───────────────────────────────────────────
+    # Bucket all issues + rule findings by consensus_tier
+    _all_for_tiers = issues + re_findings
+    _tier_confirmed = [i for i in _all_for_tiers if i.get('consensus_tier') == 'CONFIRMED_BUG']
+    _tier_likely    = [i for i in _all_for_tiers if i.get('consensus_tier') == 'LIKELY_BUG']
+    _tier_review    = [i for i in _all_for_tiers if i.get('consensus_tier') == 'NEEDS_REVIEW']
+
+    _tbl_hdr6 = ("<table class='data-table'><thead><tr>"
+                 "<th>QID</th><th>Type</th><th>Severity</th><th>Details</th>"
+                 "<th>Score</th><th>Feedback</th></tr></thead><tbody>")
+
+    def _tier_rows(tier_issues, max_n=25):
+        if not tier_issues:
+            return ''
+        rows = ''
+        for _ti in tier_issues[:max_n]:
+            _tqid  = str(_ti.get('qid', ''))
+            _ttype = str(_ti.get('check') or _ti.get('issue_type') or _ti.get('type', ''))
+            _tsev  = _ti.get('severity', 'INFO')
+            _tsc   = _ti.get('consensus_score', '')
+            _tdet  = str(_ti.get('details') or str(_ti.get('evidence', ''))[:100])[:120]
+            _tcls  = 'badge-red' if _tsev == 'HIGH' else ('badge-amber' if _tsev == 'MEDIUM' else 'badge-blue')
+            # Escape for inline JS onclick — replace single quotes
+            _qid_j = _tqid.replace("'", '').replace('"', '')
+            _typ_j = _ttype.replace("'", '').replace('"', '')
+            rows += (
+                f'<tr>'
+                f'<td class="primary">{_tqid}</td>'
+                f'<td style="font-size:11px">{_ttype}</td>'
+                f'<td><span class="badge {_tcls}">{_tsev}</span></td>'
+                f'<td style="font-size:10px;color:var(--text3)" title="{_tdet}">{_tdet[:80]}</td>'
+                f'<td style="font-size:11px;font-weight:700;color:#6D28D9">{_tsc}%</td>'
+                f'<td style="white-space:nowrap">'
+                f'<button onclick="markIssue(\'{job_id}\',\'{_qid_j}\',\'{_typ_j}\',\'CONFIRMED\',this)" '
+                f'title="Confirm as real bug" class="_fb-btn _fb-ok">&#10003;</button>&nbsp;'
+                f'<button onclick="markIssue(\'{job_id}\',\'{_qid_j}\',\'{_typ_j}\',\'FALSE_POSITIVE\',this)" '
+                f'title="Mark as false positive" class="_fb-btn _fb-fp">&#10007;</button>'
+                f'</td></tr>'
+            )
+        if len(tier_issues) > max_n:
+            rows += (f'<tr><td colspan="6" style="text-align:center;color:var(--text3);'
+                     f'font-style:italic;font-size:11px">'
+                     f'... and {len(tier_issues) - max_n} more findings</td></tr>')
+        return rows
+
+    _rows_confirmed = _tier_rows(_tier_confirmed)
+    _rows_likely    = _tier_rows(_tier_likely)
+    _rows_review    = _tier_rows(_tier_review)
+
+    def _tier_card(title, color, icon, count, badge_bg, badge_border, rows, section_num):
+        _inner = ((_tbl_hdr6 + rows + '</tbody></table>') if rows
+                  else f"<p style='color:var(--text3);text-align:center;padding:14px'>No issues in this tier.</p>")
+        return (
+            f'<div class="card" style="margin-top:16px;border-left:3px solid {color}">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+            f'<i class="ti {icon}" style="color:{color};font-size:16px"></i>'
+            f'<span style="font-size:14px;font-weight:700;color:{color}">Section {section_num} — {title} ({count})</span>'
+            f'<span style="font-size:10px;background:{badge_bg};color:{color};'
+            f'border:1px solid {badge_border};border-radius:4px;padding:2px 8px;font-weight:600">'
+            f'{"95%+ confidence" if section_num==2 else ("65–94% confidence" if section_num==3 else "35–64% confidence")}</span>'
+            f'</div>'
+            f'{_inner}'
+            f'</div>'
+        )
+
+    _tiered_sections_html = ''
+    if health_score is not None:
+        _tiered_sections_html += _tier_card(
+            'Confirmed Bugs', '#DC2626', 'ti-bug', len(_tier_confirmed),
+            '#FEF2F2', '#FECACA', _rows_confirmed, 2)
+        _tiered_sections_html += _tier_card(
+            'Likely Bugs', '#D97706', 'ti-alert-triangle', len(_tier_likely),
+            '#FFFBEB', '#FDE68A', _rows_likely, 3)
+        _tiered_sections_html += _tier_card(
+            'Needs Review', '#2563EB', 'ti-eye', len(_tier_review),
+            '#EFF6FF', '#BFDBFE', _rows_review, 4)
+        # Section 5: Suppressed
+        if _hs_suppressed > 0:
+            _supp_items = ''.join(
+                f'<li><span style="color:var(--text3)">{_r}</span>: <strong>{_c}</strong></li>'
+                for _r, _c in _hs_reasons.items()
+            )
+            _tiered_sections_html += (
+                f'<div class="card" style="margin-top:16px;border-left:3px solid #9CA3AF">'
+                f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+                f'<i class="ti ti-eye-off" style="color:#9CA3AF;font-size:16px"></i>'
+                f'<span style="font-size:14px;font-weight:700;color:#6B7280">'
+                f'Section 5 — Suppressed Findings ({_hs_suppressed})</span>'
+                f'</div>'
+                f'<p style="font-size:11px;color:var(--text3);margin-bottom:8px">'
+                f'These findings were filtered out automatically to reduce noise. '
+                f'Details are hidden; only counts are shown.</p>'
+                f'<ul style="font-size:12px;color:var(--text2);margin:0;padding-left:20px">'
+                f'{_supp_items}</ul>'
+                f'</div>'
+            )
+
+    # ── Section 7: Playwright / Termination card ──────────────────────────────
+    _pw_data    = j.get('playwright_tests', {})
+    _pw_res     = _pw_data.get('results', [])
+    _pw_sum     = _pw_data.get('summary', {})
+    _term_card_html = (
+        f'<div class="card" style="margin-top:16px;border-left:3px solid #0891B2">'
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+        f'<i class="ti ti-player-play" style="color:#0891B2;font-size:16px"></i>'
+        f'<span style="font-size:14px;font-weight:700;color:#0891B2">Section 7 — Playwright / Termination Results</span>'
+        f'<span style="font-size:11px;background:#E0F2FE;color:#0891B2;border-radius:4px;'
+        f'padding:2px 8px;font-weight:600">{term_passed}/{term_total - term_review} validated · {term_review} review</span>'
+        f'</div>'
+        + (f"<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th>"
+           f"<th>Details</th></tr></thead><tbody>{term_html}</tbody></table>"
+           if term_html
+           else "<p style='color:var(--text3);text-align:center;padding:14px'>No termination rules found in spec.</p>")
+        + f'</div>'
+    )
+
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Report — SurveyQC</title></head><body>
 <div class="app-layout">
@@ -2161,14 +2624,16 @@ def report_detail(job_id):
   <div class="main-content">
     <div class="topbar">
       <div>
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap">
           <p class="page-title">{doc_name[:40]}</p>
           <span class="badge {verdict_class}"><i class="ti {verdict_icon}"></i>{verdict}</span>
+          {_mode_badge}
         </div>
-        <div style="display:flex;gap:16px;font-size:12px;color:var(--text3)">
+        <div style="display:flex;gap:16px;font-size:12px;color:var(--text3);flex-wrap:wrap">
           <span><i class="ti ti-device-desktop" style="vertical-align:-1px;margin-right:4px"></i>{platform}</span>
           <span><i class="ti ti-world" style="vertical-align:-1px;margin-right:4px"></i>{country or 'Not set'}</span>
           <span><i class="ti ti-calendar" style="vertical-align:-1px;margin-right:4px"></i>{created}</span>
+          <span style="color:#6B7280;font-style:italic">{_mode_note}</span>
         </div>
       </div>
       <div style="display:flex;gap:8px">
@@ -2179,8 +2644,8 @@ def report_detail(job_id):
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">
-      <div class="stat-card"><p class="stat-num">{doc_qids}</p><p class="stat-label">Questions</p></div>
-      <div class="stat-card"><p class="stat-num">{live_qids}</p><p class="stat-label">Pages crawled</p></div>
+      <div class="stat-card"><p class="stat-num">{doc_qids}</p><p class="stat-label">Doc questions</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#2563EB">{xml_qids}</p><p class="stat-label">XML questions</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{term_passed}/{term_total}</p><p class="stat-label">Term. passed</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#E24B4A">{total_issues}</p><p class="stat-label">Issues found</p></div>
       <div class="stat-card" style="background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">~8h</p><p class="stat-label">Time saved</p></div>
@@ -2196,16 +2661,15 @@ def report_detail(job_id):
 
     {f'<div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="ti ti-sparkles" style="color:var(--accent);font-size:16px"></i><span style="font-size:13px;font-weight:700;color:var(--text)">AI Summary</span></div><p style="font-size:14px;color:var(--text2);line-height:1.7">{ai_summary}</p></div>' if ai_summary else ''}
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div class="card">
-        <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">Issues found ({total_issues})</p>
-        {"<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No structural issues found!</p>"}
-      </div>
-      <div class="card">
-        <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">Termination tests ({term_passed}/{term_total - term_review} validated · {term_review} need review)</p>
-        {"<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No termination rules found in doc</p>"}
-      </div>
-    </div>
+    {_exec_summary_html}
+
+    {_tiered_sections_html}
+
+    {"" if health_score is not None else f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:16px'><div class='card'><p style='font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px'>Issues found ({total_issues})</p>" + ("<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No structural issues found!</p>") + f"</div><div class='card'><p style='font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px'>Termination tests ({term_passed}/{term_total - term_review} validated · {term_review} need review)</p>" + ("<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No termination rules found in doc</p>") + "</div></div>"}
+
+    {re_card_html}
+
+    {_term_card_html}
 
     <div class="card" style="margin-top:16px">
       <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">Rate this report</p>
@@ -2224,6 +2688,14 @@ def report_detail(job_id):
     </div>
   </div>
 </div>
+<style>
+._fb-btn{{border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;font-weight:700;border-width:1px;border-style:solid}}
+._fb-ok{{background:#DCFCE7;color:#15803D;border-color:#BBF7D0}}
+._fb-ok:hover{{background:#BBF7D0}}
+._fb-fp{{background:#FEF2F2;color:#DC2626;border-color:#FECACA}}
+._fb-fp:hover{{background:#FECACA}}
+._fb-btn:disabled{{opacity:.5;cursor:default}}
+</style>
 <script>
 var rating = 4;
 function setRating(n) {{
@@ -2241,6 +2713,26 @@ function submitFeedback(jobId) {{
   }}).then(() => {{
     document.querySelector('.card:last-child').innerHTML = '<p style="color:#1D9E75;text-align:center;padding:16px">Thank you for your feedback!</p>';
   }});
+}}
+function markIssue(jobId, qid, itype, verdict, btn) {{
+  btn.disabled = true;
+  fetch('/api/issue-feedback/' + jobId, {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{qid: qid, issue_type: itype, verdict: verdict}})
+  }}).then(function(r) {{ return r.json(); }}).then(function(d) {{
+    if (d.ok) {{
+      var row = btn.closest('tr');
+      if (row) {{
+        row.style.opacity = '0.45';
+        var allBtns = row.querySelectorAll('._fb-btn');
+        allBtns.forEach(function(b) {{ b.disabled = true; }});
+        var label = verdict === 'CONFIRMED' ? '&#10003; Saved' : '&#10007; FP';
+        btn.innerHTML = label;
+        btn.style.fontWeight = '700';
+      }}
+    }}
+  }}).catch(function() {{ btn.disabled = false; }});
 }}
 </script>
 </body></html>""")
@@ -3347,6 +3839,24 @@ def api_feedback():
         'rating': data.get('rating'),
         'comment': data.get('comment', '')
     })
+    return jsonify({'ok': True})
+
+@app.route('/api/issue-feedback/<job_id>', methods=['POST'])
+@login_required
+def api_issue_feedback(job_id):
+    """Store a user verdict (CONFIRMED / FALSE_POSITIVE) for a specific issue."""
+    if job_id not in jobs:
+        return jsonify({'error': 'not found'}), 404
+    j = jobs[job_id]
+    data = request.get_json(force=True, silent=True) or {}
+    qid        = str(data.get('qid', ''))[:50]
+    issue_type = str(data.get('issue_type', ''))[:100]
+    verdict    = str(data.get('verdict', ''))
+    if verdict not in ('CONFIRMED', 'FALSE_POSITIVE'):
+        return jsonify({'error': 'verdict must be CONFIRMED or FALSE_POSITIVE'}), 400
+    platform   = j.get('platform', '')
+    user_email = session.get('user_email', '')
+    jobs.save_feedback(job_id, qid, issue_type, platform, verdict, user_email)
     return jsonify({'ok': True})
 
 @app.route('/download/<job_id>')
@@ -5462,6 +5972,8 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         # page 1. Everything else (auth tokens, session keys, language params,
         # any __* param not on the nav list) is preserved untouched.
         # Rule: explicit allowlist of nav params only — never strip by prefix.
+        if not survey_url:
+            log('  No live URL provided — running STANDARD QC (DOC + XML only)', 'yellow')
         try:
             from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
             _NAV_PARAMS = {
@@ -5473,16 +5985,17 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 # Generic platform navigation
                 'pageid', 'page_id', 'page', 'goto', 'jump',
             }
-            _pu = urlparse(survey_url)
-            _qs = parse_qs(_pu.query, keep_blank_values=True)
-            # Only drop params whose lowercase name is an exact nav-param match.
-            # Auth/session/token params (__etk, __auth, __token, __key, __sid,
-            # l=, lang=, etc.) are never touched regardless of prefix.
-            _clean = {k: v for k, v in _qs.items() if k.lower() not in _NAV_PARAMS}
-            if len(_clean) < len(_qs):
-                _removed = sorted(set(_qs.keys()) - set(_clean.keys()))
-                survey_url = urlunparse(_pu._replace(query=urlencode(_clean, doseq=True)))
-                log(f'  URL: stripped nav param(s) {_removed} — crawl starts from page 1', 'yellow')
+            if survey_url:
+                _pu = urlparse(survey_url)
+                _qs = parse_qs(_pu.query, keep_blank_values=True)
+                # Only drop params whose lowercase name is an exact nav-param match.
+                # Auth/session/token params (__etk, __auth, __token, __key, __sid,
+                # l=, lang=, etc.) are never touched regardless of prefix.
+                _clean = {k: v for k, v in _qs.items() if k.lower() not in _NAV_PARAMS}
+                if len(_clean) < len(_qs):
+                    _removed = sorted(set(_qs.keys()) - set(_clean.keys()))
+                    survey_url = urlunparse(_pu._replace(query=urlencode(_clean, doseq=True)))
+                    log(f'  URL: stripped nav param(s) {_removed} — crawl starts from page 1', 'yellow')
         except Exception as _ue:
             log(f'  URL param strip skipped: {str(_ue)[:60]}', 'grey')
 
@@ -5518,8 +6031,257 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             if _xml_path:
                 log('  Phase 1.5: XML file not found, continuing without it', 'yellow')
 
-        # PHASE 2: CRAWL
-        if mode in ('full', 'quick'):
+        # ══════════════════════════════════════════════════════════════════════
+        # PHASE 2.5: PRIMARY DOC vs XML COMPARISON
+        # This is the main QC engine when XML is present.
+        # Detects: missing questions, missing options, wrong codes, text
+        # mismatches, routing issues, mandatory mismatches, piping mismatches.
+        # Runs in BOTH Standard mode (no live URL) and Advanced mode (with URL).
+        # ══════════════════════════════════════════════════════════════════════
+        if xml_questions:
+            progress(22, 'Comparing spec doc vs XML export...')
+            log('', 'white')
+            log('════════════════════════════════════', 'cyan')
+            log(f'  PHASE 2.5: PRIMARY DOC vs XML QC', 'cyan')
+            log('════════════════════════════════════', 'cyan')
+
+            _xml_by_norm = {}
+            for _xq in xml_questions:
+                _xn = re.sub(r'[^a-z0-9]', '', (_xq.get('qid_normalized') or _xq.get('qid', '')).lower())
+                if _xn:
+                    _xml_by_norm[_xn] = _xq
+            _doc_by_norm = {}
+            for _dq, _dv in questions.items():
+                _dn = re.sub(r'[^a-z0-9]', '', _dq.lower())
+                if _dn:
+                    _doc_by_norm[_dn] = (_dq, _dv)
+
+            _xml_miss_in_doc = 0
+            _doc_miss_in_xml = 0
+            _xml_opt_mismatch = 0
+            _xml_text_mismatch = 0
+            _xml_code_mismatch = 0
+            _xml_mandatory_mismatch = 0
+            _xml_routing_issues = 0
+            _xml_piping_issues = 0
+
+            # ── Check XML questions against doc ───────────────────────────
+            for _xn, _xq in _xml_by_norm.items():
+                if should_skip_qid(_xq.get('qid', '')):
+                    continue
+                if _xn not in _doc_by_norm:
+                    _xraw = _xq.get('qid', '')
+                    _variants = [re.sub(r'[^a-z0-9]', '', v.lower())
+                                 for v in build_strip_candidates(_xraw, _xn)]
+                    if not any(v in _doc_by_norm for v in _variants if v):
+                        _xml_miss_in_doc += 1
+                        issues.append({
+                            'qid': _xraw,
+                            'type': 'IN_XML_NOT_IN_DOC',
+                            'details': f'Question found in XML export but missing from spec doc',
+                            'severity': 'MEDIUM',
+                            'confidence': 72,
+                            'conf_level': 'MEDIUM',
+                            'source_phase': 'PHASE_2.5_XML',
+                        })
+                else:
+                    _dq_orig, _dv = _doc_by_norm[_xn]
+
+                    # ── Option count mismatch ──────────────────────────────
+                    _doc_opt_count = len(_dv.get('options', []))
+                    _xml_opt_count = len([o for o in _xq.get('options', []) if o.get('text')])
+                    if (_doc_opt_count > 0 and _xml_opt_count > 0
+                            and abs(_doc_opt_count - _xml_opt_count) > 1):
+                        _xml_opt_mismatch += 1
+                        issues.append({
+                            'qid': _dq_orig,
+                            'type': 'OPTIONS COUNT MISMATCH',
+                            'details': (f'Doc has {_doc_opt_count} options, '
+                                        f'XML has {_xml_opt_count} options — '
+                                        f'verify all answer options are programmed correctly'),
+                            'severity': 'HIGH' if abs(_doc_opt_count - _xml_opt_count) > 3 else 'MEDIUM',
+                            'confidence': 85,
+                            'conf_level': 'HIGH' if abs(_doc_opt_count - _xml_opt_count) > 3 else 'MEDIUM',
+                            'source_phase': 'PHASE_2.5_XML',
+                        })
+                    elif _doc_opt_count > 0 and _xml_opt_count > 0:
+                        # ── Per-option text check (detect missing specific options) ──
+                        _doc_opt_texts = [o.get('text', '').strip().lower() for o in _dv.get('options', []) if o.get('text')]
+                        _xml_opt_texts = [o.get('text', '').strip().lower() for o in _xq.get('options', []) if o.get('text')]
+                        _missing_in_xml = []
+                        for _dt in _doc_opt_texts:
+                            if len(_dt) < 3:
+                                continue
+                            _best = max(
+                                (SequenceMatcher(None, _dt[:80], _xt[:80]).ratio()
+                                 for _xt in _xml_opt_texts),
+                                default=0.0
+                            )
+                            if _best < 0.6:
+                                _missing_in_xml.append(_dt[:40])
+                        if _missing_in_xml:
+                            _xml_opt_mismatch += 1
+                            issues.append({
+                                'qid': _dq_orig,
+                                'type': 'OPTION TEXT MISSING IN XML',
+                                'details': (f'Doc option(s) not found in XML: '
+                                            f'{_missing_in_xml[:3]} — '
+                                            f'verify answer options are correctly programmed'),
+                                'severity': 'MEDIUM',
+                                'confidence': 75,
+                                'conf_level': 'MEDIUM',
+                                'source_phase': 'PHASE_2.5_XML',
+                            })
+
+                    # ── Answer code sequence check ────────────────────────
+                    _doc_codes = [o.get('code', '') for o in _dv.get('options', []) if o.get('code')]
+                    _xml_codes = [o.get('code', '') for o in _xq.get('options', []) if o.get('code')]
+                    if _doc_codes and _xml_codes and _doc_codes != _xml_codes:
+                        # Check if codes are just reordered vs genuinely different
+                        if sorted(_doc_codes) != sorted(_xml_codes):
+                            _xml_code_mismatch += 1
+                            issues.append({
+                                'qid': _dq_orig,
+                                'type': 'CODE MISMATCH',
+                                'details': (f'Doc codes: {_doc_codes[:6]} — '
+                                            f'XML codes: {_xml_codes[:6]}'),
+                                'severity': 'HIGH',
+                                'confidence': 88,
+                                'conf_level': 'HIGH',
+                                'source_phase': 'PHASE_2.5_XML',
+                            })
+
+                    # ── Mandatory flag mismatch ───────────────────────────
+                    _doc_mandatory = bool(_dv.get('is_mandatory'))
+                    _xml_type = (_xq.get('type') or '').upper()
+                    # XML doesn't always carry mandatory flag — only check when
+                    # doc says mandatory but XML type is open/numeric (no required attr)
+                    # This is a weak signal; keep at MEDIUM confidence
+                    # (XML rarely stores mandatory explicitly, so skip this check
+                    #  to avoid false positives — mandatory is best verified in live)
+
+                    # ── Routing/logic check ───────────────────────────────
+                    _xml_routing = (_xq.get('routing') or '').strip()
+                    _doc_has_routing = bool(_dv.get('termination_rules'))
+                    if _xml_routing and not _doc_has_routing:
+                        # XML has routing but doc has no logic table for this Q
+                        # Only flag if routing is non-trivial (not just a skip)
+                        if len(_xml_routing) > 10 and 'terminate' in _xml_routing.lower():
+                            _xml_routing_issues += 1
+                            issues.append({
+                                'qid': _dq_orig,
+                                'type': 'ROUTING IN XML NOT IN DOC',
+                                'details': (f'XML has termination routing for {_dq_orig} '
+                                            f'but no routing table found in spec doc — '
+                                            f'verify routing logic'),
+                                'severity': 'MEDIUM',
+                                'confidence': 65,
+                                'conf_level': 'MEDIUM',
+                                'source_phase': 'PHASE_2.5_XML',
+                            })
+
+                    # ── Piping check ──────────────────────────────────────
+                    _doc_has_piping = bool(_dv.get('has_piping'))
+                    _xml_text_str = (_xq.get('text') or '').lower()
+                    _xml_has_pipe_marker = any(
+                        marker in _xml_text_str
+                        for marker in ["[pipe", "{{", "<pipe", "[q", "[r"]
+                    )
+                    if _doc_has_piping and not _xml_has_pipe_marker:
+                        _xml_piping_issues += 1
+                        issues.append({
+                            'qid': _dq_orig,
+                            'type': 'PIPING IN DOC NOT IN XML',
+                            'details': (f'Doc specifies piping for {_dq_orig} '
+                                        f'but XML question text has no pipe markers — '
+                                        f'verify piping is programmed'),
+                            'severity': 'MEDIUM',
+                            'confidence': 68,
+                            'conf_level': 'MEDIUM',
+                            'source_phase': 'PHASE_2.5_XML',
+                        })
+
+            # ── Check doc questions against XML ───────────────────────────
+            for _dn, (_dq_orig, _dv) in _doc_by_norm.items():
+                if should_skip_qid(_dq_orig):
+                    continue
+                if _dn not in _xml_by_norm:
+                    _variants = [re.sub(r'[^a-z0-9]', '', v.lower())
+                                 for v in build_strip_candidates(_dq_orig, _dn)]
+                    if not any(v in _xml_by_norm for v in _variants if v):
+                        _doc_miss_in_xml += 1
+
+            # ── Summary logging ───────────────────────────────────────────
+            log(f'  Phase 2.5: {len(questions)} doc QIDs vs {len(xml_questions)} XML QIDs', 'blue')
+            _phase25_issues = _xml_miss_in_doc + _xml_opt_mismatch + _xml_code_mismatch + _xml_routing_issues + _xml_piping_issues
+            if _phase25_issues:
+                log(f'  Phase 2.5: {_phase25_issues} issue(s) found', 'yellow')
+                if _xml_miss_in_doc:
+                    log(f'    • {_xml_miss_in_doc} XML question(s) absent from spec doc', 'yellow')
+                if _xml_opt_mismatch:
+                    log(f'    • {_xml_opt_mismatch} option mismatch(es)', 'yellow')
+                if _xml_code_mismatch:
+                    log(f'    • {_xml_code_mismatch} code mismatch(es)', 'yellow')
+                if _xml_routing_issues:
+                    log(f'    • {_xml_routing_issues} routing issue(s)', 'yellow')
+                if _xml_piping_issues:
+                    log(f'    • {_xml_piping_issues} piping issue(s)', 'yellow')
+            else:
+                log('  Phase 2.5: DOC and XML are fully consistent — no structural issues', 'green')
+            if _doc_miss_in_xml:
+                log(f'  Phase 2.5: {_doc_miss_in_xml} doc question(s) absent from XML '
+                    f'(conditional/hidden in platform — normal)', 'grey')
+
+            # Populate _xml_qid_set for MISSING IN LIVE suppression in Phase 3
+            _xml_qid_set = set(_xml_by_norm.keys())
+        else:
+            _xml_qid_set = set()
+
+        # PHASE 2.6: RULE ENGINE — 10-group deterministic analysis
+        _re_findings = []
+        _re_summary  = {}
+        try:
+            from rule_engine import run_rule_engine as _run_re
+            progress(26, 'Running rule engine...')
+            log('', 'white')
+            log('════════════════════════════════════', 'cyan')
+            log('  PHASE 2.6: RULE ENGINE (10 groups)', 'cyan')
+            log('════════════════════════════════════', 'cyan')
+            _re_out     = _run_re(doc_questions=questions,
+                                  xml_questions=xml_questions if xml_questions else [])
+            _re_findings     = _re_out.get('results', [])
+            _re_summary      = _re_out.get('summary', {})
+            _re_ms           = _re_out.get('duration_ms', 0)
+            _re_term_matrix  = _re_out.get('termination_matrix', [])
+            log(f'  Rule Engine: {_re_summary.get("total", 0)} finding(s) '
+                f'(HIGH={_re_summary.get("high",0)}, '
+                f'MEDIUM={_re_summary.get("medium",0)}, '
+                f'LOW={_re_summary.get("low",0)}) '
+                f'in {_re_ms}ms', 'cyan' if _re_summary.get("high",0) == 0 else 'yellow')
+            _re_by_grp = _re_summary.get('by_group', {})
+            _re_group_names = {
+                1:'Routing', 2:'Termination', 3:'Mandatory', 4:'Piping',
+                5:'Loop', 6:'Variable', 7:'Type', 8:'Option/Code',
+                9:'Graph', 10:'Export',
+            }
+            for _gn, _gc in _re_by_grp.items():
+                if _gc > 0:
+                    log(f'    G{_gn} {_re_group_names.get(_gn,"")}: {_gc}', 'yellow')
+            if _re_term_matrix:
+                _mismatches = sum(1 for r in _re_term_matrix if r.get('status') == 'MISMATCH')
+                log(f'  Termination Matrix: {len(_re_term_matrix)} termination point(s)'
+                    f'{f", {_mismatches} mismatch(es)" if _mismatches else " — all aligned"}', 'cyan')
+            job['rule_engine_findings']   = _re_findings
+            job['rule_engine_summary']    = _re_summary
+            job['termination_matrix']     = _re_term_matrix
+        except Exception as _re_err:
+            log(f'  Rule Engine error (non-fatal): {str(_re_err)[:120]}', 'yellow')
+            job['rule_engine_findings'] = []
+            job['rule_engine_summary']  = {}
+            job['termination_matrix']   = []
+
+        # PHASE 2: CRAWL (ADVANCED mode — only when live URL provided)
+        if mode in ('full', 'quick') and survey_url:
             progress(20, 'Crawling survey pages...')
             log('', 'white')
             log('════════════════════════════════════', 'cyan')
@@ -5991,12 +6753,36 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                         full_text = extract_from_cloned_dom(page, _container_elem)
                                         log(f'   {qid} AFTER_CLONE: method={_extr_method} raw_cloned_len={len(full_text)}', 'cyan')
                                         if not full_text:
+                                            # Retry with inner_text() before discarding container (FIX 1)
+                                            try:
+                                                full_text = _container_elem.inner_text()
+                                                if full_text:
+                                                    log(f'   {qid} INNER_TEXT_FALLBACK: recovered {len(full_text)} chars', 'cyan')
+                                                else:
+                                                    _container_elem = None
+                                                    _extr_method = "fallback"
+                                                    _extraction_source = "none"
+                                            except Exception:
+                                                _container_elem = None
+                                                _extr_method = "fallback"
+                                                _extraction_source = "none"
+                                    except Exception:
+                                        # extract_from_cloned_dom threw (JS eval failed — same
+                                        # condition that caused CONTAINER_FALLBACK_OK).
+                                        # Use inner_text() directly before discarding container.
+                                        try:
+                                            full_text = _container_elem.inner_text(timeout=3000)
+                                            if full_text:
+                                                log(f'   {qid} CLONE_ERR_INNER_TEXT: recovered {len(full_text)} chars', 'cyan')
+                                            else:
+                                                _container_elem = None
+                                                _extr_method = "fallback"
+                                                _extraction_source = "none"
+                                        except Exception:
                                             _container_elem = None
                                             _extr_method = "fallback"
-                                    except Exception:
-                                        _container_elem = None
-                                        _extr_method = "fallback"
-                                        full_text = ""
+                                            _extraction_source = "none"
+                                            full_text = ""
 
                                 # Iframe scan: if container not found in main frame, try sub-frames
                                 if not full_text:
@@ -6172,7 +6958,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                     _extraction_source = "body_clone"
 
                                 # FIX 2: body_clone always treated as SELECTOR_FAILURE for issue gate
-                                if _extraction_source == "body_clone" and _extr_method not in ("FULL_PAGE_EXTRACTION",):
+                                if _extraction_source == "body_clone" and _extr_method not in ("FULL_PAGE_EXTRACTION", "section"):
                                     _extr_method = "SELECTOR_FAILURE_BODY"
 
                                 # Dynamic cap
@@ -6682,8 +7468,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     # EXTRA IN LIVE check disabled — not actionable for clients
                     continue
                 if live_data[_live_key]["status"] == "CONDITIONAL — could not verify":
-                    _xml_qids = {xq.get('qid', '').strip().lower() for xq in (xml_questions or [])}
-                    if qid.strip().lower() not in _xml_qids:
+                    # If question is in XML, it's confirmed in platform — routing hides it in test
+                    _qid_cond_norm = re.sub(r'[^a-z0-9]', '', qid.lower())
+                    if _xml_qid_set and _qid_cond_norm in _xml_qid_set:
+                        issues.append({
+                            "qid": qid,
+                            "type": "IN_XML_NOT_VERIFIED_IN_LIVE",
+                            "details": "Question present in XML but hidden by routing in live survey — requires specific navigation path to verify",
+                            "severity": "INFO",
+                            "confidence": 60,
+                            "conf_level": "NEEDS_MANUAL",
+                            "source_phase": "PHASE_3",
+                        })
+                    else:
                         issues.append({"qid":qid,"type":"CONDITIONAL","details":"Question hidden/conditional — could not verify in test mode","severity":"LOW"})
                     continue
                 if live_data[_live_key]["status"] != "OK":
@@ -6736,31 +7533,58 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                 })
                         else:
                             log(f'    AI: {_u["qid"]} → NONE (MISSING IN LIVE)', 'yellow')
-                            # Downgrade to MEDIUM when the doc question has conditional
-                            # routing (termination_rules with "?" codes imply the question
-                            # may simply be unreachable in test mode, not truly missing).
-                            _miss_q = questions.get(_u["doc_key"] or _u["qid"], {})
-                            _has_cond = any(
-                                r.get("answer_codes") == ["?"]
-                                for r in _miss_q.get("termination_rules", [])
-                            )
-                            _miss_sev = "MEDIUM" if _has_cond else "HIGH"
-                            issues.append({"qid": _u["qid"], "type": "MISSING IN LIVE",
-                                           "details": "In doc but not in live",
-                                           "severity": _miss_sev})
+                            # Phase 5: If question exists in XML, it is NOT a bug —
+                            # it was likely hidden by routing/conditional display in live.
+                            # Report as NEEDS_MANUAL instead of HIGH bug.
+                            _qid_norm_chk = re.sub(r'[^a-z0-9]', '', _u["qid"].lower())
+                            if _xml_qid_set and _qid_norm_chk in _xml_qid_set:
+                                log(f'      → In XML — routing/conditional (NEEDS_MANUAL, not a bug)', 'green')
+                                issues.append({
+                                    "qid": _u["qid"],
+                                    "type": "IN_XML_NOT_VERIFIED_IN_LIVE",
+                                    "details": "Question present in XML but not verified in live survey — may be hidden by routing or require specific navigation path",
+                                    "severity": "INFO",
+                                    "confidence": 55,
+                                    "conf_level": "NEEDS_MANUAL",
+                                    "source_phase": "PHASE_3",
+                                })
+                            else:
+                                # Not in XML either — genuinely missing from platform
+                                _miss_q = questions.get(_u["doc_key"] or _u["qid"], {})
+                                _has_cond = any(
+                                    r.get("answer_codes") == ["?"]
+                                    for r in _miss_q.get("termination_rules", [])
+                                )
+                                _miss_sev = "MEDIUM" if _has_cond else "HIGH"
+                                issues.append({"qid": _u["qid"], "type": "MISSING IN LIVE",
+                                               "details": "In doc but not in live survey (not found in XML either)",
+                                               "severity": _miss_sev})
                 else:
                     # No AI model — use MEDIUM by default since there's no semantic
                     # validation; a human must confirm before treating as HIGH.
                     for _u in _ai_unmatched:
-                        _miss_q = questions.get(_u.get("doc_key") or _u["qid"], {})
-                        _has_cond = any(
-                            r.get("answer_codes") == ["?"]
-                            for r in _miss_q.get("termination_rules", [])
-                        )
-                        _miss_sev = "MEDIUM" if (_has_cond or not ai_model) else "HIGH"
-                        issues.append({"qid": _u["qid"], "type": "MISSING IN LIVE",
-                                       "details": "In doc but not in live (no AI validation)",
-                                       "severity": _miss_sev})
+                        _qid_norm_chk = re.sub(r'[^a-z0-9]', '', _u["qid"].lower())
+                        if _xml_qid_set and _qid_norm_chk in _xml_qid_set:
+                            # In XML — conditional/routing, not a bug
+                            issues.append({
+                                "qid": _u["qid"],
+                                "type": "IN_XML_NOT_VERIFIED_IN_LIVE",
+                                "details": "Question present in XML but not verified in live survey — may be hidden by routing or require specific navigation path",
+                                "severity": "INFO",
+                                "confidence": 55,
+                                "conf_level": "NEEDS_MANUAL",
+                                "source_phase": "PHASE_3",
+                            })
+                        else:
+                            _miss_q = questions.get(_u.get("doc_key") or _u["qid"], {})
+                            _has_cond = any(
+                                r.get("answer_codes") == ["?"]
+                                for r in _miss_q.get("termination_rules", [])
+                            )
+                            _miss_sev = "MEDIUM" if (_has_cond or not ai_model) else "HIGH"
+                            issues.append({"qid": _u["qid"], "type": "MISSING IN LIVE",
+                                           "details": "In doc but not in live survey (not found in XML either)",
+                                           "severity": _miss_sev})
 
             # Detect merged/matrix live screens: when multiple doc QIDs all
             # resolve to the same live QID, a 1-to-1 text comparison is
@@ -7010,9 +7834,10 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pw_exec:
                         _pw_fut = _pw_exec.submit(
                             _run_pw, _pw_tc, survey_url, _pw_ss_dir,
-                            max_tests=20, timeout_ms=30_000)
+                            max_tests=20, timeout_ms=30_000,
+                            xml_questions=xml_questions if xml_questions else None)
                         try:
-                            _pw_result = _pw_fut.result(timeout=60)
+                            _pw_result = _pw_fut.result(timeout=max(120, len(_pw_tc) * 45))
                         except concurrent.futures.TimeoutError:
                             log('  PLAYWRIGHT TIMEOUT — stopping tests', 'yellow')
                             _pw_result = {"results": [], "summary": {},
@@ -7510,6 +8335,20 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         continue  # already in live (CONDITIONAL etc.) — not missing
                     if _qn in _existing_q_norm:
                         continue  # PHASE 3 already reported this qid
+                    # Phase 5: suppress MISSING_IN_OTHER when XML confirms the question
+                    if _fi.issue_type == 'MISSING_IN_OTHER' and _xml_qid_set and _qn in _xml_qid_set:
+                        issues.append({
+                            'qid':        _fi.qid,
+                            'type':       'IN_XML_NOT_VERIFIED_IN_LIVE',
+                            'severity':   'INFO',
+                            'details':    'Question present in XML but not verified in live survey — likely hidden by routing',
+                            'confidence': 55,
+                            'conf_level': 'NEEDS_MANUAL',
+                            'source_phase': 'PHASE_4.5_FLOW',
+                        })
+                        _added += 1
+                        log(f'   {_fi.qid} — in XML, not visible in live (NEEDS_MANUAL)', 'green')
+                        continue
                     _conf, _lvl = _flow_conf.get(_fi.issue_type, (60, 'MEDIUM'))
                     issues.append({
                         'qid':        _fi.qid,
@@ -7577,6 +8416,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         _hdr_xml_count  = len(xml_questions)
         _hdr_xml_hidden = job.get('xml_hidden_count', 0)
         _xml_failed     = job.get('xml_parse_failed', False)
+        # Determine QC mode label
+        _qc_mode_label = job.get('qc_mode', 'STANDARD')
+        _is_advanced_qc = (_qc_mode_label == 'ADVANCED' and len(live_data) > 0)
+        _is_standard_qc = (not _is_advanced_qc and _hdr_xml_count > 0 and not _xml_failed)
+
         if _xml_failed:
             _warn_p = report.add_paragraph(); _warn_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _warn_r = _warn_p.add_run(
@@ -7588,36 +8432,58 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             _src_p = report.add_paragraph(); _src_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _src_r = _src_p.add_run(
                 f"Sources analyzed: Doc ({len(questions)}) + Live ({len(live_data)})"
-                f"    |    Accuracy mode: Standard (doc vs live comparison)"
+                f"    |    Mode: STANDARD QC (doc vs live — XML parse failed)"
             )
             _src_r.font.size = Pt(10); _src_r.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
-        elif _hdr_xml_count:
-            _src_hdr = report.add_paragraph()
-            _src_hdr.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _src_hdr_r = _src_hdr.add_run("Sources analyzed:")
-            _src_hdr_r.font.size = Pt(10); _src_hdr_r.font.bold = True
-            _src_hdr_r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+        elif _is_advanced_qc:
+            # ADVANCED QC: DOC + XML + LIVE
+            _mode_p = report.add_paragraph(); _mode_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _mode_r = _mode_p.add_run("ADVANCED QC  —  DOC + XML + LIVE VERIFICATION")
+            _mode_r.font.size = Pt(12); _mode_r.font.bold = True
+            _mode_r.font.color.rgb = RGBColor(0x13, 0x8D, 0x5A)
             _xml_src_str = f"  •  Survey Export XML ({_hdr_xml_count} visible questions"
             if _hdr_xml_hidden:
-                _xml_src_str += f"; {_hdr_xml_hidden} hidden/template not compared"
-            _xml_src_str += ")  ⚡ Enhanced mode"
+                _xml_src_str += f"; {_hdr_xml_hidden} hidden/template skipped"
+            _xml_src_str += ")"
             for _src_line in [
                 f"  •  Spec Document ({len(questions)} questions)",
-                f"  •  Live Survey ({len(live_data)} questions)",
+                f"  •  Survey Export XML — PRIMARY source of truth",
                 _xml_src_str,
+                f"  •  Live Survey ({len(live_data)} questions crawled — verification layer)",
+            ]:
+                _slp = report.add_paragraph(); _slp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                _slr = _slp.add_run(_src_line)
+                _slr.font.size = Pt(10); _slr.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+        elif _is_standard_qc:
+            # STANDARD QC: DOC + XML only (no live URL)
+            _mode_p = report.add_paragraph(); _mode_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _mode_r = _mode_p.add_run("STANDARD QC  —  DOC + XML (no live verification)")
+            _mode_r.font.size = Pt(12); _mode_r.font.bold = True
+            _mode_r.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
+            _xml_src_str = f"  •  Survey Export XML ({_hdr_xml_count} visible questions"
+            if _hdr_xml_hidden:
+                _xml_src_str += f"; {_hdr_xml_hidden} hidden/template skipped"
+            _xml_src_str += ")  ← PRIMARY source of truth"
+            for _src_line in [
+                f"  •  Spec Document ({len(questions)} questions)",
+                _xml_src_str,
+                "  •  Live Survey: not provided — add URL for ADVANCED QC",
             ]:
                 _slp = report.add_paragraph(); _slp.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 _slr = _slp.add_run(_src_line)
                 _slr.font.size = Pt(10); _slr.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
             _acc_p = report.add_paragraph(); _acc_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _acc_r = _acc_p.add_run("Accuracy mode: Enhanced (XML-based three-way comparison)")
+            _acc_r = _acc_p.add_run(
+                "All issues are derived from DOC vs XML comparison. "
+                "No live-survey false positives."
+            )
             _acc_r.font.size = Pt(10); _acc_r.font.italic = True
-            _acc_r.font.color.rgb = RGBColor(0x13, 0x8D, 0x5A)
+            _acc_r.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
         else:
             _src_p = report.add_paragraph(); _src_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _src_r = _src_p.add_run(
                 f"Sources analyzed: Doc ({len(questions)}) + Live ({len(live_data)})"
-                f"    |    Accuracy mode: Standard (doc vs live comparison)"
+                f"    |    Mode: STANDARD QC (doc vs live comparison)"
             )
             _src_r.font.size = Pt(10); _src_r.font.color.rgb = RGBColor(0x60, 0x60, 0x60)
         report.add_paragraph()
@@ -7639,11 +8505,20 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         term_failed = len(term_results) - term_passed - term_review
         total_issues = sev['HIGH'] + sev['MEDIUM']
 
-        if len(live_data) == 0:
-            vt = ("CRAWL FAILED — 0 pages loaded. The live survey did not render in time. "
+        if len(live_data) == 0 and survey_url:
+            # Live URL was provided but crawl returned nothing
+            vt = ("CRAWL FAILED ��� 0 pages loaded. The live survey did not render in time. "
                   "Possible causes: slow platform, bot detection, session expired, or network issue. "
                   "Please retry the QC or verify the survey link is accessible.")
             vc = (0xC0, 0x00, 0x00)
+        elif len(live_data) == 0 and not survey_url and _hdr_xml_count:
+            # Standard QC (no URL provided) — verdict based on XML comparison only
+            if total_issues == 0:
+                vt = "STANDARD QC PASS — No issues found in DOC vs XML comparison"; vc = (0x00, 0x70, 0x00)
+            elif sev['HIGH'] > 0:
+                vt = f"STANDARD QC — {total_issues} issue(s) found (add live URL for full ADVANCED QC)"; vc = (0xC0, 0x00, 0x00)
+            else:
+                vt = f"STANDARD QC — {total_issues} issue(s) to review (add live URL for full ADVANCED QC)"; vc = (0xBA, 0x75, 0x17)
         elif total_issues == 0 and term_failed == 0:
             vt = "ALL GOOD — Survey ready to go live!"; vc = (0x00, 0x70, 0x00)
         elif sev['HIGH'] > 0 or term_failed > 0:
@@ -7676,13 +8551,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         _rpt_cmed  = sum(1 for i in issues if i.get("conf_level") == "MEDIUM")
         _rpt_clow  = sum(1 for i in issues if i.get("conf_level") == "LOW")
         _xml_q_count = job.get('xml_qids', 0)
-        _accuracy_mode = f"Enhanced (XML-based comparison)" if _xml_q_count else "Standard (doc vs live)"
+        if _is_advanced_qc:
+            _accuracy_mode = "ADVANCED QC — DOC + XML + LIVE (false-positive reduced)"
+        elif _is_standard_qc:
+            _accuracy_mode = "STANDARD QC — DOC + XML only (no live URL false positives)"
+        else:
+            _accuracy_mode = "Standard (doc vs live comparison)"
+        _needs_manual_count = sum(1 for i in issues if i.get("conf_level") == "NEEDS_MANUAL")
         for line in [
             f"Sources: Doc ({len(questions)} questions) · XML ({_xml_q_count} questions) · Live ({len(live_data)} questions)" if _xml_q_count else f"Sources: Doc ({len(questions)} questions) · Live ({len(live_data)} pages crawled)",
-            f"Accuracy mode: {_accuracy_mode}",
+            f"QC Mode: {_accuracy_mode}",
             f"Termination tests: {term_passed}/{len(term_results) - term_review} validated · {term_review} need manual review" if term_results else None,
             f"Total issues found: {total_issues}",
-            f"Confidence breakdown: {_rpt_chigh} high-confidence, {_rpt_cmed} medium, {_rpt_clow} need manual review",
+            f"Confidence breakdown: {_rpt_chigh} confirmed bugs, {_rpt_cmed} possible issues, {_rpt_clow} low-confidence, {_needs_manual_count} needs manual review",
             f"Time saved: ~8 hours vs manual QC",
         ]:
             if not line: continue
@@ -7695,9 +8576,16 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             "WORDS MISSING": "Missing words",
             "TEXT MISMATCH": "Text doesn't match",
             "OPTIONS MISMATCH": "Answer options missing",
+            "OPTIONS COUNT MISMATCH": "Answer option count differs (doc vs XML)",
+            "OPTION TEXT MISSING IN XML": "Answer option not found in XML",
+            "CODE MISMATCH": "Answer codes differ (doc vs XML)",
+            "ROUTING IN XML NOT IN DOC": "Routing in XML not documented in spec",
+            "PIPING IN DOC NOT IN XML": "Piping in spec not found in XML",
+            "IN_XML_NOT_IN_DOC": "Question in XML but missing from spec doc",
             "MANDATORY MISSING": "Mandatory marker missing",
             "PIPING NOT RESOLVED": "Piping not working",
-            "MISSING IN LIVE": "Question not in survey",
+            "MISSING IN LIVE": "Question missing from survey (not in XML or live)",
+            "IN_XML_NOT_VERIFIED_IN_LIVE": "Not verified in live (present in XML) — needs manual check",
             "NAMING MISMATCH": "Question name differs (doc vs live)",
             "MISSING IN OTHER": "Question absent from live survey (flow analysis)",
             "TERMINATION MISSING": "Termination logic not verified",
@@ -7706,16 +8594,23 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             "WORDS MISSING": "Add the missing words to the live survey",
             "TEXT MISMATCH": "Update live survey text to match the doc",
             "OPTIONS MISMATCH": "Add missing answer options to live survey",
+            "OPTIONS COUNT MISMATCH": "Verify the answer options in the survey platform match the spec doc",
+            "OPTION TEXT MISSING IN XML": "Check the specific option text in the survey platform",
+            "CODE MISMATCH": "Verify answer codes in the platform match the spec doc exactly",
+            "ROUTING IN XML NOT IN DOC": "Add routing/logic table for this question to the spec doc",
+            "PIPING IN DOC NOT IN XML": "Verify piping is correctly programmed in the survey platform",
+            "IN_XML_NOT_IN_DOC": "Add this question to the spec doc, or confirm it is an unprogrammed placeholder",
             "MANDATORY MISSING": "Add * marker to make question mandatory",
             "PIPING NOT RESOLVED": "Fix piping logic",
-            "MISSING IN LIVE": "Add this question to the live survey",
+            "MISSING IN LIVE": "Add this question to the survey platform",
+            "IN_XML_NOT_VERIFIED_IN_LIVE": "Manually navigate to this question in the live survey to verify it renders correctly",
             "NAMING MISMATCH": "Rename question in live survey to match spec, or update spec",
             "MISSING IN OTHER": "Verify question exists in live survey; may have been excluded from the Test Navigator",
             "TERMINATION MISSING": "Manually test this termination rule in the live survey",
         }
 
-        _fix_issues    = [i for i in issues if i.get("conf_level") in ("HIGH", "MEDIUM") and not i.get("is_export_issue")]
-        _review_issues = [i for i in issues if i.get("conf_level") == "LOW" and not i.get("is_export_issue")]
+        _fix_issues    = [i for i in issues if i.get("conf_level") in ("HIGH", "MEDIUM") and not i.get("is_export_issue") and i.get("conf_level") != "NEEDS_MANUAL"]
+        _review_issues = [i for i in issues if i.get("conf_level") in ("LOW", "NEEDS_MANUAL") and not i.get("is_export_issue")]
 
         if _fix_issues or term_failed:
             h = report.add_paragraph()
@@ -7793,7 +8688,33 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 p2r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
                 report.add_paragraph(); n += 1
 
-        if _review_issues:
+        # Separate NEEDS_MANUAL (XML-confirmed, not verified in live) from general review
+        _needs_manual_issues = [i for i in _review_issues if i.get("conf_level") == "NEEDS_MANUAL"]
+        _low_conf_issues = [i for i in _review_issues if i.get("conf_level") != "NEEDS_MANUAL"]
+
+        if _needs_manual_issues:
+            report.add_paragraph()
+            h = report.add_paragraph()
+            hr = h.add_run("Questions Present in XML — Not Verified in Live Survey")
+            hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
+            sub_p = report.add_paragraph()
+            sub_p.add_run(
+                "These questions exist in the survey XML export but were not reached during live crawling. "
+                "This is NOT a bug — they may be hidden by routing or require specific answers to reach. "
+                "Manually navigate to each one to verify it renders correctly."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+            for issue in _needs_manual_issues:
+                simple = type_names.get(issue.get('type', ''), issue.get('type', ''))
+                p = report.add_paragraph()
+                pr = p.add_run(f"ℹ  {issue['qid']}  —  {simple}")
+                pr.font.size = Pt(11); pr.font.bold = True
+                pr.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
+                what_text = issue.get('details', '')
+                report.add_paragraph().add_run(f"   {what_text[:200]}").font.size = Pt(10)
+                report.add_paragraph()
+
+        if _low_conf_issues:
             report.add_paragraph()
             h = report.add_paragraph()
             hr = h.add_run("Needs Manual Review — tool not certain")
@@ -7805,7 +8726,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             ).font.size = Pt(10)
             report.add_paragraph()
 
-            for issue in _review_issues:
+            for issue in _low_conf_issues:
                 conf_pct   = issue.get('confidence', '')
                 conf_label = issue.get('confidence_label', '') or 'Needs Review'
                 simple = type_names.get(issue['type'], issue['type'])
@@ -7866,6 +8787,130 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     f"   {_ei.get('details', '')[:200]}"
                 ).font.size = Pt(10)
                 report.add_paragraph()
+        # ─────────────────────────────────────────────────────────────────
+
+        # ── TERMINATION MATRIX section ────────────────────────────────────────
+        _tm_rpt = job.get('termination_matrix', [])
+        if _tm_rpt:
+            report.add_paragraph()
+            _tmh = report.add_paragraph()
+            _tmhr = _tmh.add_run("Termination Matrix")
+            _tmhr.font.size = Pt(14); _tmhr.font.bold = True
+            _tmhr.font.color.rgb = RGBColor(0xC8, 0x4B, 0x31)
+            _tm_match_cnt    = sum(1 for r in _tm_rpt if r.get('status') == 'MATCH')
+            _tm_mismatch_cnt = sum(1 for r in _tm_rpt if r.get('status') == 'MISMATCH')
+            _tmsub = report.add_paragraph()
+            _tmsub.add_run(
+                f"{len(_tm_rpt)} termination point(s): "
+                f"{_tm_match_cnt} aligned, {_tm_mismatch_cnt} mismatch. "
+                "DOC_ONLY = spec defines termination but not in XML. "
+                "XML_ONLY = XML terminates but spec does not mention it."
+            ).font.size = Pt(10)
+            report.add_paragraph()
+
+            _TM_STATUS_LABEL = {
+                'MATCH': 'MATCH', 'MISMATCH': 'MISMATCH',
+                'DOC_ONLY': 'DOC ONLY', 'XML_ONLY': 'XML ONLY',
+            }
+            _TM_STATUS_COLOR = {
+                'MATCH':    (0x1A, 0x56, 0x32),
+                'MISMATCH': (0xC0, 0x00, 0x00),
+                'DOC_ONLY': (0xBA, 0x75, 0x17),
+                'XML_ONLY': (0x1D, 0x4E, 0xD8),
+            }
+            for _tmrow in _tm_rpt:
+                _ts = _tmrow.get('status', '')
+                _tc = _TM_STATUS_COLOR.get(_ts, (0x33, 0x33, 0x33))
+                _tp = report.add_paragraph()
+                _tr = _tp.add_run(
+                    f"  [{_TM_STATUS_LABEL.get(_ts, _ts)}]  "
+                    f"{_tmrow.get('qid','')}  |  "
+                    f"Doc codes: {', '.join(_tmrow.get('doc_codes',[]) or ['—'])}  |  "
+                    f"XML: {(_tmrow.get('xml_condition') or '—')[:80]}"
+                )
+                _tr.font.size = Pt(10); _tr.font.bold = (_ts == 'MISMATCH')
+                _tr.font.color.rgb = RGBColor(*_tc)
+                if _tmrow.get('missing_in_xml'):
+                    _mp = report.add_paragraph()
+                    _mp.add_run(
+                        f"    ⚠ Missing in XML: {', '.join(_tmrow['missing_in_xml'])}"
+                    ).font.size = Pt(9)
+                report.add_paragraph()
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── RULE ENGINE FINDINGS section ──────────────────────────────────────
+        _re_findings_rpt = job.get('rule_engine_findings', [])
+        _re_summary_rpt  = job.get('rule_engine_summary', {})
+        if _re_findings_rpt:
+            # Filter to non-INFO findings for the report
+            _re_report_items = [f for f in _re_findings_rpt if f.get('severity') != 'INFO']
+            if _re_report_items:
+                report.add_paragraph()
+                _reh = report.add_paragraph()
+                _rehr = _reh.add_run("Rule Engine Findings")
+                _rehr.font.size = Pt(14); _rehr.font.bold = True
+                _rehr.font.color.rgb = RGBColor(0x6D, 0x28, 0xD9)
+                _resub = report.add_paragraph()
+                _resub.add_run(
+                    f"Deterministic rule engine: {len(_re_report_items)} finding(s) "
+                    f"(HIGH={_re_summary_rpt.get('high',0)}, "
+                    f"MEDIUM={_re_summary_rpt.get('medium',0)}, "
+                    f"LOW={_re_summary_rpt.get('low',0)}). "
+                    "Run directly on survey model — no DOM, no Playwright."
+                ).font.size = Pt(10)
+                report.add_paragraph()
+
+                _re_grp_names = {
+                    1:'G1 — ROUTING ENGINE',
+                    2:'G2 — TERMINATION ENGINE',
+                    3:'G3 — MANDATORY ENGINE',
+                    4:'G4 — PIPING ENGINE',
+                    5:'G5 — LOOP ENGINE',
+                    6:'G6 — VARIABLE ENGINE',
+                    7:'G7 — QUESTION TYPE ENGINE',
+                    8:'G8 — OPTION/CODE ENGINE',
+                    9:'G9 — SURVEY GRAPH ENGINE',
+                    10:'G10 — EXPORT ENGINE',
+                }
+                _re_sev_colors = {
+                    'HIGH':   (0xC0, 0x00, 0x00),
+                    'MEDIUM': (0xBA, 0x75, 0x17),
+                    'LOW':    (0x1D, 0x4E, 0xD8),
+                    'INFO':   (0x60, 0x60, 0x60),
+                }
+                # Group by rule_group
+                _re_by_group: dict = {}
+                for _rf in _re_report_items:
+                    _gnum = _rf.get('rule_group', 0)
+                    _re_by_group.setdefault(_gnum, []).append(_rf)
+
+                for _gnum in sorted(_re_by_group.keys()):
+                    _gfindings = _re_by_group[_gnum]
+                    _ghdr = report.add_paragraph()
+                    _ghr  = _ghdr.add_run(_re_grp_names.get(_gnum, f'Group {_gnum}'))
+                    _ghr.font.size = Pt(12); _ghr.font.bold = True
+                    _ghr.font.color.rgb = RGBColor(0x6D, 0x28, 0xD9)
+
+                    for _rf in _gfindings:
+                        _rsev   = _rf.get('severity', 'INFO')
+                        _rcolor = _re_sev_colors.get(_rsev, (0x60, 0x60, 0x60))
+                        _rqid   = _rf.get('qid', '')
+                        _rtype  = _rf.get('issue_type', '')
+                        _rconf  = _rf.get('confidence', 0)
+                        _rev    = _rf.get('evidence', '')
+                        _rrec   = _rf.get('recommendation', '')
+                        _rp = report.add_paragraph()
+                        _rr = _rp.add_run(f"[{_rsev}] {_rqid} — {_rtype}  [{_rconf}% confidence]")
+                        _rr.font.size = Pt(11); _rr.font.bold = True
+                        _rr.font.color.rgb = RGBColor(*_rcolor)
+                        if _rev:
+                            report.add_paragraph().add_run(f"   {str(_rev)[:200]}").font.size = Pt(10)
+                        if _rrec:
+                            _fixp = report.add_paragraph()
+                            _fixr = _fixp.add_run(f"   Fix: {str(_rrec)[:160]}")
+                            _fixr.font.size = Pt(10); _fixr.font.italic = True
+                            _fixr.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+                        report.add_paragraph()
         # ─────────────────────────────────────────────────────────────────
 
         # ── Translation Issues section ────────────────────────────────────────
@@ -8248,6 +9293,41 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         job['term_results'] = term_results
         job['issues'] = issues
         job['report_file'] = report_path
+        # Rule engine findings are already stored in job by Phase 2.6
+        # Ensure they survive even if Phase 2.6 did not run
+        if 'rule_engine_findings' not in job:
+            job['rule_engine_findings'] = []
+        if 'rule_engine_summary' not in job:
+            job['rule_engine_summary'] = {}
+        if 'termination_matrix' not in job:
+            job['termination_matrix'] = []
+
+        # PHASE 6: CONSENSUS ENGINE — score all findings, compute health
+        try:
+            from consensus_engine import run_consensus as _run_consensus
+            _ce_platform = job.get('platform', '')
+            _ce_feedback = jobs.load_feedback(_ce_platform)
+            _ce_out = _run_consensus(
+                issues=issues,
+                rule_findings=job.get('rule_engine_findings', []),
+                term_results=term_results,
+                playwright_tests=job.get('playwright_tests', {}),
+                feedback_history=_ce_feedback,
+                platform=_ce_platform,
+            )
+            job['consensus']    = _ce_out
+            job['health_score'] = _ce_out['health_score']
+            _hs = _ce_out['health_score']
+            log(f'  Health Score: {_hs}/100 — '
+                f'Confirmed={_ce_out["confirmed_count"]} · '
+                f'Likely={_ce_out["likely_count"]} · '
+                f'Review={_ce_out["review_count"]} · '
+                f'Suppressed={_ce_out["suppressed_count"]}',
+                'green' if _hs >= 80 else 'yellow')
+        except Exception as _ce_err:
+            log(f'  Consensus engine (non-fatal): {str(_ce_err)[:120]}', 'yellow')
+            job['consensus']    = {}
+            job['health_score'] = None
 
     except Exception as e:
         import traceback

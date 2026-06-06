@@ -201,7 +201,7 @@ class RangeInfo:
         }
 
 
-def detect_doc_ranges(doc_questions: dict) -> dict:
+def detect_doc_ranges(doc_questions: dict, xml_questions: list | None = None) -> dict:
     """
     Scan every doc question for range constraints.
 
@@ -213,18 +213,77 @@ def detect_doc_ranges(doc_questions: dict) -> dict:
     }
     results: dict = {}
 
+    # Build XML numeric type lookup for cross-reference
+    _xml_numeric: set = set()
+    if xml_questions:
+        for _xq in xml_questions:
+            if (_xq.get('type') or '').upper() in ('NUMERIC', 'NUMBER', 'INTEGER', 'FLOAT'):
+                _norm = re.sub(r'[^a-z0-9]', '', (_xq.get('qid_normalized') or _xq.get('qid', '')).lower())
+                if _norm:
+                    _xml_numeric.add(_norm)
+
+    _YEAR_BUCKET_RE = re.compile(
+        r'\d{1,2}\s*[-–]\s*\d{1,2}\s*(years?|ans?|ann[e\xe9]es?)',
+        re.IGNORECASE,
+    )
+
     for qid, q in doc_questions.items():
         text       = (q.get('text') or '').strip()
         qtype      = (q.get('question_type') or '').upper()
-        is_numeric = any(nt in qtype for nt in _NUMERIC_TYPES)
+        is_numeric = any(nt in qtype for nt in _NUMERIC_TYPES) or bool(q.get('is_numeric'))
+        # Cross-reference XML type: if XML says numeric, trust it
+        _qnorm = re.sub(r'[^a-z0-9]', '', qid.lower())
+        if _qnorm in _xml_numeric:
+            is_numeric = True
         is_mand    = bool(q.get('is_mandatory') or q.get('mandatory'))
+        has_options = bool(q.get('options'))
 
-        # Also scan option texts — ranges sometimes appear there
-        all_text = text + ' ' + ' '.join(
-            o.get('text', '') for o in q.get('options', [])
-        )
+        # Early exit: 3+ answer options whose text contains year/an/année bucket
+        # patterns (e.g. "2-9 ans", "10-19 years") → skip ALL range detection.
+        # These are categorical age buckets, not numeric input bounds.
+        if has_options and not is_numeric:
+            _opt_texts = [o.get('text', '') for o in (q.get('options') or [])]
+            if (len(_opt_texts) >= 3
+                    and sum(1 for t in _opt_texts if _YEAR_BUCKET_RE.search(t)) >= 2):
+                continue
 
-        bounds = extract_range(all_text)
+        # Scan question text only — option labels are categorical answer buckets,
+        # not numeric input constraints, and trigger false R041/R042 positives.
+        all_text = text
+
+        # For questions with answer options that are NOT explicitly numeric,
+        # only use strong explicit MIN/MAX keyword patterns — not bare dash.
+        # This prevents "2-9 years / 10-19 years" answer bucket lists from
+        # being misidentified as numeric input constraints.
+        if has_options and not is_numeric:
+            bounds = None
+            for pat_name, pat in _PATTERNS:
+                if pat_name == 'dash':
+                    continue  # skip bare-dash for categorical questions
+                m = pat.search(all_text)
+                if m:
+                    lo = _parse_num(m.group(1))
+                    hi = _parse_num(m.group(2))
+                    if lo is not None and hi is not None and lo < hi:
+                        # Extra guard: if multiple different ranges detected in
+                        # the same text, they are almost certainly answer buckets
+                        all_matches = [(lo, hi)]
+                        for _, pat2 in _PATTERNS:
+                            for m2 in pat2.finditer(all_text):
+                                if m2.start() == m.start():
+                                    continue
+                                lo2 = _parse_num(m2.group(1))
+                                hi2 = _parse_num(m2.group(2))
+                                if lo2 is not None and hi2 is not None and lo2 < hi2:
+                                    all_matches.append((lo2, hi2))
+                        if len(all_matches) >= 2:
+                            bounds = None  # multiple ranges = categorical buckets
+                        else:
+                            bounds = (lo, hi)
+                        break
+        else:
+            bounds = extract_range(all_text)
+
         if bounds is None:
             # Fall back: is the question text numeric-context heavy?
             # If so, flag as numeric even without explicit range for R045.
@@ -277,18 +336,23 @@ def _make_range_issue(qid: str, rule: str, severity: str,
 def validate_ranges(
     doc_questions: dict,
     live_questions: Optional[dict] = None,
+    xml_questions: list | None = None,
 ) -> list:
     """
     Run R041–R045 checks.  live_questions is accepted for future live-input
     comparison but most checks are doc-derived; Playwright test cases (R041/R042)
     confirm enforcement at runtime.
 
+    R041/R042 (boundary tests) are ONLY generated when the question is confirmed
+    numeric — prevents categorical answer buckets like "2-9 years / 10-19 years"
+    from generating spurious range validation tests.
+
     Returns list of issue dicts, each containing:
         qid, min_val, max_val, rule, check, type, severity, evidence,
         details, confidence, is_range_issue.
     """
     issues: list = []
-    range_map = detect_doc_ranges(doc_questions)
+    range_map = detect_doc_ranges(doc_questions, xml_questions=xml_questions)
 
     # Track QIDs that have ranges so we can check for conflicting detections
     _range_counts: dict = {}
@@ -307,41 +371,47 @@ def validate_ranges(
 
         lo, hi = ri.min_val, ri.max_val
 
-        # R041 — Min boundary: raise as INFO (Playwright will confirm)
-        issues.append(_make_range_issue(
-            qid, 'R041', 'HIGH',
-            f'Range {_fmt(lo)}–{_fmt(hi)} detected in spec '
-            f'("{ri.pattern_text[:60]}") — '
-            f'verify live blocks values < {_fmt(lo)}',
-            75, lo, hi,
-        ))
-
-        # R042 — Max boundary
-        issues.append(_make_range_issue(
-            qid, 'R042', 'HIGH',
-            f'Range {_fmt(lo)}–{_fmt(hi)} detected in spec — '
-            f'verify live blocks values > {_fmt(hi)}',
-            75, lo, hi,
-        ))
-
-        # R043 — Range in spec but question type ambiguous / no prog row
-        if not ri.is_numeric and not ri.has_prog_range:
+        # R041 / R042 — Boundary tests ONLY for confirmed numeric questions.
+        # Categorical answer buckets (e.g. "2-9 years", "10-19 years") must
+        # never generate boundary validation tests — they are not numeric inputs.
+        if ri.is_numeric:
+            # R041 — Min boundary
             issues.append(_make_range_issue(
-                qid, 'R043', 'HIGH',
-                f'Range {_fmt(lo)}–{_fmt(hi)} found in doc text '
-                f'but question type not marked NUMERIC — '
-                f'validation may not be programmed',
-                70, lo, hi,
+                qid, 'R041', 'HIGH',
+                f'Range {_fmt(lo)}–{_fmt(hi)} detected in spec '
+                f'("{ri.pattern_text[:60]}") — '
+                f'verify live blocks values < {_fmt(lo)}',
+                75, lo, hi,
             ))
 
-        # R445 — Mandatory numeric with range
-        if ri.is_mandatory:
+            # R042 — Max boundary
             issues.append(_make_range_issue(
-                qid, 'R045', 'HIGH',
-                f'Mandatory numeric {qid} (range {_fmt(lo)}–{_fmt(hi)}) — '
-                f'blank entry must be blocked',
-                80, lo, hi,
+                qid, 'R042', 'HIGH',
+                f'Range {_fmt(lo)}–{_fmt(hi)} detected in spec — '
+                f'verify live blocks values > {_fmt(hi)}',
+                75, lo, hi,
             ))
+
+            # R045 — Mandatory numeric with range
+            if ri.is_mandatory:
+                issues.append(_make_range_issue(
+                    qid, 'R045', 'HIGH',
+                    f'Mandatory numeric {qid} (range {_fmt(lo)}–{_fmt(hi)}) — '
+                    f'blank entry must be blocked',
+                    80, lo, hi,
+                ))
+        else:
+            # R043 — Range detected in spec but question not confirmed numeric.
+            # Flag as MEDIUM for manual review — may be a categorical answer list
+            # or a question that needs a NUMERIC type assignment.
+            if not ri.has_prog_range:
+                issues.append(_make_range_issue(
+                    qid, 'R043', 'MEDIUM',
+                    f'Range {_fmt(lo)}–{_fmt(hi)} found in doc text '
+                    f'but question type not marked NUMERIC — '
+                    f'verify if this is a numeric input constraint or categorical options',
+                    55, lo, hi,
+                ))
 
         _range_counts[qid] = _range_counts.get(qid, 0) + 1
 
@@ -383,6 +453,7 @@ def validate_ranges(
 def generate_range_test_cases(
     doc_questions: dict,
     id_prefix: str = 'TC_RNG',
+    xml_questions: list | None = None,
 ) -> list:
     """
     Generate RANGE-type Playwright test cases for all questions with
@@ -398,7 +469,7 @@ def generate_range_test_cases(
 
     Returns list of dicts compatible with test_generator.TestCase.to_dict().
     """
-    range_map = detect_doc_ranges(doc_questions)
+    range_map = detect_doc_ranges(doc_questions, xml_questions=xml_questions)
     counter   = [0]
 
     def _next_id() -> str:
@@ -424,6 +495,10 @@ def generate_range_test_cases(
     tests: list = []
 
     for qid, ri in range_map.items():
+        # Only generate auto-runnable boundary tests for confirmed numeric questions.
+        # Categorical questions (answer buckets) must not generate Playwright tests.
+        if not ri.is_numeric:
+            continue
         lo, hi = ri.min_val, ri.max_val
         cond = f'Range {_fmt(lo) if lo is not None else "?"}'
         cond += f'–{_fmt(hi) if hi is not None else "?"}'

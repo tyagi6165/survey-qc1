@@ -1037,3 +1037,15 @@ select[id="statusFilter"]:focus { border-color: var(--accent); }
   #feedback-fab { bottom: 72px; right: 12px; padding: 9px 14px; }
   .share-via { flex-direction: column; }
 }
+
+/* ── Dashboard report rows ── */
+.report-row:hover { background: var(--bg3); }
+.report-row td { transition: background .12s; }
+
+/* ── Drop-zone states (new-qc upload zones) ── */
+.dz { border: 1.5px dashed #D1D5DB; border-radius: 10px; min-height: 118px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: border-color .15s, background .15s; padding: 12px; }
+.dz:hover { border-color: #9CA3AF; background: #F9FAFB; }
+.dz.dz-over { border: 1.5px dashed #3B82F6 !important; background: #EFF6FF !important; }
+.dz.dz-ok   { border: 1.5px solid  #16A34A !important; background: #F0FAF4 !important; }
+.dz.dz-ok:hover { background: #E6F7EE !important; }
+.dz.dz-err  { border: 1.5px solid  #DC2626 !important; background: #FFF5F5 !important; }
