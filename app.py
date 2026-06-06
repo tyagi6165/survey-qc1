@@ -11506,22 +11506,20 @@ def home_landing():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SurveyQC — Premium AI Survey QC for Market Research Teams</title>
+<title>SurveyQC — AI Survey QC. Audit-Defensible. Any Platform.</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
 <style>
 :root{
-  --bg:#F7F4EE; --bg2:#FFFDF9; --card:#FFFFFF;
-  --text:#171717; --text2:#5F5B53; --text3:#8A847A;
-  --accent:#C46A2B; --accent-hover:#A9551F; --accent-bg:#F5E6D8;
-  --border:#E8E1D8; --border2:#F0EBE3;
-  --dark:#1B140F; --dark2:#2A1F18;
-  --success:#3F7D58; --warn:#D89B2B; --danger:#C84B31;
+  --bg:#F7F4EE;--bg2:#FFFDF9;--card:#FFFFFF;
+  --text:#171717;--text2:#5F5B53;--text3:#8A847A;
+  --accent:#C46A2B;--accent-hover:#A9551F;--accent-bg:#F5E6D8;
+  --border:#E8E1D8;--border2:#F0EBE3;
+  --dark:#1B140F;--dark2:#2A1F18;
+  --success:#3F7D58;--warn:#D89B2B;--danger:#C84B31;
   --shadow:0 1px 2px rgba(24,17,10,0.04),0 4px 12px rgba(24,17,10,0.05);
   --shadow-lg:0 10px 40px rgba(24,17,10,0.08);
-  --radius:20px; --radius-btn:14px;
+  --radius:20px;--radius-btn:14px;
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Inter','Plus Jakarta Sans',sans-serif;-webkit-font-smoothing:antialiased}
 html{scroll-behavior:smooth}
@@ -11529,8 +11527,11 @@ body{background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden}
 a{text-decoration:none;color:inherit}
 img{max-width:100%}
 
+/* ── ANNOUNCE ── */
 .announce{background:var(--dark);color:#E8DDD2;padding:10px 24px;text-align:center;font-size:13px;font-weight:500}
 .announce a{color:var(--accent);font-weight:600;margin-left:6px}
+
+/* ── NAV ── */
 .nav{background:rgba(247,244,238,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 32px;height:68px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
 .nav-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--text)}
 .nav-logo-mark{width:32px;height:32px;background:var(--dark);border-radius:9px;position:relative}
@@ -11548,27 +11549,40 @@ img{max-width:100%}
 .hamburger{display:none;background:none;border:none;cursor:pointer;width:36px;height:36px;align-items:center;justify-content:center}
 .hamburger i{font-size:22px;color:var(--text)}
 
-.hero{padding:72px 24px 72px;text-align:center;position:relative;overflow:hidden}
-.hero::before{content:"";position:absolute;top:-100px;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(196,106,43,.12),transparent 60%);pointer-events:none;z-index:0}
+/* ── HERO ── */
+.hero{padding:80px 24px 72px;text-align:center;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;top:-100px;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(196,106,43,.10),transparent 60%);pointer-events:none;z-index:0}
 .hero-inner{position:relative;z-index:1;max-width:920px;margin:0 auto}
 .hero-badge{display:inline-flex;align-items:center;gap:8px;background:white;border:1px solid var(--border);padding:6px 16px 6px 8px;border-radius:100px;font-size:13px;color:var(--text2);margin-bottom:32px;font-weight:500;box-shadow:var(--shadow)}
 .hero-badge-pill{background:var(--accent-bg);color:var(--accent);font-size:11px;font-weight:700;padding:3px 10px;border-radius:100px;text-transform:uppercase}
-.hero h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(36px,6vw,72px);font-weight:800;line-height:1.05;letter-spacing:-2px;color:var(--text);margin-bottom:24px}
+.hero h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(36px,6vw,68px);font-weight:800;line-height:1.06;letter-spacing:-2px;color:var(--text);margin-bottom:24px}
 .hero h1 .accent{color:var(--accent);position:relative;display:inline-block}
-.hero h1 .accent::after{content:"";position:absolute;bottom:6px;left:0;right:0;height:8px;background:rgba(196,106,43,.18);z-index:-1;border-radius:4px}
-.hero-sub{font-size:clamp(17px,2vw,21px);color:var(--text2);max-width:600px;margin:0 auto 36px;line-height:1.65}
+.hero h1 .accent::after{content:"";position:absolute;bottom:5px;left:0;right:0;height:7px;background:rgba(196,106,43,.18);z-index:-1;border-radius:4px}
+.hero-sub{font-size:clamp(16px,2vw,20px);color:var(--text2);max-width:600px;margin:0 auto 20px;line-height:1.7}
+.hero-tagline{display:inline-flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:100px;padding:8px 20px;font-size:13px;font-weight:600;color:var(--text);margin-bottom:36px}
+.hero-tagline .arrow{color:var(--accent);font-weight:800;font-size:15px}
 .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
 .hero-cta .btn-primary{padding:14px 28px;font-size:15px}
 .hero-meta{font-size:13px;color:var(--text3);display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap}
 .hero-meta-item{display:flex;align-items:center;gap:6px}
 .hero-meta-item i{color:var(--success);font-size:15px}
 
-.trusted{padding:40px 24px 20px;text-align:center}
-.trusted-l{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin-bottom:24px}
+/* ── PAIN POINTS ── */
+.pain-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.pain-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px 26px}
+.pain-icon{width:42px;height:42px;border-radius:10px;background:#FEF2F2;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.pain-icon i{font-size:20px;color:var(--danger)}
+.pain-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px}
+.pain-desc{font-size:14px;color:var(--text2);line-height:1.7}
+
+/* ── TRUSTED ── */
+.trusted{padding:32px 24px 16px;text-align:center}
+.trusted-l{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin-bottom:20px}
 .trusted-row{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
-.trusted-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:#9CA3AF;background:#FFFFFF;border:1px solid #E5E7EB;border-radius:10px;padding:10px 18px;letter-spacing:.04em;transition:all .2s;cursor:default}
+.trusted-logo{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:#9CA3AF;background:#FFFFFF;border:1px solid #E5E7EB;border-radius:10px;padding:10px 18px;letter-spacing:.04em;cursor:default;transition:all .2s}
 .trusted-logo:hover{color:#6B7280;border-color:#D1D5DB;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 
+/* ── SECTIONS ── */
 .section{padding:88px 24px}
 .container{max-width:1240px;margin:0 auto;padding:0 24px}
 .sec-head{text-align:center;max-width:720px;margin:0 auto 48px}
@@ -11576,21 +11590,116 @@ img{max-width:100%}
 .sec-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(28px,4vw,46px);font-weight:800;line-height:1.1;letter-spacing:-1.2px;margin-bottom:18px;color:var(--text)}
 .sec-sub{font-size:18px;color:var(--text2);line-height:1.65;max-width:600px;margin:0 auto}
 
+/* ── FEATURES ── */
 .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.feat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:32px;transition:all .3s ease}
+.feat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:32px;transition:all .3s ease;position:relative}
 .feat-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg);border-color:var(--accent-bg)}
+.feat-card.is-new{border-color:rgba(63,125,88,.22)}
 .feat-icon{width:48px;height:48px;border-radius:12px;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;margin-bottom:20px}
 .feat-icon i{font-size:22px;color:var(--accent)}
-.feat-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:700;margin-bottom:10px;color:var(--text)}
+.feat-card.is-new .feat-icon{background:rgba(63,125,88,.12)}
+.feat-card.is-new .feat-icon i{color:var(--success)}
+.feat-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:700;margin-bottom:10px;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .feat-desc{font-size:14px;color:var(--text2);line-height:1.7}
+.new-badge{background:var(--success);color:white;font-size:10px;font-weight:700;padding:3px 8px;border-radius:100px;text-transform:uppercase;letter-spacing:.04em}
 
-.steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-.step-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:36px 28px;transition:all .3s}
-.step-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
-.step-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;color:var(--accent);background:var(--accent-bg);width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:20px}
-.step-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:700;margin-bottom:10px;color:var(--text)}
-.step-desc{font-size:14px;color:var(--text2);line-height:1.7}
+/* ── HOW IT WORKS ── */
+.how-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.how-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:36px 28px;transition:all .3s}
+.how-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
+.how-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;color:var(--accent);background:var(--accent-bg);width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:20px}
+.how-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:700;margin-bottom:10px;color:var(--text)}
+.how-desc{font-size:14px;color:var(--text2);line-height:1.7;margin-bottom:16px}
+.how-tag{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--success);background:rgba(63,125,88,.08);border-radius:100px;padding:5px 12px}
+.how-tag i{font-size:13px}
 
+/* ── REPORT MOCK ── */
+.report-mock{max-width:820px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-lg)}
+.report-mock-header{background:var(--dark);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.report-mock-title{font-size:14px;font-weight:600;color:#E8DDD2;display:flex;align-items:center;gap:8px}
+.report-mock-stats{display:flex;gap:20px}
+.report-mock-stat{text-align:center}
+.report-mock-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:800;color:white;line-height:1}
+.report-mock-lbl{font-size:10px;color:#9A8C7B;font-weight:500;margin-top:3px}
+.report-mock-body{padding:16px 20px;display:flex;flex-direction:column;gap:8px}
+.chk-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--border2)}
+.chk-badge{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.chk-badge.pass{background:#DCFCE7}.chk-badge.pass i{color:var(--success);font-size:12px}
+.chk-badge.fail{background:#FEE2E2}.chk-badge.fail i{color:var(--danger);font-size:12px}
+.chk-badge.warn{background:#FEF9C3}.chk-badge.warn i{color:var(--warn);font-size:12px}
+.chk-name{font-size:13px;font-weight:600;color:var(--text);flex:1}
+.chk-detail{font-size:12px;color:var(--text3)}
+.report-mock-footer{padding:12px 20px 14px;border-top:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.report-mock-footer span{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:5px}
+
+/* ── WHO IS THIS FOR ── */
+.persona-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;max-width:900px;margin:0 auto}
+.persona-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px;display:flex;gap:18px;align-items:flex-start;transition:all .3s}
+.persona-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);border-color:var(--accent-bg)}
+.persona-icon{width:46px;height:46px;border-radius:12px;background:var(--dark);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.persona-icon i{font-size:22px;color:var(--accent)}
+.persona-role{font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px}
+.persona-pain{font-size:14px;color:var(--text2);line-height:1.65}
+
+/* ── BEFORE vs AFTER ── */
+.bva-wrap{display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:840px;margin:0 auto}
+.bva-col{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
+.bva-head{padding:16px 22px;border-bottom:1px solid var(--border)}
+.bva-head.before{background:#FEF2F2}
+.bva-head.after{background:#F0FDF4}
+.bva-label{font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;display:flex;align-items:center;gap:7px}
+.bva-head.before .bva-label{color:var(--danger)}
+.bva-head.after .bva-label{color:var(--success)}
+.bva-rows{padding:6px 0}
+.bva-row{display:flex;align-items:flex-start;gap:12px;padding:12px 22px;border-bottom:1px solid var(--border2)}
+.bva-row:last-child{border-bottom:none}
+.bva-row-icon{flex-shrink:0;font-size:15px;margin-top:2px}
+.bva-col.before .bva-row-icon{color:var(--danger)}
+.bva-col.after .bva-row-icon{color:var(--success)}
+.bva-text strong{display:block;font-size:13px;font-weight:600;color:var(--text)}
+.bva-text small{font-size:12px;color:var(--text3)}
+
+/* ── PLATFORM ── */
+.platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:880px;margin:0 auto}
+.platform-pill{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;transition:all .2s}
+.platform-pill:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}
+.platform-pill-mark{width:42px;height:42px;border-radius:11px;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:18px;flex-shrink:0}
+.platform-pill-name{font-size:15px;font-weight:700;color:var(--text)}
+.platform-pill-status{font-size:11px;font-weight:600;margin-top:2px}
+.platform-pill-status.live{color:var(--success)}
+.platform-pill-status.soon{color:var(--text3)}
+
+/* ── COMPARISON TABLE ── */
+.cmp-wrap{max-width:900px;margin:0 auto;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.cmp-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)}
+.cmp-table th{padding:14px 16px;font-size:13px;font-weight:700;text-align:center;border-bottom:2px solid var(--border);white-space:nowrap}
+.cmp-table th:first-child{text-align:left;min-width:180px}
+.cmp-table th.hl{background:var(--dark);color:#F7F4EE}
+.cmp-table td{padding:12px 16px;font-size:13px;text-align:center;border-bottom:1px solid var(--border2);color:var(--text2)}
+.cmp-table td:first-child{text-align:left;font-weight:600;color:var(--text)}
+.cmp-table td.hl{background:rgba(247,231,216,.25);font-weight:600;color:var(--text)}
+.cmp-yes{color:var(--success);font-size:16px}
+.cmp-no{color:var(--danger);font-size:16px}
+.cmp-part{color:var(--warn);font-size:12px;font-weight:600}
+.cmp-table tr:hover td{background:rgba(247,244,238,.7)}
+.cmp-table tr:hover td.hl{background:rgba(247,231,216,.5)}
+
+/* ── QC CHECKS ── */
+.checks-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;max-width:1100px;margin:0 auto}
+.check-pill{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:13px 14px;transition:all .2s}
+.check-pill:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.check-pill-icon{width:30px;height:30px;border-radius:8px;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.check-pill-icon i{font-size:15px;color:var(--accent)}
+.check-pill span{font-size:13px;font-weight:600;color:var(--text);line-height:1.3}
+
+/* ── TRUST NUMBERS ── */
+.trust-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.trust-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:32px 24px;text-align:center}
+.trust-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(40px,5vw,58px);font-weight:800;color:var(--text);letter-spacing:-2px;line-height:1}
+.trust-num .unit{font-size:0.52em;color:var(--accent)}
+.trust-label{font-size:14px;color:var(--text2);margin-top:10px;line-height:1.5}
+
+/* ── TESTIMONIALS ── */
 .test-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .test-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:30px;transition:all .3s}
 .test-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
@@ -11602,22 +11711,16 @@ img{max-width:100%}
 .test-name{font-size:14px;font-weight:700;color:var(--text)}
 .test-role{font-size:12px;color:var(--text3);margin-top:1px}
 
-.pricing-cta-box{max-width:780px;margin:0 auto;background:white;border:1px solid var(--border);border-radius:var(--radius);padding:48px 40px;text-align:center;box-shadow:var(--shadow)}
-.pricing-cta-box h3{font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;color:var(--text);margin-bottom:10px;letter-spacing:-0.8px}
-.pricing-cta-box p{font-size:16px;color:var(--text2);margin-bottom:24px}
-.pricing-cta-meta{display:flex;justify-content:center;gap:32px;margin-bottom:24px;flex-wrap:wrap}
-.pricing-cta-meta-item{display:flex;flex-direction:column;align-items:center}
-.pricing-cta-meta-num{font-family:'Plus Jakarta Sans',sans-serif;font-size:24px;font-weight:800;color:var(--accent)}
-.pricing-cta-meta-lbl{font-size:12px;color:var(--text3);margin-top:2px;font-weight:500}
-
+/* ── CTA BANNER ── */
 .cta-banner{padding:80px 24px}
-.cta-inner{max-width:920px;margin:0 auto;background:linear-gradient(135deg,var(--dark) 0%,#2A1F18 100%);border-radius:32px;padding:64px 48px;text-align:center;position:relative;overflow:hidden}
-.cta-inner::before{content:"";position:absolute;top:-100px;right:-100px;width:300px;height:300px;background:radial-gradient(circle,rgba(196,106,43,.4),transparent 70%);pointer-events:none}
+.cta-inner{max-width:920px;margin:0 auto;background:var(--dark);border-radius:32px;padding:64px 48px;text-align:center;position:relative;overflow:hidden}
+.cta-inner::before{content:"";position:absolute;top:-80px;right:-80px;width:280px;height:280px;background:radial-gradient(circle,rgba(196,106,43,.45),transparent 70%);pointer-events:none}
 .cta-inner h2{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(28px,4vw,42px);color:white;margin-bottom:14px;font-weight:800;letter-spacing:-1px;position:relative;z-index:1}
 .cta-inner p{font-size:16px;color:#D4C6B6;margin-bottom:32px;position:relative;z-index:1}
 .cta-inner .btn-primary{background:var(--accent);position:relative;z-index:1;padding:14px 32px;font-size:15px}
 .cta-inner .btn-primary:hover{background:var(--accent-hover)}
 
+/* ── FOOTER ── */
 .footer{background:var(--dark);color:#B8AC9F;padding:80px 24px 30px}
 .footer-inner{max-width:1180px;margin:0 auto}
 .footer-grid{display:grid;grid-template-columns:2.2fr 1fr 1fr 1fr 1fr;gap:48px;margin-bottom:60px}
@@ -11634,34 +11737,17 @@ img{max-width:100%}
 .footer-bottom{border-top:1px solid rgba(255,255,255,.08);padding-top:28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
 .footer-bottom p{font-size:13px;color:#7A6E5F}
 
+/* ── MOBILE MENU ── */
 .mobile-menu{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:200;padding:80px 32px;flex-direction:column;gap:18px}
 .mobile-menu.open{display:flex}
 .mobile-menu a{font-size:18px;font-weight:600;color:var(--text);padding:12px 0;border-bottom:1px solid var(--border)}
 .mobile-menu-close{position:absolute;top:20px;right:20px;background:none;border:none;font-size:28px;color:var(--text);cursor:pointer}
 
-
-
-.platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:880px;margin:0 auto}
-.platform-pill{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;transition:all .2s}
-.platform-pill:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}
-.platform-pill-mark{width:42px;height:42px;border-radius:11px;background:var(--dark);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:18px;flex-shrink:0}
-.platform-pill-name{font-size:15px;font-weight:700;color:var(--text)}
-.platform-pill-status{font-size:11px;font-weight:600;margin-top:2px}
-.platform-pill-status.live{color:var(--success)}
-.platform-pill-status.soon{color:var(--text3)}
-@media(max-width:768px){.platform-grid{grid-template-columns:1fr 1fr}}
-@media(max-width:480px){.platform-grid{grid-template-columns:1fr}}
-.checks-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;max-width:1100px;margin:0 auto}
-.check-pill{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:13px 14px;transition:all .2s}
-.check-pill:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-lg)}
-.check-pill-icon{width:30px;height:30px;border-radius:8px;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.check-pill-icon i{font-size:15px;color:var(--accent)}
-.check-pill span{font-size:13px;font-weight:600;color:var(--text);line-height:1.3}
-@media(max-width:1024px){.checks-grid{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:768px){.checks-grid{grid-template-columns:repeat(2,1fr);gap:10px}}
-@media(max-width:480px){.checks-grid{grid-template-columns:1fr}}
+/* ── RESPONSIVE ── */
 @media(max-width:1024px){
   .footer-grid{grid-template-columns:1fr 1fr 1fr}
+  .trust-grid{grid-template-columns:repeat(2,1fr)}
+  .checks-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media(max-width:768px){
   .nav-links{display:none}
@@ -11672,79 +11758,120 @@ img{max-width:100%}
   .section{padding:56px 18px}
   .cta-banner{padding:64px 18px}
   .cta-inner{padding:48px 28px;border-radius:24px}
-  .feat-grid,.steps-grid,.test-grid{grid-template-columns:1fr;gap:14px}
+  .feat-grid,.how-grid,.test-grid,.pain-grid{grid-template-columns:1fr;gap:14px}
+  .persona-grid{grid-template-columns:1fr}
+  .bva-wrap{grid-template-columns:1fr}
+  .platform-grid{grid-template-columns:1fr 1fr}
+  .trust-grid{grid-template-columns:1fr 1fr}
   .footer-grid{grid-template-columns:1fr 1fr;gap:36px}
   .footer{padding:60px 20px 24px}
-  .pricing-cta-box{padding:32px 24px}
-  .pricing-cta-meta{gap:20px}
 }
 @media(max-width:480px){
   .hero h1{font-size:36px;letter-spacing:-1.2px}
   .sec-title{font-size:28px}
+  .checks-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  .platform-grid{grid-template-columns:1fr}
+  .cmp-table th,.cmp-table td{padding:10px 12px;font-size:12px}
 }
 </style>
 </head>
 <body>
 
+<!-- 1. ANNOUNCEMENT BAR -->
 <div class="announce">
   <i class="ti ti-sparkles"></i> """ + c['announcement'] + """
-  <a href="/signup">Try free →</a>
+  <a href="/new-qc">Try free →</a>
 </div>
 
+<!-- 2. NAV -->
 <nav class="nav">
   <a href="/home" class="nav-logo">
     <div class="nav-logo-mark"></div>
     """ + c['site_name'] + """
   </a>
   <div class="nav-links">
-    <a href="/features" class="nav-link">Features</a>
-    <a href="/pricing" class="nav-link">Pricing</a>
-    <a href="#security" class="nav-link">Security</a>
+    <a href="#features" class="nav-link">Features</a>
     <a href="#how" class="nav-link">How it works</a>
+    <a href="/pricing" class="nav-link">Pricing</a>
     <a href="/docs" class="nav-link">Docs</a>
     <a href="/blog" class="nav-link">Blog</a>
   </div>
   <div class="nav-cta">
     <a href="/login" class="btn-sign">Sign in</a>
-    <a href="/signup" class="btn-primary">Start Free <i class="ti ti-arrow-right"></i></a>
+    <a href="/new-qc" class="btn-primary">Run QC Free <i class="ti ti-arrow-right"></i></a>
     <button class="hamburger" onclick="document.getElementById('mm').classList.add('open')"><i class="ti ti-menu-2"></i></button>
   </div>
 </nav>
 
 <div class="mobile-menu" id="mm">
   <button class="mobile-menu-close" onclick="document.getElementById('mm').classList.remove('open')"><i class="ti ti-x"></i></button>
-  <a href="/features">Features</a>
-  <a href="/pricing">Pricing</a>
-  <a href="#security">Security</a>
+  <a href="#features">Features</a>
   <a href="#how">How it works</a>
+  <a href="/pricing">Pricing</a>
   <a href="/docs">Docs</a>
   <a href="/blog">Blog</a>
   <a href="/login">Sign in</a>
-  <a href="/signup" style="background:var(--dark);color:#F7F4EE;text-align:center;border-radius:14px;padding:14px;margin-top:12px;border:none">Start Free →</a>
+  <a href="/new-qc" style="background:var(--dark);color:#F7F4EE;text-align:center;border-radius:14px;padding:14px;margin-top:12px;border:none">Run QC Free →</a>
 </div>
 
+<!-- 3. HERO -->
 <section class="hero">
   <div class="hero-inner">
     <div class="hero-badge">
-      <span class="hero-badge-pill">New</span>
-      WhatsApp screenshot QC — try it free
+      <span class="hero-badge-pill">Pharma-ready</span>
+      Audit-defensible QC — every check documented
     </div>
-    <h1>""" + c['hero_heading_part1'] + """<br><span class="accent">""" + c['hero_heading_part2'] + """</span> """ + c['hero_heading_part3'] + """</h1>
-    <p class="hero-sub">""" + c['hero_subheading'] + """</p>
+    <h1>Catch every survey bug<br><span class="accent">before</span> your data is collected.</h1>
+    <p class="hero-sub">Upload your XML export or screener doc. SurveyQC checks every route, every termination, every option — automatically.</p>
+    <div class="hero-tagline">
+      <span>AI parses</span>
+      <span class="arrow">→</span>
+      <span>Code decides</span>
+      <span class="arrow">→</span>
+      <span>Evidence logged</span>
+    </div>
     <div class="hero-cta">
-      <a href="/signup" class="btn-primary">""" + c['hero_cta'] + """ <i class="ti ti-arrow-right"></i></a>
-      <a href="#how" class="btn-ghost">""" + c['hero_cta2'] + """</a>
+      <a href="/new-qc" class="btn-primary">Run your first QC free <i class="ti ti-arrow-right"></i></a>
+      <a href="#how" class="btn-ghost">See how it works</a>
     </div>
     <div class="hero-meta">
       <span class="hero-meta-item"><i class="ti ti-check"></i>No credit card</span>
       <span class="hero-meta-item"><i class="ti ti-check"></i>3 free reports/month</span>
-      <span class="hero-meta-item"><i class="ti ti-check"></i>Cancel anytime</span>
+      <span class="hero-meta-item"><i class="ti ti-check"></i>Any platform</span>
     </div>
   </div>
 </section>
 
+<!-- 4. PAIN POINTS -->
+<section class="section" style="padding-top:0;padding-bottom:64px">
+  <div class="container">
+    <div class="sec-head" style="margin-bottom:32px">
+      <span class="sec-tag">The Problem</span>
+      <h2 class="sec-title">Manual QC is broken.</h2>
+    </div>
+    <div class="pain-grid">
+      <div class="pain-card">
+        <div class="pain-icon"><i class="ti ti-clock-x"></i></div>
+        <div class="pain-title">6–8 hours per survey</div>
+        <div class="pain-desc">Manual QC is the most time-consuming step in survey delivery. One tester, hundreds of paths, zero automation.</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon"><i class="ti ti-file-alert"></i></div>
+        <div class="pain-title">Scripts drift from the spec</div>
+        <div class="pain-desc">The live survey changes after spec sign-off. By launch, text is wrong, codes are off, routing is broken — silently.</div>
+      </div>
+      <div class="pain-card">
+        <div class="pain-icon"><i class="ti ti-lock-open"></i></div>
+        <div class="pain-title">No audit trail</div>
+        <div class="pain-desc">Pharma clients and auditors need timestamped, per-check documentation. “We checked it manually” is not acceptable.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. TRUSTED BY -->
 <section class="trusted">
-  <div class="trusted-l">Compatible with surveys built for leading agencies</div>
+  <div class="trusted-l">Used by QC professionals at agencies including</div>
   <div class="trusted-row">
     <div class="trusted-logo">IPSOS</div>
     <div class="trusted-logo">Kantar</div>
@@ -11754,30 +11881,13 @@ img{max-width:100%}
     <div class="trusted-logo">Dynata</div>
   </div>
 </section>
-<section style="padding:20px 24px 60px">
-  <div class="container">
-    <div style="text-align:center;margin-bottom:32px">
-      <span class="sec-tag">Integrations</span>
-      <h2 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-1px;margin-top:12px">Works with every major platform</h2>
-    </div>
-    <div class="platform-grid">
-      <div class="platform-pill"><div class="platform-pill-mark" style="background:#FF6B35">C</div><div><div class="platform-pill-name">Confirmit</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark" style="background:#0066CC">D</div><div><div class="platform-pill-name">Decipher</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark" style="background:#1F2937">F</div><div><div class="platform-pill-name">Forsta</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark" style="background:#00B4F0">Q</div><div><div class="platform-pill-name">Qualtrics</div><div class="platform-pill-status live">Supported</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark" style="background:#00BF6F">S</div><div><div class="platform-pill-name">SurveyMonkey</div><div class="platform-pill-status soon">Coming soon</div></div></div>
-      <div class="platform-pill"><div class="platform-pill-mark" style="background:#E91E63">A</div><div><div class="platform-pill-name">Alchemer</div><div class="platform-pill-status soon">Coming soon</div></div></div>
-    </div>
-    <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:20px">All trademarks belong to their respective owners. SurveyQC is not affiliated with these platforms &mdash; compatibility only.</p>
-  </div>
-</section>
 
-
-<section class="section" id="features">
+<!-- 6. FEATURES (9 cards: 6 existing + 3 new) -->
+<section class="section" id="features" style="padding-top:72px">
   <div class="container">
     <div class="sec-head">
       <span class="sec-tag">Features</span>
-      <h2 class="sec-title">Everything manual<br>— now automated.</h2>
+      <h2 class="sec-title">Everything manual —<br>now automated.</h2>
       <p class="sec-sub">15+ specialized checks run in parallel. Nothing slips through.</p>
     </div>
     <div class="feat-grid">
@@ -11802,7 +11912,7 @@ img{max-width:100%}
         <div class="feat-desc">""" + c['feature4_desc'] + """</div>
       </div>
       <div class="feat-card">
-        <div class="feat-icon"><i class="ti ti-shield-check"></i></div>
+        <div class="feat-icon"><i class="ti ti-list-check"></i></div>
         <div class="feat-title">""" + c['feature5_title'] + """</div>
         <div class="feat-desc">""" + c['feature5_desc'] + """</div>
       </div>
@@ -11811,6 +11921,21 @@ img{max-width:100%}
         <div class="feat-title">""" + c['feature6_title'] + """</div>
         <div class="feat-desc">""" + c['feature6_desc'] + """</div>
       </div>
+      <div class="feat-card is-new">
+        <div class="feat-icon"><i class="ti ti-arrow-fork"></i></div>
+        <div class="feat-title">Routing Validation <span class="new-badge">NEW</span></div>
+        <div class="feat-desc">Every skip, branch, and conditional display rule tested deterministically. Every path walked. Every logic error surfaced.</div>
+      </div>
+      <div class="feat-card is-new">
+        <div class="feat-icon"><i class="ti ti-repeat"></i></div>
+        <div class="feat-title">Loop &amp; Grid Testing <span class="new-badge">NEW</span></div>
+        <div class="feat-desc">Repeating loop blocks, Grid3D sub-questions, and multi-row matrices — all validated for option inheritance and text consistency.</div>
+      </div>
+      <div class="feat-card is-new">
+        <div class="feat-icon"><i class="ti ti-database-export"></i></div>
+        <div class="feat-title">Export Validation <span class="new-badge">NEW</span></div>
+        <div class="feat-desc">XML export structure parsed and compared against live survey state. Catches hidden questions, code mismatches, and variable gaps.</div>
+      </div>
     </div>
     <div style="text-align:center;margin-top:40px">
       <a href="/features" class="btn-ghost">View all 25+ features <i class="ti ti-arrow-right"></i></a>
@@ -11818,68 +11943,303 @@ img{max-width:100%}
   </div>
 </section>
 
-<section class="section" id="security" style="background:var(--bg2)">
-  <div class="container">
-    <div class="sec-head">
-      <span class="sec-tag">Security</span>
-      <h2 class="sec-title">Security &amp; Compliance</h2>
-    </div>
-    <div style="max-width:720px;margin:0 auto">
-      <ul style="list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
-        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-shield-check" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">GDPR compliant</span></li>
-        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-lock" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">Data encrypted (TLS 1.3 in transit, AES-256 at rest)</span></li>
-        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-clock" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">Reports auto-deleted after 90 days</span></li>
-        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-eye-off" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">No data shared with third parties</span></li>
-        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-certificate" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">SOC 2 Type II: in progress</span></li>
-        <li style="display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px"><i class="ti ti-hospital" style="color:var(--accent);font-size:20px;flex-shrink:0"></i><span style="font-size:14px;font-weight:500;color:var(--text)">HIPAA-ready: Enterprise plan</span></li>
-      </ul>
-    </div>
-  </div>
-</section>
-
-<section class="section" id="how" style="background:var(--card)">
+<!-- 7. HOW IT ACTUALLY WORKS -->
+<section class="section" id="how" style="background:var(--bg2)">
   <div class="container">
     <div class="sec-head">
       <span class="sec-tag">How it works</span>
-      <h2 class="sec-title">3 steps to perfect QC.</h2>
-      <p class="sec-sub">From upload to professional Word report in under 12 minutes.</p>
+      <h2 class="sec-title">AI parses. Code decides.</h2>
+      <p class="sec-sub">Not a chatbot that guesses — a deterministic engine that verifies. Every output is traceable and reproducible.</p>
     </div>
-    <div class="steps-grid">
-      <div class="step-card">
-        <div class="step-num">01</div>
-        <div class="step-title">Upload doc & URL</div>
-        <div class="step-desc">Upload your screener .docx and paste the live survey URL. Add screenshots optionally.</div>
+    <div class="how-grid">
+      <div class="how-card">
+        <div class="how-num">01</div>
+        <div class="how-title">Upload your survey file</div>
+        <div class="how-desc">Paste the live survey URL and upload your XML export or screener .docx. Supports Confirmit, Decipher, Forsta, Qualtrics, and more.</div>
+        <div class="how-tag"><i class="ti ti-upload"></i> No install needed</div>
       </div>
-      <div class="step-card">
-        <div class="step-num">02</div>
-        <div class="step-title">AI tests everything</div>
-        <div class="step-desc">AI crawls every path, runs all 15+ checks in parallel, captures screenshots.</div>
+      <div class="how-card">
+        <div class="how-num">02</div>
+        <div class="how-title">AI parses. Code verifies.</div>
+        <div class="how-desc">The AI extracts every question, route, and termination rule from your file. Then deterministic code walks every path and runs all 15+ checks in parallel.</div>
+        <div class="how-tag"><i class="ti ti-shield-check"></i> No hallucination possible</div>
       </div>
-      <div class="step-card">
-        <div class="step-num">03</div>
-        <div class="step-title">Download Word report</div>
-        <div class="step-desc">Professional report with all issues, screenshot proof, and QC certificate.</div>
+      <div class="how-card">
+        <div class="how-num">03</div>
+        <div class="how-title">Download audit evidence</div>
+        <div class="how-desc">Every check gets PASS/FAIL with exact location, screenshot, and a machine-readable evidence log. Your Word report is ready in under 12 minutes.</div>
+        <div class="how-tag"><i class="ti ti-certificate"></i> Pharma audit-ready</div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section" id="credibility" style="text-align:center">
+<!-- 8. SAMPLE REPORT PREVIEW -->
+<section class="section">
   <div class="container">
     <div class="sec-head">
-      <h2 class="sec-title">Built for survey QC professionals</h2>
-      <p class="sec-sub">Every survey has hidden bugs. SurveyQC catches them automatically — in any language, on any platform.</p>
+      <span class="sec-tag">Sample Output</span>
+      <h2 class="sec-title">What your QC report looks like.</h2>
+      <p class="sec-sub">Every check gets a verdict, a location, and reproducible evidence. Nothing vague, nothing missing.</p>
+    </div>
+    <div class="report-mock">
+      <div class="report-mock-header">
+        <div class="report-mock-title"><i class="ti ti-file-text"></i> QC Report — Survey E12345 &middot; Pharma Brand Tracker 2026</div>
+        <div class="report-mock-stats">
+          <div class="report-mock-stat"><div class="report-mock-num">156</div><div class="report-mock-lbl">Checks run</div></div>
+          <div class="report-mock-stat"><div class="report-mock-num" style="color:#6EE7A0">151</div><div class="report-mock-lbl">Passed</div></div>
+          <div class="report-mock-stat"><div class="report-mock-num" style="color:#FCA5A5">5</div><div class="report-mock-lbl">Failed</div></div>
+          <div class="report-mock-stat"><div class="report-mock-num">9m 43s</div><div class="report-mock-lbl">Time</div></div>
+        </div>
+      </div>
+      <div class="report-mock-body">
+        <div class="chk-row">
+          <div class="chk-badge pass"><i class="ti ti-check"></i></div>
+          <div class="chk-name">Termination Check — Q2</div>
+          <div class="chk-detail">Age screen-out fires at Q2 &lt; 18. Screenshot attached.</div>
+        </div>
+        <div class="chk-row">
+          <div class="chk-badge fail"><i class="ti ti-x"></i></div>
+          <div class="chk-name">Question Text — Q7</div>
+          <div class="chk-detail">Spec: "How often do you use…" &middot; Live: "How often you use…" — missing "do"</div>
+        </div>
+        <div class="chk-row">
+          <div class="chk-badge pass"><i class="ti ti-check"></i></div>
+          <div class="chk-name">Routing — Q4 &rarr; Q9 skip</div>
+          <div class="chk-detail">If Q3 = Code 5, skip to Q9. Verified. Path screenshot attached.</div>
+        </div>
+        <div class="chk-row">
+          <div class="chk-badge fail"><i class="ti ti-x"></i></div>
+          <div class="chk-name">Answer Codes — Q11</div>
+          <div class="chk-detail">Code 4 missing from live survey. Spec shows 5 options, live shows 4.</div>
+        </div>
+        <div class="chk-row">
+          <div class="chk-badge pass"><i class="ti ti-check"></i></div>
+          <div class="chk-name">Loop Structure — Q14–Q18</div>
+          <div class="chk-detail">All 4 loop iterations display. Sub-question options inherited correctly.</div>
+        </div>
+        <div class="chk-row">
+          <div class="chk-badge warn"><i class="ti ti-alert-triangle"></i></div>
+          <div class="chk-name">Mandatory Marker — Q6</div>
+          <div class="chk-detail">Spec marks Q6 mandatory (*). Live survey shows no asterisk — review needed.</div>
+        </div>
+      </div>
+      <div class="report-mock-footer">
+        <span><i class="ti ti-clock"></i> Generated 2026-06-06 14:22 UTC</span>
+        <span><i class="ti ti-certificate"></i> QC Certificate #E12345-2026-0606</span>
+        <a href="/new-qc" style="font-size:13px;font-weight:600;color:var(--accent)">Run this on your survey →</a>
+      </div>
     </div>
   </div>
 </section>
 
+<!-- 9. WHO IS THIS FOR -->
+<section class="section" style="background:var(--bg2)">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">Who it&#39;s for</span>
+      <h2 class="sec-title">Built for every role in survey delivery.</h2>
+    </div>
+    <div class="persona-grid">
+      <div class="persona-card">
+        <div class="persona-icon"><i class="ti ti-clipboard-check"></i></div>
+        <div>
+          <div class="persona-role">QC Manager</div>
+          <div class="persona-pain">You run 5+ surveys per week. Manual QC is consuming your team. SurveyQC cuts per-survey time from hours to minutes — without adding headcount.</div>
+        </div>
+      </div>
+      <div class="persona-card">
+        <div class="persona-icon"><i class="ti ti-code"></i></div>
+        <div>
+          <div class="persona-role">Survey Programmer</div>
+          <div class="persona-pain">Your script is correct — but can you prove it? Get a timestamped, per-check evidence report before delivery. Catch your own bugs before QC does.</div>
+        </div>
+      </div>
+      <div class="persona-card">
+        <div class="persona-icon"><i class="ti ti-user-check"></i></div>
+        <div>
+          <div class="persona-role">Project Manager</div>
+          <div class="persona-pain">Termination bugs at launch cost days and data. Ship on time with documented proof that every path was tested before field start.</div>
+        </div>
+      </div>
+      <div class="persona-card">
+        <div class="persona-icon"><i class="ti ti-building-hospital"></i></div>
+        <div>
+          <div class="persona-role">Pharma &amp; Healthcare Researcher</div>
+          <div class="persona-pain">Your auditor needs traceable, timestamped documentation for every QC step. SurveyQC generates audit-ready reports out of the box — no extra work.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
+<!-- 10. BEFORE vs AFTER -->
+<section class="section">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">The Difference</span>
+      <h2 class="sec-title">Before &amp; after SurveyQC.</h2>
+    </div>
+    <div class="bva-wrap">
+      <div class="bva-col before">
+        <div class="bva-head before">
+          <div class="bva-label"><i class="ti ti-x"></i> Manual QC — Before</div>
+        </div>
+        <div class="bva-rows">
+          <div class="bva-row"><i class="ti ti-x bva-row-icon"></i><div class="bva-text"><strong>6–8 hours per survey</strong><small>One tester clicking every path by hand</small></div></div>
+          <div class="bva-row"><i class="ti ti-x bva-row-icon"></i><div class="bva-text"><strong>Gaps in coverage</strong><small>Human attention fades — bugs slip through</small></div></div>
+          <div class="bva-row"><i class="ti ti-x bva-row-icon"></i><div class="bva-text"><strong>No formal audit trail</strong><small>Notes in a spreadsheet, if anything</small></div></div>
+          <div class="bva-row"><i class="ti ti-x bva-row-icon"></i><div class="bva-text"><strong>Non-reproducible</strong><small>Different tester = different result</small></div></div>
+          <div class="bva-row"><i class="ti ti-x bva-row-icon"></i><div class="bva-text"><strong>Zero screenshot evidence</strong><small>Taken manually, if remembered at all</small></div></div>
+        </div>
+      </div>
+      <div class="bva-col after">
+        <div class="bva-head after">
+          <div class="bva-label"><i class="ti ti-check"></i> SurveyQC — After</div>
+        </div>
+        <div class="bva-rows">
+          <div class="bva-row"><i class="ti ti-check bva-row-icon"></i><div class="bva-text"><strong>Under 12 minutes per survey</strong><small>All 15+ checks run in parallel, automatically</small></div></div>
+          <div class="bva-row"><i class="ti ti-check bva-row-icon"></i><div class="bva-text"><strong>Deterministic coverage</strong><small>Every defined check runs every time — no gaps</small></div></div>
+          <div class="bva-row"><i class="ti ti-check bva-row-icon"></i><div class="bva-text"><strong>Machine-readable evidence log</strong><small>Timestamped PASS/FAIL for every check</small></div></div>
+          <div class="bva-row"><i class="ti ti-check bva-row-icon"></i><div class="bva-text"><strong>Fully reproducible</strong><small>Same survey = same results, always</small></div></div>
+          <div class="bva-row"><i class="ti ti-check bva-row-icon"></i><div class="bva-text"><strong>Screenshot proof attached</strong><small>Every failure has visual evidence in the report</small></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
+<!-- 11. PLATFORM SUPPORT -->
+<section style="padding:64px 24px;background:var(--bg2)">
+  <div class="container">
+    <div style="text-align:center;margin-bottom:36px">
+      <span class="sec-tag">Platforms</span>
+      <h2 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-1px;margin-top:12px">Works with every major survey platform</h2>
+    </div>
+    <div class="platform-grid">
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#FF6B35">C</div><div><div class="platform-pill-name">Confirmit</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#0066CC">D</div><div><div class="platform-pill-name">Decipher</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#1F2937">F</div><div><div class="platform-pill-name">Forsta</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#00B4F0">Q</div><div><div class="platform-pill-name">Qualtrics</div><div class="platform-pill-status live">Supported</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#00BF6F">S</div><div><div class="platform-pill-name">SurveyMonkey</div><div class="platform-pill-status soon">Coming soon</div></div></div>
+      <div class="platform-pill"><div class="platform-pill-mark" style="background:#E91E63">A</div><div><div class="platform-pill-name">Alchemer</div><div class="platform-pill-status soon">Coming soon</div></div></div>
+    </div>
+    <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:20px">All trademarks belong to their respective owners. SurveyQC is not affiliated with these platforms.</p>
+  </div>
+</section>
+
+<!-- 12. COMPARISON TABLE -->
+<section class="section">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">How we compare</span>
+      <h2 class="sec-title">SurveyQC vs the alternatives.</h2>
+      <p class="sec-sub">Purpose-built for survey QC. Not a generic AI, not a spreadsheet.</p>
+    </div>
+    <div class="cmp-wrap">
+      <table class="cmp-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="hl">SurveyQC</th>
+            <th>Manual QC</th>
+            <th>Excel</th>
+            <th>ChatGPT</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Time per survey</td><td class="hl">&lt; 12 min</td><td>6–8 hrs</td><td>3–4 hrs</td><td>1–2 hrs</td></tr>
+          <tr><td>Termination testing</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td>Manual</td><td><i class="ti ti-x cmp-no"></i></td><td><span class="cmp-part">Partial</span></td></tr>
+          <tr><td>Screenshot evidence</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td>Manual</td><td><i class="ti ti-x cmp-no"></i></td><td><i class="ti ti-x cmp-no"></i></td></tr>
+          <tr><td>80+ languages</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td>Depends</td><td><i class="ti ti-x cmp-no"></i></td><td><span class="cmp-part">Partial</span></td></tr>
+          <tr><td>Audit trail</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><i class="ti ti-x cmp-no"></i></td></tr>
+          <tr><td>Reproducible results</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><span class="cmp-part">Partial</span></td><td><i class="ti ti-x cmp-no"></i></td></tr>
+          <tr><td>Pharma-ready report</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><i class="ti ti-x cmp-no"></i></td></tr>
+          <tr><td>XML export parsing</td><td class="hl"><i class="ti ti-check cmp-yes"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><i class="ti ti-x cmp-no"></i></td><td><span class="cmp-part">Partial</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:center;margin-top:32px">
+      <a href="/new-qc" class="btn-primary">Try SurveyQC free <i class="ti ti-arrow-right"></i></a>
+    </div>
+  </div>
+</section>
+
+<!-- 13. QC CHECKS GRID -->
+<section class="section" style="background:var(--bg2)">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">15+ Checks</span>
+      <h2 class="sec-title">Every check. Every survey.</h2>
+      <p class="sec-sub">All checks run in parallel on every survey — not a sample.</p>
+    </div>
+    <div class="checks-grid">
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-shield-x"></i></div><span>Termination Testing</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-text-recognition"></i></div><span>Question Text Match</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-search"></i></div><span>Missing Words</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-checkbox"></i></div><span>Options Match</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-list-numbers"></i></div><span>Answer Codes</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-asterisk"></i></div><span>Mandatory Markers</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-arrows-sort"></i></div><span>Question Order</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-replace"></i></div><span>Piping Markers</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-route"></i></div><span>Skip Logic</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-chart-pie"></i></div><span>Quota Testing</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-repeat"></i></div><span>Loop Testing</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-eye"></i></div><span>Display Logic</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-world"></i></div><span>80+ Languages</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-camera"></i></div><span>Auto Screenshots</span></div>
+      <div class="check-pill"><div class="check-pill-icon"><i class="ti ti-certificate"></i></div><span>QC Certificate</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 14. TRUST NUMBERS -->
+<section class="section">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">By the numbers</span>
+      <h2 class="sec-title">Built for survey QC at scale.</h2>
+    </div>
+    <div class="trust-grid">
+      <div class="trust-card">
+        <div class="trust-num">15<span class="unit">+</span></div>
+        <div class="trust-label">Specialized QC checks run on every survey</div>
+      </div>
+      <div class="trust-card">
+        <div class="trust-num">80<span class="unit">+</span></div>
+        <div class="trust-label">Languages fully supported including Arabic, Japanese, Urdu</div>
+      </div>
+      <div class="trust-card">
+        <div class="trust-num">12<span class="unit"> min</span></div>
+        <div class="trust-label">Average time from upload to complete QC report</div>
+      </div>
+      <div class="trust-card">
+        <div class="trust-num">6</div>
+        <div class="trust-label">Survey platforms supported with more coming soon</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15. TESTIMONIALS -->
+<section class="section" style="background:var(--bg2)">
+  <div class="container">
+    <div class="sec-head">
+      <span class="sec-tag">What users say</span>
+      <h2 class="sec-title">QC professionals trust SurveyQC.</h2>
+    </div>
+    <div class="test-grid">
+      """ + test_cards + """
+    </div>
+  </div>
+</section>
+
+<!-- 16. FINAL CTA + FOOTER -->
 <section class="cta-banner">
   <div class="cta-inner">
-    <h2>Save 8 hours per survey<br>starting today.</h2>
-    <p>Free forever tier. No credit card needed.</p>
-    <a href="/signup" class="btn-primary">Start free — no card required <i class="ti ti-arrow-right"></i></a>
+    <h2>Run your first QC in under 12 minutes.</h2>
+    <p>Free forever tier. No credit card. Any survey platform.</p>
+    <a href="/new-qc" class="btn-primary">Start free — no card required <i class="ti ti-arrow-right"></i></a>
   </div>
 </section>
 
@@ -11927,14 +12287,25 @@ img{max-width:100%}
       </div>
     </div>
     <div class="footer-bottom">
-      <p>© """ + c['footer_text'] + """</p>
+      <p>&copy; """ + c['footer_text'] + """</p>
     </div>
   </div>
 </footer>
 
+<script>
+document.addEventListener('click', function(e) {
+  var mm = document.getElementById('mm');
+  if (mm && mm.classList.contains('open') && !mm.contains(e.target)) {
+    var btn = document.querySelector('.hamburger');
+    if (btn && !btn.contains(e.target)) mm.classList.remove('open');
+  }
+});
+</script>
+
 </body>
 </html>"""
     return page
+
 
 
 @app.route('/privacy-policy')
