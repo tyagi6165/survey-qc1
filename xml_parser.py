@@ -40,6 +40,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from qid_normalizer import normalize_qid as _canonical_normalize_qid
+
 try:
     import resource as _resource
     def _mem_mb():
@@ -77,6 +79,95 @@ _SNIFF_BYTES = 2048
 
 _LLM_MAX_RETRIES = 1
 _LLM_RETRY_DELAY = 15  # seconds; multiplied by attempt number
+_XML_PARSE_TIMEOUT_DEFAULT = int(os.getenv("SURVEYQC_XML_PARSE_TIMEOUT", "45"))
+_XML_PARSER_LLM_ENABLED = os.getenv("SURVEYQC_XML_PARSER_LLM", "0").lower() in {"1", "true", "yes", "on"}
+_parse_ctx = threading.local()
+
+_ALLOWED_ZIP_EXTS = {".xml", ".qsf", ".json", ".txt"}
+_IGNORED_ZIP_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+    ".css", ".js", ".html", ".htm", ".pdf", ".doc", ".docx",
+    ".xls", ".xlsx", ".ppt", ".pptx", ".mp3", ".mp4", ".woff", ".woff2",
+}
+
+
+def _ctx() -> dict:
+    return getattr(_parse_ctx, "value", {}) or {}
+
+
+def _set_ctx(ctx: dict) -> None:
+    _parse_ctx.value = ctx
+
+
+def _clear_ctx() -> None:
+    _parse_ctx.value = {}
+
+
+def _emit_progress(message: str) -> None:
+    cb = _ctx().get("progress_cb")
+    if not cb:
+        return
+    try:
+        cb(message)
+    except Exception as exc:
+        log.debug("xml_parser progress callback failed: %s", exc)
+
+
+def _log_cb(message: str) -> None:
+    cb = _ctx().get("log_cb")
+    if not cb:
+        return
+    try:
+        cb(message)
+    except Exception as exc:
+        log.debug("xml_parser log callback failed: %s", exc)
+
+
+def _fmt_fields(fields: dict) -> str:
+    parts = []
+    for key, val in fields.items():
+        if val is None:
+            continue
+        parts.append(f"{key}={val}")
+    return " ".join(parts)
+
+
+def _checkpoint_start(name: str, **fields) -> float:
+    log.info("[XML_TIMING] %s duration=0.00s %s", name, _fmt_fields(fields))
+    _log_cb(f"{name} {_fmt_fields(fields)}".strip())
+    return time.time()
+
+
+def _checkpoint_end(name: str, start: float, **fields) -> float:
+    duration = time.time() - start
+    log.info("[XML_TIMING] %s duration=%.2fs %s", name, duration, _fmt_fields(fields))
+    _log_cb(f"{name} duration={duration:.2f}s {_fmt_fields(fields)}".strip())
+    return duration
+
+
+def _deadline_exceeded() -> bool:
+    deadline = _ctx().get("deadline")
+    return bool(deadline and time.time() > deadline)
+
+
+def _remaining_time(default: float = 1.0) -> float:
+    deadline = _ctx().get("deadline")
+    if not deadline:
+        return default
+    return max(0.0, deadline - time.time())
+
+
+def _mark_timeout(where: str) -> None:
+    _parse_metadata["warning"] = "XML_PARSER_TIMEOUT"
+    _parse_metadata["timeout"] = True
+    _parse_metadata["timeout_at"] = where
+    log.warning("[XML_TIMING] XML_PARSER_TIMEOUT duration=%.2fs at=%s",
+                time.time() - _ctx().get("started_at", time.time()), where)
+    _emit_progress("XML parser timeout; returning partial XML model...")
+
+
+def _llm_allowed() -> bool:
+    return _XML_PARSER_LLM_ENABLED and not _deadline_exceeded()
 
 # ── Type maps ─────────────────────────────────────────────────────────────────
 
@@ -169,8 +260,8 @@ _CHOICE_TYPES = {"UNIQUE", "MULTIPLE", "MATRIX", "GRID"}
 # ── QID normalisation ─────────────────────────────────────────────────────────
 
 def _normalize_qid(raw: str) -> str:
-    """Uppercase, replace dots with X, strip spaces."""
-    return re.sub(r"\.", "X", raw.strip()).upper()
+    """Canonical SurveyQC QID normalisation used by DOC/XML/live matching."""
+    return _canonical_normalize_qid(raw)
 
 # Public alias per spec
 normalize_qid = _normalize_qid
@@ -187,6 +278,122 @@ _COMPLEX_ROUTING_RE = re.compile(
 def is_complex_routing(cond_str: str) -> bool:
     """True if routing has boolean operators or function calls — triggers LLM."""
     return bool(_COMPLEX_ROUTING_RE.search(cond_str)) if cond_str else False
+
+
+_TERMINATION_KEYWORD_RE = re.compile(
+    r'(terminate|complete|stop|end(?:interview)?|close|screen[\s_-]*out|'
+    r'disqualif|thank|thanks|endinterview|setstatus|completeinterview|gotoend|'
+    r'setinterviewend|hard\s+terminate|screenedset|quotafullredirect|screenedredirect)',
+    re.IGNORECASE,
+)
+
+_LEGAL_INFO_RE = re.compile(
+    r'(traitement\s+des\s+donn|loi\s+bertrand|privacy|legal|consent|'
+    r'donnees\s+a\s+caractere\s+personnel|données\s+à\s+caractère\s+personnel)',
+    re.IGNORECASE,
+)
+
+_QID_REF_RE = re.compile(
+    r'\b(?:f|qf|ReturnNum|gridGetRowsByScale|EqualTo)\s*\(\s*[\'"]([A-Za-z]{1,8}\d+[A-Za-z]*(?:_[0-9]+)?)',
+    re.IGNORECASE,
+)
+
+
+def _extract_logic_text(el, max_chars: int = 1800) -> tuple:
+    """Return compact routing-like and termination-like evidence from a question XML node."""
+    routing_bits = []
+    term_bits = []
+    interesting_tags = {
+        'questionmaskpredicate', 'predicates', 'predicate', 'expression',
+        'script', 'scripts', 'action', 'actions', 'goto', 'routing',
+        'condition', 'conditions', 'mask', 'complete', 'status',
+    }
+    for node in el.iter():
+        tag = node.tag.split('}')[-1].lower()
+        pieces = []
+        if node.text and node.text.strip():
+            pieces.append(node.text.strip())
+        for key, val in node.attrib.items():
+            if val and str(val).strip():
+                pieces.append(f'{key}={val}')
+        if not pieces:
+            continue
+        blob = ' '.join(pieces)
+        if tag in interesting_tags or _TERMINATION_KEYWORD_RE.search(blob):
+            routing_bits.append(blob)
+        if _TERMINATION_KEYWORD_RE.search(blob):
+            term_bits.append(blob)
+        if sum(len(x) for x in routing_bits) > max_chars:
+            break
+    routing = '; '.join(dict.fromkeys(routing_bits))[:max_chars] or None
+    termination = '; '.join(dict.fromkeys(term_bits))[:max_chars] or None
+    return routing, termination
+
+
+def _compact_xml_text(el, max_chars: int = 1800) -> str:
+    pieces = []
+    for node in el.iter():
+        tag = node.tag.split('}')[-1]
+        if node.text and node.text.strip():
+            pieces.append(f'{tag}: {node.text.strip()}')
+        for key, val in node.attrib.items():
+            if val and str(val).strip():
+                pieces.append(f'{tag}.{key}={val}')
+        if sum(len(p) for p in pieces) > max_chars:
+            break
+    return '; '.join(dict.fromkeys(pieces))[:max_chars]
+
+
+def _condition_expression(el) -> str:
+    for child in el:
+        if child.tag.split('}')[-1].lower() == 'expression':
+            return (child.text or '').strip()
+    return ''
+
+
+def _extract_deep_termination_evidence(root, max_records: int = 250) -> dict:
+    """Return {normalized_qid: [evidence]} from global Confirmit logic nodes.
+
+    Confirmit often stores screen-out logic as sibling/global Condition nodes
+    rather than inside the question node. This scanner looks only for strong
+    routing/action signals and ignores legal/static text.
+    """
+    evidence_by_qid = {}
+    records = 0
+    interesting = {'condition', 'script', 'action', 'goto', 'callblock'}
+    for el in root.iter():
+        if _deadline_exceeded() or records >= max_records:
+            break
+        tag = el.tag.split('}')[-1].lower()
+        if tag not in interesting:
+            continue
+        blob = _compact_xml_text(el)
+        if not blob or _LEGAL_INFO_RE.search(blob):
+            continue
+        has_term = bool(_TERMINATION_KEYWORD_RE.search(blob))
+        if not has_term:
+            continue
+        expr = _condition_expression(el) if tag == 'condition' else ''
+        refs = set(_QID_REF_RE.findall(expr or blob))
+        if not refs:
+            continue
+        source = f'{el.tag.split("}")[-1]}#{el.get("EntityId", "")}'.rstrip('#')
+        evidence_text = f'{expr}; {blob}' if expr else blob
+        for ref in refs:
+            qn = _normalize_qid(ref)
+            if not qn:
+                continue
+            evidence_by_qid.setdefault(qn, []).append({
+                'qid': ref,
+                'xml_condition': expr[:500] if expr else evidence_text[:500],
+                'xml_source_node': source,
+                'evidence_text': evidence_text[:1200],
+                'confidence': 90 if expr and _TERMINATION_KEYWORD_RE.search(evidence_text) else 70,
+            })
+            records += 1
+    if evidence_by_qid:
+        _parse_metadata['termination_evidence_count'] = sum(len(v) for v in evidence_by_qid.values())
+    return evidence_by_qid
 
 
 # ── XML element utilities ─────────────────────────────────────────────────────
@@ -419,6 +626,23 @@ def _llm_enrich(qid: str, raw_block: str, q: dict, triggers: list) -> dict:
     return merged
 
 
+def _maybe_llm_enrich(parser_name: str, qid: str, raw_block: str, q: dict, triggers: list) -> tuple:
+    """
+    Parser LLM fallback is disabled by default because XML import must be bounded.
+    Set SURVEYQC_XML_PARSER_LLM=1 only for controlled diagnostics.
+    """
+    if not triggers:
+        return q, False
+    if not _llm_allowed():
+        reason = "timeout" if _deadline_exceeded() else "disabled"
+        _parse_metadata["llm_fallback_skipped"] = _parse_metadata.get("llm_fallback_skipped", 0) + 1
+        log.info("[TIMING] AI_FALLBACK_SKIPPED_XML_PARSER: parser=%s QID=%s reason=%s triggers=%s",
+                 parser_name, qid, reason, triggers)
+        return q, False
+    log.info("%s: LLM fallback QID=%s fields=%s", parser_name, qid, triggers)
+    return _llm_enrich(qid, raw_block, q, triggers), True
+
+
 # ── Format detection ──────────────────────────────────────────────────────────
 
 def detect_format(file_path: str) -> str:
@@ -507,7 +731,16 @@ def parse_export(file_path: str) -> list:
     Returns [] (with a log warning) on parse errors — never crashes.
     """
     t0_export = time.time()
+    filename = os.path.basename(file_path)
+    ext = os.path.splitext(filename)[1].lower()
+    size_bytes = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+    _checkpoint_start("XML_EXPORT_PARSING_START",
+                      filename=filename, extension=ext or "none", file_size_bytes=size_bytes)
+    _emit_progress("Parsing XML export...")
+
+    t0_detect = _checkpoint_start("PLATFORM_DETECT_START", filename=filename)
     fmt = detect_format(file_path)
+    _checkpoint_end("PLATFORM_DETECT_END", t0_detect, format=fmt)
     log.info("parse_export: detected format '%s' for %s", fmt, os.path.basename(file_path))
 
     dispatch = {
@@ -526,13 +759,16 @@ def parse_export(file_path: str) -> list:
             "Decipher XML, Qualtrics QSF (.qsf/.json), or Forsta XML."
         )
 
+    t0_canon = _checkpoint_start("CANONICAL_CONVERSION_START", format=fmt)
     result = dispatch[fmt](file_path)
+    _checkpoint_end("CANONICAL_CONVERSION_END", t0_canon, questions=len(result))
     log.info("[TIMING] PARSE_EXPORT_TOTAL: %.2fs format=%s questions=%d",
              time.time() - t0_export, fmt, len(result))
+    _checkpoint_end("XML_EXPORT_PARSING_END", t0_export, format=fmt, questions=len(result))
     return result
 
 
-def parse_export_with_stats(file_path: str) -> tuple:
+def parse_export_with_stats(file_path: str, progress_cb=None, log_cb=None, timeout_s: int = None) -> tuple:
     """
     Like parse_export() but also returns a metadata dict.
 
@@ -547,7 +783,16 @@ def parse_export_with_stats(file_path: str) -> tuple:
     log.info("[TIMING] PARSE_EXPORT_WITH_STATS_START: file=%s mem=%.1f MB",
              os.path.basename(file_path), mem_start)
     _parse_metadata.clear()
-    questions = parse_export(file_path)
+    _set_ctx({
+        "started_at": t0_total,
+        "deadline": t0_total + (timeout_s or _XML_PARSE_TIMEOUT_DEFAULT),
+        "progress_cb": progress_cb,
+        "log_cb": log_cb,
+    })
+    try:
+        questions = parse_export(file_path)
+    finally:
+        _clear_ctx()
 
     # [TIMING] XML comparison preparation (building by-QID index)
     t0_index = time.time()
@@ -573,7 +818,8 @@ def parse_export_with_stats(file_path: str) -> tuple:
 def _load_xml_text_and(parser_fn):
     """Return a loader that reads file as UTF-8 text then calls parser_fn."""
     def loader(file_path):
-        t0_load = time.time()
+        _emit_progress("Loading XML export...")
+        t0_load = _checkpoint_start("XML_LOAD_START", filename=os.path.basename(file_path))
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024) if os.path.exists(file_path) else 0
         mem_before = _mem_mb()
         log.info("[TIMING] XML_FILE_LOAD_START: %s (%.2f MB) mem=%.1f MB",
@@ -585,8 +831,8 @@ def _load_xml_text_and(parser_fn):
             log.warning("parse_export: cannot read %s — %s", file_path, exc)
             return []
         mem_after = _mem_mb()
-        log.info("[TIMING] XML_FILE_LOAD_COMPLETE: %.2fs text_len=%d chars mem=%.1f MB (delta=+%.1f MB)",
-                 time.time() - t0_load, len(text), mem_after, mem_after - mem_before)
+        _checkpoint_end("XML_LOAD_END", t0_load, text_chars=len(text), file_size_mb=f"{file_size_mb:.2f}",
+                        mem_mb=f"{mem_after:.1f}", mem_delta_mb=f"{mem_after - mem_before:.1f}")
         return parser_fn(text)
     return loader
 
@@ -594,20 +840,23 @@ def _load_xml_text_and(parser_fn):
 def _load_text_and(parser_fn):
     """Return a loader that reads file as UTF-8 text then calls parser_fn."""
     def loader(file_path):
+        _emit_progress("Loading survey export...")
+        t0_load = _checkpoint_start("XML_LOAD_START", filename=os.path.basename(file_path))
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except OSError as exc:
             log.warning("parse_export: cannot read %s — %s", file_path, exc)
             return []
+        _checkpoint_end("XML_LOAD_END", t0_load, text_chars=len(text))
         return parser_fn(text)
     return loader
 
 
 def _load_confirmit_zip(file_path: str) -> list:
     """Unzip Confirmit export, find the survey definition XML, parse it."""
-    # [TIMING] XML file load start
-    t0_load = time.time()
+    _emit_progress("Extracting ZIP...")
+    t0_zip = _checkpoint_start("ZIP_EXTRACT_START", filename=os.path.basename(file_path))
     zip_size_mb = os.path.getsize(file_path) / (1024 * 1024)
     mem_before = _mem_mb()
     log.info("[TIMING] XML_FILE_LOAD_START: %s (%.2f MB, mem=%.1f MB)",
@@ -615,26 +864,72 @@ def _load_confirmit_zip(file_path: str) -> list:
 
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            xml_members = [n for n in zf.namelist() if n.lower().endswith(".xml")]
+            infos = zf.infolist()
+            allowed_infos = []
+            ignored_count = 0
+            for info in infos:
+                if info.is_dir():
+                    continue
+                ext = os.path.splitext(info.filename.lower())[1]
+                if ext in _IGNORED_ZIP_EXTS or ext not in _ALLOWED_ZIP_EXTS:
+                    ignored_count += 1
+                    continue
+                allowed_infos.append(info)
 
-            if not xml_members:
-                raise ValueError("No XML file found inside zip.")
+            xml_infos = [info for info in allowed_infos if info.filename.lower().endswith(".xml")]
+            qsf_infos = [
+                info for info in allowed_infos
+                if info.filename.lower().endswith((".qsf", ".json", ".txt"))
+            ]
+            _checkpoint_end("ZIP_EXTRACT_END", t0_zip,
+                            zip_file_size_mb=f"{zip_size_mb:.2f}",
+                            files=len(infos), allowed_files=len(allowed_infos),
+                            ignored_files=ignored_count, xml_files=len(xml_infos))
 
-            # Prefer the file whose name suggests it's the main survey definition
-            preferred = next(
-                (n for n in xml_members
-                 if any(kw in n.lower() for kw in ("definition", "survey", "export"))),
-                None,
-            )
-            target = preferred or max(xml_members, key=lambda n: zf.getinfo(n).file_size)
-            xml_size_bytes = zf.getinfo(target).file_size
-            log.info("[TIMING] XML_FILE_LOAD_TARGET: %s (uncompressed %.2f MB)",
-                     target, xml_size_bytes / (1024 * 1024))
+            candidates = xml_infos or qsf_infos
+            if not candidates:
+                raise ValueError("No supported XML/QSF/JSON/TXT survey file found inside zip.")
 
-            with tempfile.TemporaryDirectory() as tmp:
-                extracted = zf.extract(target, path=tmp)
-                with open(extracted, "r", encoding="utf-8", errors="replace") as fh:
-                    xml_text = fh.read()
+            _emit_progress("Selecting survey XML...")
+            t0_select = _checkpoint_start("XML_FILE_SELECT_START", candidates=len(candidates),
+                                          xml_files=len(xml_infos))
+
+            def _candidate_score(info) -> tuple:
+                name = info.filename.lower()
+                ext = os.path.splitext(name)[1]
+                score = 0
+                if ext == ".xml":
+                    score += 100
+                elif ext in {".qsf", ".json"}:
+                    score += 60
+                if any(kw in name for kw in ("definition", "survey", "export", "project", "datamap")):
+                    score += 50
+                if any(bad in name for bad in ("asset", "image", "css", "script", "html", "template")):
+                    score -= 60
+                sniff = ""
+                try:
+                    with zf.open(info, "r") as fh:
+                        sniff = fh.read(min(info.file_size, 8192)).decode("utf-8", errors="replace").lower()
+                except Exception:
+                    sniff = ""
+                if any(marker in sniff for marker in ("<project", "<survey", "<variables>", "surveyelements")):
+                    score += 75
+                if any(marker in sniff for marker in ("<single", "<multi", "<grid", "<radio", "<checkbox")):
+                    score += 25
+                return score, info.file_size
+
+            target_info = max(candidates, key=_candidate_score)
+            target = target_info.filename
+            selected_size = target_info.file_size
+            _checkpoint_end("XML_FILE_SELECT_END", t0_select,
+                            selected_file=target, selected_file_size_bytes=selected_size,
+                            xml_files=len(xml_infos))
+
+            _emit_progress("Loading selected survey XML...")
+            t0_load = _checkpoint_start("XML_LOAD_START", selected_file=target,
+                                        selected_file_size_bytes=selected_size)
+            with zf.open(target_info, "r") as fh:
+                xml_text = fh.read().decode("utf-8", errors="replace")
 
     except zipfile.BadZipFile:
         raise ValueError("File appears to be corrupted or is not a valid zip archive.")
@@ -643,10 +938,9 @@ def _load_confirmit_zip(file_path: str) -> list:
             raise ValueError("Zip file is password-protected — export without a password.")
         raise ValueError(f"Could not open zip: {exc}") from exc
 
-    load_elapsed = time.time() - t0_load
     mem_after = _mem_mb()
-    log.info("[TIMING] XML_FILE_LOAD_COMPLETE: %.2fs xml_text_len=%d chars mem=%.1f MB (delta=+%.1f MB)",
-             load_elapsed, len(xml_text), mem_after, mem_after - mem_before)
+    _checkpoint_end("XML_LOAD_END", t0_load, xml_text_chars=len(xml_text),
+                    mem_mb=f"{mem_after:.1f}", mem_delta_mb=f"{mem_after - mem_before:.1f}")
 
     return parse_confirmit_xml(xml_text)
 
@@ -673,8 +967,9 @@ def parse_confirmit_xml(xml_text: str) -> list:
 
     t0_total = time.time()
     mem_before_parse = _mem_mb()
-    log.info("[TIMING] XML_PARSE_START: xml_text_len=%d chars mem=%.1f MB",
-             len(xml_text), mem_before_parse)
+    t0_parse = _checkpoint_start("XML_PARSE_START", xml_text_chars=len(xml_text),
+                                 mem_mb=f"{mem_before_parse:.1f}")
+    _emit_progress("Parsing XML tree...")
 
     # [TIMING] ET.fromstring parse
     t0_et = time.time()
@@ -683,7 +978,13 @@ def parse_confirmit_xml(xml_text: str) -> list:
     except ET.ParseError as exc:
         log.warning("parse_confirmit_xml: XML parse error — %s", exc)
         return []
+    node_count = sum(1 for _ in root.iter())
+    _parse_metadata["node_count"] = node_count
     log.info("[TIMING] XML_PARSE_COMPLETE: ET.fromstring took %.2fs", time.time() - t0_et)
+    _checkpoint_end("XML_PARSE_END", t0_parse, nodes_parsed=node_count)
+    if _deadline_exceeded():
+        _mark_timeout("XML_PARSE_END")
+        return []
 
     # ── Modern Confirmit Project format ─────────────────────────────────────
     if _local_tag(root) == "project":
@@ -706,10 +1007,13 @@ def parse_confirmit_xml(xml_text: str) -> list:
         return visible
 
     # ── Classic format: <Variables><Variable> ───────────────────────────────
-    t0_var = time.time()
-    log.info("[TIMING] VARIABLE_EXTRACTION_START")
+    _emit_progress("Extracting variables...")
+    t0_var = _checkpoint_start("VARIABLE_EXTRACTION_START")
     variables_el = None
     for el in root.iter():
+        if _deadline_exceeded():
+            _mark_timeout("VARIABLE_EXTRACTION")
+            return []
         if _local_tag(el) == "variables":
             variables_el = el
             break
@@ -719,8 +1023,7 @@ def parse_confirmit_xml(xml_text: str) -> list:
         return []
 
     var_elements = [el for el in variables_el if _local_tag(el) == "variable"]
-    log.info("[TIMING] VARIABLE_EXTRACTION_COMPLETE: %.2fs found %d <Variable> elements",
-             time.time() - t0_var, len(var_elements))
+    _checkpoint_end("VARIABLE_EXTRACTION_END", t0_var, variables_extracted=len(var_elements))
 
     if not var_elements:
         log.warning("parse_confirmit_xml: no <Variable> children found")
@@ -729,10 +1032,17 @@ def parse_confirmit_xml(xml_text: str) -> list:
     results   = []
     llm_count = 0
 
-    t0_questions = time.time()
-    log.info("[TIMING] QUESTION_EXTRACTION_START: %d variables", len(var_elements))
+    _emit_progress("Extracting questions...")
+    t0_questions = _checkpoint_start("QUESTION_EXTRACTION_START", variables=len(var_elements))
+    t0_options_total = _checkpoint_start("OPTION_EXTRACTION_START", variables=len(var_elements))
+    t0_routing_total = _checkpoint_start("ROUTING_EXTRACTION_START", variables=len(var_elements))
+    t0_term_total = _checkpoint_start("TERMINATION_EXTRACTION_START", variables=len(var_elements))
+    option_count = 0
 
     for var_el in var_elements:
+        if _deadline_exceeded():
+            _mark_timeout("QUESTION_EXTRACTION")
+            break
         qid      = var_el.get("name", f"VAR{len(results) + 1}")
         raw_type = var_el.get("type", "").lower()
         q_type   = TYPE_MAP_CONFIRMIT.get(raw_type, "UNKNOWN")
@@ -747,24 +1057,29 @@ def parse_confirmit_xml(xml_text: str) -> list:
                     code     = ans_el.get("code", None)
                     opt_text = _confirmit_get_text(ans_el)
                     options.append(make_option(code, opt_text))
+        option_count += len(options)
         opts_elapsed = time.time() - t0_opts
         if opts_elapsed > 1.0:
             log.info("[TIMING] OPTION_EXTRACTION_SLOW: QID=%s %.2fs %d options", qid, opts_elapsed, len(options))
 
-        raw_block = "# Confirmit Variable\n" + ET.tostring(var_el, encoding="unicode")
-
-        q = make_question(qid, text, q_type, options)
+        routing, termination = _extract_logic_text(var_el)
+        q = make_question(qid, text, q_type, options, routing, termination)
         triggers = _check_fallback_triggers(q)
 
         if triggers:
-            llm_count += 1
-            log.info("parse_confirmit_xml: LLM fallback QID=%s fields=%s", qid, triggers)
-            q = _llm_enrich(qid, raw_block, q, triggers)
+            raw_block = ""
+            if _llm_allowed():
+                raw_block = "# Confirmit Variable\n" + ET.tostring(var_el, encoding="unicode")
+            q, used_llm = _maybe_llm_enrich("parse_confirmit_xml", qid, raw_block, q, triggers)
+            if used_llm:
+                llm_count += 1
 
         results.append(q)
 
-    log.info("[TIMING] QUESTION_EXTRACTION_COMPLETE: %.2fs extracted %d questions",
-             time.time() - t0_questions, len(results))
+    _checkpoint_end("OPTION_EXTRACTION_END", t0_options_total, options_extracted=option_count)
+    _checkpoint_end("ROUTING_EXTRACTION_END", t0_questions, routing_records=0)
+    _checkpoint_end("TERMINATION_EXTRACTION_END", t0_questions, termination_records=0)
+    _checkpoint_end("QUESTION_EXTRACTION_END", t0_questions, questions_extracted=len(results))
     total_elapsed = time.time() - t0_total
     log.info(
         "[TIMING] PARSE_CONFIRMIT_XML_COMPLETE: total=%.2fs llm_calls=%d llm_total=%.2fs",
@@ -793,7 +1108,13 @@ def _parse_confirmit_project_xml(root) -> tuple:
     """
     t0_project = time.time()
     mem_before = _mem_mb()
-    log.info("[TIMING] QUESTION_EXTRACTION_START (project format) mem=%.1f MB", mem_before)
+    _emit_progress("Building XML model...")
+    t0_question_total = _checkpoint_start("QUESTION_EXTRACTION_START", format="confirmit_project",
+                                          mem_mb=f"{mem_before:.1f}")
+    t0_option_total = _checkpoint_start("OPTION_EXTRACTION_START", format="confirmit_project")
+    t0_routing_total = _checkpoint_start("ROUTING_EXTRACTION_START", format="confirmit_project")
+    t0_variable_total = _checkpoint_start("VARIABLE_EXTRACTION_START", format="confirmit_project")
+    t0_termination_total = _checkpoint_start("TERMINATION_EXTRACTION_START", format="confirmit_project")
 
     # ── FIX 1 & 2: Build parent map and Grid3D inheritance caches ────────────
     # parent_map lets us walk from any element up to a Grid3D ancestor.
@@ -805,12 +1126,21 @@ def _parse_confirmit_project_xml(root) -> tuple:
     #   Used as a fallback when a Grid3D sub-question has empty FormTexts.
 
     t0_prep = time.time()
-    parent_map: dict = {child: parent for parent in root.iter() for child in parent}
+    parent_map: dict = {}
+    for parent in root.iter():
+        if _deadline_exceeded():
+            _mark_timeout("PARENT_MAP")
+            break
+        for child in parent:
+            parent_map[child] = parent
 
     grid3d_options_cache: dict = {}
     grid3d_text_cache: dict    = {}
 
     for el in root.iter():
+        if _deadline_exceeded():
+            _mark_timeout("GRID3D_CACHE")
+            break
         if el.tag.split('}')[-1] != 'Grid3D':
             continue
         eid = id(el)
@@ -856,8 +1186,14 @@ def _parse_confirmit_project_xml(root) -> tuple:
 
     # ── Candidate element collection ─────────────────────────────────────────
     t0_iter = time.time()
-    all_candidates = [(el, el.tag.split('}')[-1]) for el in root.iter()
-                      if el.tag.split('}')[-1] in _CONFIRMIT_PROJECT_Q_TAGS]
+    all_candidates = []
+    for el in root.iter():
+        if _deadline_exceeded():
+            _mark_timeout("CANDIDATE_COLLECTION")
+            break
+        tag = el.tag.split('}')[-1]
+        if tag in _CONFIRMIT_PROJECT_Q_TAGS:
+            all_candidates.append((el, tag))
     log.info("[TIMING] TREE_ITER_COMPLETE: %.2fs found %d candidate question elements",
              time.time() - t0_iter, len(all_candidates))
 
@@ -876,8 +1212,12 @@ def _parse_confirmit_project_xml(root) -> tuple:
     # Collect questions needing LLM; enriched concurrently after the main loop.
     # Each entry: (list_index, qid, raw_block, q, triggers)
     pending_llm: list = []
+    deep_term_evidence = _extract_deep_termination_evidence(root)
 
     for el, tag in all_candidates:
+        if _deadline_exceeded():
+            _mark_timeout("QUESTION_EXTRACTION")
+            break
         # QID from <Name> child element text
         name_el = el.find('Name')
         if name_el is None or not (name_el.text or '').strip():
@@ -957,6 +1297,20 @@ def _parse_confirmit_project_xml(root) -> tuple:
                 ]
                 if exprs:
                     routing = '; '.join(exprs)
+        logic_routing, termination = _extract_logic_text(el)
+        if not routing and logic_routing:
+            routing = logic_routing
+        _deep_term = deep_term_evidence.get(_normalize_qid(qid), [])
+        if _deep_term:
+            _deep_bits = [
+                (r.get('xml_condition') or r.get('evidence_text') or '')
+                for r in _deep_term
+                if r.get('xml_condition') or r.get('evidence_text')
+            ]
+            _deep_joined = '; '.join(dict.fromkeys(_deep_bits))[:1800]
+            termination = '; '.join(x for x in [termination, _deep_joined] if x)[:1800] or None
+            if not routing and _deep_joined:
+                routing = _deep_joined
         t_routing_total += time.time() - t0_routing
 
         # ── FIX 2: inherit text from Grid3D parent when own text is empty ────────
@@ -969,29 +1323,37 @@ def _parse_confirmit_project_xml(root) -> tuple:
                     inherited_text += 1
                     log.info("[TIMING] TEXT_INHERITED: QID=%s from Grid3D parent", qid)
 
-        # [TIMING] ET.tostring serialisation (used as LLM raw_block input)
-        t0_tostring = time.time()
-        raw_block = f"# Confirmit Project XML: {tag}\n" + ET.tostring(el, encoding='unicode')
-        tostring_elapsed = time.time() - t0_tostring
-        t_tostring_total += tostring_elapsed
-        if tostring_elapsed > 0.5:
-            log.info("[TIMING] TOSTRING_SLOW: QID=%s %.2fs raw_block_len=%d",
-                     qid, tostring_elapsed, len(raw_block))
-
         # Track Loop elements separately
         if tag_low == 'loop':
             loop_count += 1
             log.info("[TIMING] LOOP_EXTRACTION: QID=%s routing=%s options=%d",
                      qid, routing[:60] if routing else None, len(options))
 
-        q        = make_question(qid, text, q_type, options, routing)
+        q        = make_question(qid, text, q_type, options, routing, termination)
+        if _deep_term:
+            q['termination_evidence'] = _deep_term
+            q['termination_source_node'] = _deep_term[0].get('xml_source_node', '')
+            q['termination_confidence'] = max(int(r.get('confidence') or 0) for r in _deep_term)
         triggers = _check_fallback_triggers(q)
 
         if triggers:
-            # ── FIX 3: defer LLM calls; run them concurrently after this loop ──
-            log.info("[TIMING] AI_FALLBACK_QUEUED: QID=%s tag=%s triggers=%s text_len=%d options=%d",
-                     qid, tag, triggers, len(text), len(options))
-            pending_llm.append((len(visible), qid, raw_block, q, triggers))
+            if _llm_allowed():
+                # Serialize only when LLM fallback is explicitly enabled.
+                t0_tostring = time.time()
+                raw_block = f"# Confirmit Project XML: {tag}\n" + ET.tostring(el, encoding='unicode')
+                tostring_elapsed = time.time() - t0_tostring
+                t_tostring_total += tostring_elapsed
+                if tostring_elapsed > 0.5:
+                    log.info("[TIMING] TOSTRING_SLOW: QID=%s %.2fs raw_block_len=%d",
+                             qid, tostring_elapsed, len(raw_block))
+                log.info("[TIMING] AI_FALLBACK_QUEUED: QID=%s tag=%s triggers=%s text_len=%d options=%d",
+                         qid, tag, triggers, len(text), len(options))
+                pending_llm.append((len(visible), qid, raw_block, q, triggers))
+            else:
+                reason = "timeout" if _deadline_exceeded() else "disabled"
+                _parse_metadata["llm_fallback_skipped"] = _parse_metadata.get("llm_fallback_skipped", 0) + 1
+                log.info("[TIMING] AI_FALLBACK_SKIPPED_XML_PARSER: parser=_parse_confirmit_project_xml "
+                         "QID=%s reason=%s triggers=%s", qid, reason, triggers)
 
         visible.append(q)
 
@@ -1008,20 +1370,32 @@ def _parse_confirmit_project_xml(root) -> tuple:
                 executor.submit(_llm_enrich, qid, raw_block, q, triggers): (idx, qid)
                 for idx, qid, raw_block, q, triggers in pending_llm
             }
-            for future in as_completed(future_to_idx):
-                idx, qid = future_to_idx[future]
-                try:
-                    visible[idx] = future.result()
-                except Exception as exc:
-                    log.warning("[TIMING] CONCURRENT_LLM_ERROR: QID=%s %s", qid, exc)
+            try:
+                for future in as_completed(future_to_idx, timeout=max(_remaining_time(1.0), 0.1)):
+                    idx, qid = future_to_idx[future]
+                    try:
+                        visible[idx] = future.result(timeout=max(_remaining_time(1.0), 0.1))
+                    except Exception as exc:
+                        log.warning("[TIMING] CONCURRENT_LLM_ERROR: QID=%s %s", qid, exc)
+            except Exception as exc:
+                _mark_timeout("CONCURRENT_LLM")
+                log.warning("[TIMING] CONCURRENT_LLM_TIMEOUT_OR_ERROR: %s", exc)
+                for future in future_to_idx:
+                    future.cancel()
 
         log.info("[TIMING] CONCURRENT_LLM_COMPLETE: %.2fs for %d calls (wall time)",
                  time.time() - t0_llm_phase, llm_count)
 
     total_project = time.time() - t0_project
     mem_after = _mem_mb()
-    log.info("[TIMING] QUESTION_EXTRACTION_COMPLETE: %.2fs extracted %d questions",
-             total_project, len(visible))
+    _checkpoint_end("OPTION_EXTRACTION_END", t0_option_total,
+                    options_extracted=sum(len(q.get("options") or []) for q in visible))
+    _checkpoint_end("ROUTING_EXTRACTION_END", t0_routing_total,
+                    routing_records=sum(1 for q in visible if q.get("routing")))
+    _checkpoint_end("VARIABLE_EXTRACTION_END", t0_variable_total,
+                    variables_extracted=len(visible), hidden_variables=hidden_ct)
+    _checkpoint_end("TERMINATION_EXTRACTION_END", t0_termination_total, termination_records=0)
+    _checkpoint_end("QUESTION_EXTRACTION_END", t0_question_total, questions_extracted=len(visible))
     log.info(
         "[TIMING] PROJECT_PARSE_BREAKDOWN: total=%.2fs "
         "prep=%.2fs text=%.2fs options=%.2fs routing=%.2fs tostring=%.2fs "
@@ -1077,17 +1451,32 @@ def parse_decipher_xml(xml_text: str) -> list:
     <term> elements are attached to the nearest preceding question as termination.
     Questions inside <block> with cond= get is_matrix_group=True.
     """
+    _emit_progress("Parsing XML tree...")
+    t0_parse = _checkpoint_start("XML_PARSE_START", xml_text_chars=len(xml_text))
     try:
         root = ET.fromstring(_strip_xml_decl(xml_text))
     except ET.ParseError as exc:
         log.warning("parse_decipher_xml: XML parse error — %s", exc)
         return []
+    node_count = sum(1 for _ in root.iter())
+    _parse_metadata["node_count"] = node_count
+    _checkpoint_end("XML_PARSE_END", t0_parse, nodes_parsed=node_count)
 
     results  = []
     llm_count = 0
     last_q   = None   # mutable dict ref for termination attachment
+    t0_questions = _checkpoint_start("QUESTION_EXTRACTION_START", format="decipher")
+    t0_options = _checkpoint_start("OPTION_EXTRACTION_START", format="decipher")
+    t0_routing = _checkpoint_start("ROUTING_EXTRACTION_START", format="decipher")
+    t0_vars = _checkpoint_start("VARIABLE_EXTRACTION_START", format="decipher")
+    t0_terms = _checkpoint_start("TERMINATION_EXTRACTION_START", format="decipher")
+    option_count = 0
+    term_count = 0
 
     for el, in_block in _iter_decipher_questions(root):
+        if _deadline_exceeded():
+            _mark_timeout("DECIPHER_QUESTION_EXTRACTION")
+            break
         tag = _local_tag(el)
 
         # ── <term> — attach to preceding question ───────────────────────────
@@ -1098,6 +1487,7 @@ def parse_decipher_xml(xml_text: str) -> list:
                     last_q["termination"] += f"; {cond}"
                 else:
                     last_q["termination"] = cond
+                term_count += 1
             continue
 
         # ── question element ────────────────────────────────────────────────
@@ -1114,22 +1504,31 @@ def parse_decipher_xml(xml_text: str) -> list:
             opt_text  = (row.text or "").strip()
             exclusive = row.get("exclusive", "0") == "1"
             options.append(make_option(code, opt_text, "ne" if exclusive else None))
+        option_count += len(options)
 
         routing = cond or None
-
-        raw_block = f"# Decipher XML element: {tag}\n" + ET.tostring(el, encoding="unicode")
 
         q = make_question(qid, text, q_type, options, routing,
                           is_matrix_group=in_block)
         triggers = _check_fallback_triggers(q)
 
         if triggers:
-            llm_count += 1
-            log.info("parse_decipher_xml: LLM fallback QID=%s fields=%s", qid, triggers)
-            q = _llm_enrich(qid, raw_block, q, triggers)
+            raw_block = ""
+            if _llm_allowed():
+                raw_block = f"# Decipher XML element: {tag}\n" + ET.tostring(el, encoding="unicode")
+            q, used_llm = _maybe_llm_enrich("parse_decipher_xml", qid, raw_block, q, triggers)
+            if used_llm:
+                llm_count += 1
 
         results.append(q)
         last_q = q
+
+    _checkpoint_end("OPTION_EXTRACTION_END", t0_options, options_extracted=option_count)
+    _checkpoint_end("ROUTING_EXTRACTION_END", t0_routing,
+                    routing_records=sum(1 for q in results if q.get("routing")))
+    _checkpoint_end("VARIABLE_EXTRACTION_END", t0_vars, variables_extracted=len(results))
+    _checkpoint_end("TERMINATION_EXTRACTION_END", t0_terms, termination_records=term_count)
+    _checkpoint_end("QUESTION_EXTRACTION_END", t0_questions, questions_extracted=len(results))
 
     log.info(
         "parse_decipher_xml: Parsed %d questions: %d via code, %d via LLM fallback",
@@ -1147,11 +1546,13 @@ def parse_qualtrics_qsf(qsf_text: str) -> list:
     Type determined from (QuestionType, Selector) pair.
     DisplayLogic flattened to a routing string; complex → LLM fallback.
     """
+    t0_parse = _checkpoint_start("XML_PARSE_START", qsf_chars=len(qsf_text), format="qualtrics_qsf")
     try:
         data = json.loads(qsf_text)
     except json.JSONDecodeError as exc:
         log.warning("parse_qualtrics_qsf: JSON parse error — %s", exc)
         return []
+    _checkpoint_end("XML_PARSE_END", t0_parse, nodes_parsed=len(data.get("SurveyElements", [])))
 
     elements   = data.get("SurveyElements", [])
     sq_payloads = [
@@ -1165,8 +1566,17 @@ def parse_qualtrics_qsf(qsf_text: str) -> list:
 
     results   = []
     llm_count = 0
+    t0_questions = _checkpoint_start("QUESTION_EXTRACTION_START", format="qualtrics_qsf")
+    t0_options = _checkpoint_start("OPTION_EXTRACTION_START", format="qualtrics_qsf")
+    t0_routing = _checkpoint_start("ROUTING_EXTRACTION_START", format="qualtrics_qsf")
+    t0_vars = _checkpoint_start("VARIABLE_EXTRACTION_START", format="qualtrics_qsf")
+    t0_terms = _checkpoint_start("TERMINATION_EXTRACTION_START", format="qualtrics_qsf")
+    option_count = 0
 
     for payload in sq_payloads:
+        if _deadline_exceeded():
+            _mark_timeout("QUALTRICS_QUESTION_EXTRACTION")
+            break
         qid = payload.get("QuestionID", f"QID{len(results) + 1}")
 
         # Strip HTML tags from question text
@@ -1190,22 +1600,31 @@ def parse_qualtrics_qsf(qsf_text: str) -> list:
         for code, choice in sorted(raw_choices.items(), key=lambda x: x[0]):
             opt_text = choice.get("Display", "") if isinstance(choice, dict) else str(choice)
             options.append(make_option(code, opt_text))
+        option_count += len(options)
 
         # Routing from DisplayLogic
         display_logic = payload.get("DisplayLogic")
         routing       = _qualtrics_logic_to_str(display_logic) if display_logic else None
 
-        raw_block = "# Qualtrics SQ element\n" + json.dumps(payload, ensure_ascii=False, indent=2)
-
         q = make_question(qid, text, q_type, options, routing)
         triggers = _check_fallback_triggers(q)
 
         if triggers:
-            llm_count += 1
-            log.info("parse_qualtrics_qsf: LLM fallback QID=%s fields=%s", qid, triggers)
-            q = _llm_enrich(qid, raw_block, q, triggers)
+            raw_block = ""
+            if _llm_allowed():
+                raw_block = "# Qualtrics SQ element\n" + json.dumps(payload, ensure_ascii=False, indent=2)
+            q, used_llm = _maybe_llm_enrich("parse_qualtrics_qsf", qid, raw_block, q, triggers)
+            if used_llm:
+                llm_count += 1
 
         results.append(q)
+
+    _checkpoint_end("OPTION_EXTRACTION_END", t0_options, options_extracted=option_count)
+    _checkpoint_end("ROUTING_EXTRACTION_END", t0_routing,
+                    routing_records=sum(1 for q in results if q.get("routing")))
+    _checkpoint_end("VARIABLE_EXTRACTION_END", t0_vars, variables_extracted=len(results))
+    _checkpoint_end("TERMINATION_EXTRACTION_END", t0_terms, termination_records=0)
+    _checkpoint_end("QUESTION_EXTRACTION_END", t0_questions, questions_extracted=len(results))
 
     log.info(
         "parse_qualtrics_qsf: Parsed %d questions: %d via code, %d via LLM fallback",
@@ -1243,16 +1662,24 @@ def parse_generic_xml(xml_text: str) -> list:
     """
     log.warning("parse_generic_xml: unknown XML format — attempting best-effort extraction")
 
+    t0_parse = _checkpoint_start("XML_PARSE_START", xml_text_chars=len(xml_text), format="generic")
     try:
         root = ET.fromstring(xml_text.lstrip("﻿"))
     except ET.ParseError as exc:
         log.warning("parse_generic_xml: XML parse error — %s", exc)
         return []
+    node_count = sum(1 for _ in root.iter())
+    _parse_metadata["node_count"] = node_count
+    _checkpoint_end("XML_PARSE_END", t0_parse, nodes_parsed=node_count)
 
     candidates = [el for el in root.iter() if _local_tag(el) in _GENERIC_Q_TAGS]
 
     if not candidates:
         log.warning("parse_generic_xml: no known question tags — passing full XML to LLM")
+        _parse_metadata["llm_fallback_skipped"] = _parse_metadata.get("llm_fallback_skipped", 0) + 1
+        if not _llm_allowed():
+            log.info("[TIMING] AI_FALLBACK_SKIPPED_XML_PARSER: parser=parse_generic_xml reason=disabled full_xml=1")
+            return []
         from normalizer import normalize_chunk
         full_text = "# Unknown survey XML\n" + ET.tostring(root, encoding="unicode")
         results = normalize_chunk(full_text, _get_llm_model())
@@ -1263,8 +1690,16 @@ def parse_generic_xml(xml_text: str) -> list:
 
     results   = []
     llm_count = 0
+    t0_questions = _checkpoint_start("QUESTION_EXTRACTION_START", format="generic")
+    t0_options = _checkpoint_start("OPTION_EXTRACTION_START", format="generic")
+    t0_routing = _checkpoint_start("ROUTING_EXTRACTION_START", format="generic")
+    t0_vars = _checkpoint_start("VARIABLE_EXTRACTION_START", format="generic")
+    t0_terms = _checkpoint_start("TERMINATION_EXTRACTION_START", format="generic")
 
     for el in candidates:
+        if _deadline_exceeded():
+            _mark_timeout("GENERIC_QUESTION_EXTRACTION")
+            break
         tag = _local_tag(el)
         qid = (
             el.get("label") or el.get("name") or
@@ -1277,15 +1712,23 @@ def parse_generic_xml(xml_text: str) -> list:
                 text_parts.append(child.text.strip())
         text = " ".join(text_parts[:3])
 
-        raw_block = f"# Unknown XML element: {tag}\n" + ET.tostring(el, encoding="unicode")
-
         q = make_question(qid, text, "UNKNOWN")
         # Type is always unknown in generic mode; always call LLM
         triggers = ["type", "options"] if not text else ["type", "options", "routing"]
-        llm_count += 1
-        log.info("parse_generic_xml: LLM fallback QID=%s fields=%s", qid, triggers)
-        q = _llm_enrich(qid, raw_block, q, triggers)
+        raw_block = ""
+        if _llm_allowed():
+            raw_block = f"# Unknown XML element: {tag}\n" + ET.tostring(el, encoding="unicode")
+        q, used_llm = _maybe_llm_enrich("parse_generic_xml", qid, raw_block, q, triggers)
+        if used_llm:
+            llm_count += 1
         results.append(q)
+
+    _checkpoint_end("OPTION_EXTRACTION_END", t0_options, options_extracted=0)
+    _checkpoint_end("ROUTING_EXTRACTION_END", t0_routing,
+                    routing_records=sum(1 for q in results if q.get("routing")))
+    _checkpoint_end("VARIABLE_EXTRACTION_END", t0_vars, variables_extracted=len(results))
+    _checkpoint_end("TERMINATION_EXTRACTION_END", t0_terms, termination_records=0)
+    _checkpoint_end("QUESTION_EXTRACTION_END", t0_questions, questions_extracted=len(results))
 
     log.warning(
         "parse_generic_xml: Parsed %d questions (low confidence): %d via code, %d via LLM",

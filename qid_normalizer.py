@@ -31,6 +31,14 @@ verify_extraction(qid, text) → (bool, str)
 
 Public API (normalisation)
 --------------------------
+normalize_qid(qid) -> str
+    Uppercase canonical QID used for DOC/XML/live matching. Removes dots,
+    spaces, underscores and hyphens, normalises bis casing, and keeps
+    alphanumeric characters.
+
+qid_alias_candidates(qid) -> list[str]
+    Ordered exact/normalised punctuation-stripped aliases used for matching.
+
 INTERNAL_NORMS : frozenset[str]
     Alphanumeric lower-case norms of Confirmit/Forsta framework variables.
 
@@ -125,7 +133,7 @@ FRAMEWORK_PAGE_PAT: re.Pattern = re.compile(
 )
 
 _VALID_QID_PAT: re.Pattern = re.compile(
-    r'^[A-Za-z]{1,8}\d+[a-zA-Z]*(?:_\d+|\.\d+)?$'
+    r'^[A-Za-z]{1,8}\d+[a-zA-Z]*$'
 )
 
 # ---------------------------------------------------------------------------
@@ -136,6 +144,41 @@ def _norm(s: str) -> str:
     return re.sub(r'[^a-z0-9]', '', s.lower())
 
 
+def normalize_qid(qid: str) -> str:
+    """Return the canonical QID form for source-to-source matching.
+
+    Examples:
+        S4.A -> S4A
+        D4.bis -> D4BIS
+        q20_bis -> Q20BIS
+    """
+    raw = str(qid or '').strip().upper()
+    raw = re.sub(r'BIS$', 'BIS', raw, flags=re.I)
+    return re.sub(r'[^A-Z0-9]', '', raw)
+
+
+def qid_alias_candidates(qid: str) -> list:
+    """Return ordered alias candidates for QID matching."""
+    raw = str(qid or '').strip()
+    if not raw:
+        return []
+    variants = [
+        raw,
+        normalize_qid(raw),
+        re.sub(r'[\s._-]+', '', raw),
+        raw.replace('.', ''),
+        re.sub(r'(?i)bis$', 'BIS', raw),
+    ]
+    out = []
+    seen = set()
+    for v in variants:
+        n = normalize_qid(v)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Filtering functions
 # ---------------------------------------------------------------------------
@@ -143,6 +186,7 @@ def is_valid_qid(candidate: str) -> bool:
     """Return True if candidate looks like a real survey QID, not a common word."""
     if not candidate:
         return False
+    candidate = normalize_qid(candidate)
     if len(candidate) > 15:
         return False
     if candidate.lower() in QID_STOP_WORDS:
@@ -216,11 +260,13 @@ def should_skip_qid(qid: str) -> bool:
     """
     if not qid:
         return True
-    if not is_valid_qid(qid):
+    raw_qid = str(qid or '').strip()
+    norm_qid = normalize_qid(raw_qid)
+    if not is_valid_qid(norm_qid):
         return True    # stop word, no digits, too long
-    if is_framework_page(qid):
+    if is_framework_page(raw_qid) or is_framework_page(norm_qid):
         return True    # Agreement, Invoice, Password, Article pages
-    if is_internal_id(qid):
+    if is_internal_id(raw_qid) or is_internal_id(norm_qid):
         return True    # SumOfRows, S99Date, Confirmit scripting vars
     return False
 

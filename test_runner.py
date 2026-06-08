@@ -38,6 +38,8 @@ import time
 from difflib import SequenceMatcher
 from typing import Optional
 
+from qid_normalizer import normalize_qid, qid_alias_candidates
+
 
 # ── Termination / thank-you page indicators (multilingual) ───────────────────
 _TERM_TEXT = re.compile(
@@ -281,7 +283,7 @@ def _find_question_container(
 
     Returns (locator, strategy_name) or (None, None).
     """
-    qid_upper = qid.upper()
+    qid_upper = normalize_qid(qid)
     qid_lower = qid.lower()
     body_len  = len(_body_text(page, 500))
 
@@ -292,7 +294,7 @@ def _find_question_container(
 
     # ── Strategies 1–4: attribute selectors ──────────────────────────────────
     for tpl in _Q_ATTR_SELS:
-        for variant in dict.fromkeys([qid, qid_upper, qid_lower]):
+        for variant in dict.fromkeys([qid, qid_upper, qid_lower] + qid_alias_candidates(qid)):
             sel = tpl.format(qid=variant)
             try:
                 loc = page.locator(sel)
@@ -505,7 +507,7 @@ def _build_presence_cache(
             for qid in qids:
                 if qid in cache:
                     continue
-                qid_upper = qid.upper()
+                qid_upper = normalize_qid(qid)
 
                 # Fast body-text check
                 if qid_upper in body_upper:
@@ -515,7 +517,7 @@ def _build_presence_cache(
                 # DOM attribute check (strategies 1–4 only; skip fuzzy for speed)
                 for tpl in _Q_ATTR_SELS:
                     found = False
-                    for variant in dict.fromkeys([qid, qid_upper, qid.lower()]):
+                    for variant in dict.fromkeys([qid, qid_upper, qid.lower()] + qid_alias_candidates(qid)):
                         sel = tpl.format(qid=variant)
                         try:
                             if page.locator(sel).count() > 0:
@@ -570,7 +572,7 @@ def _navigate_to_qid(
     Combines page-level navigation (TN click, Next-walk) with DOM container
     discovery (Phase 2 waterfall).
     """
-    qid_upper = qid.upper()
+    qid_upper = normalize_qid(qid)
 
     # Phase 5: log cache result upfront
     if presence_cache is not None and qid in presence_cache:
@@ -701,7 +703,7 @@ def _run_termination(
     action_type, action_val = _parse_action(tc.get("action", ""))
     qid = tc["qid"]
     diag: list = []
-    xml_text = (xml_text_map or {}).get(qid.upper(), "")
+    xml_text = (xml_text_map or {}).get(normalize_qid(qid), "")
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
@@ -713,7 +715,7 @@ def _run_termination(
 
         if not found:
             ss = _screenshot_on_fail(page, qid, ss_dir)
-            xml_known = bool(xml_qid_set and qid.upper() in xml_qid_set)
+            xml_known = bool(xml_qid_set and normalize_qid(qid) in xml_qid_set)
             return _locator_failure_result(tc, qid, xml_known, diag, ss, t0)
 
         action_ok, action_strat = _execute_action(
@@ -768,7 +770,7 @@ def _run_mandatory(
     t0  = time.time()
     qid = tc["qid"]
     diag: list = []
-    xml_text = (xml_text_map or {}).get(qid.upper(), "")
+    xml_text = (xml_text_map or {}).get(normalize_qid(qid), "")
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
@@ -780,7 +782,7 @@ def _run_mandatory(
 
         if not found:
             ss = _screenshot_on_fail(page, qid, ss_dir)
-            xml_known = bool(xml_qid_set and qid.upper() in xml_qid_set)
+            xml_known = bool(xml_qid_set and normalize_qid(qid) in xml_qid_set)
             return _locator_failure_result(tc, qid, xml_known, diag, ss, t0)
 
         res["locator_strategy"] = "navigated"
@@ -818,7 +820,7 @@ def _run_routing(
     action_type, action_val = _parse_action(tc.get("action", ""))
     qid = tc["qid"]
     diag: list = []
-    xml_text = (xml_text_map or {}).get(qid.upper(), "")
+    xml_text = (xml_text_map or {}).get(normalize_qid(qid), "")
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
@@ -830,7 +832,7 @@ def _run_routing(
 
         if not found:
             ss = _screenshot_on_fail(page, qid, ss_dir)
-            xml_known = bool(xml_qid_set and qid.upper() in xml_qid_set)
+            xml_known = bool(xml_qid_set and normalize_qid(qid) in xml_qid_set)
             return _locator_failure_result(tc, qid, xml_known, diag, ss, t0)
 
         action_ok, action_strat = _execute_action(
@@ -887,7 +889,7 @@ def _run_range(
     action_type, action_val = _parse_action(tc.get("action", ""))
     qid = tc["qid"]
     diag: list = []
-    xml_text = (xml_text_map or {}).get(qid.upper(), "")
+    xml_text = (xml_text_map or {}).get(normalize_qid(qid), "")
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
@@ -899,7 +901,7 @@ def _run_range(
 
         if not found:
             ss = _screenshot_on_fail(page, qid, ss_dir)
-            xml_known = bool(xml_qid_set and qid.upper() in xml_qid_set)
+            xml_known = bool(xml_qid_set and normalize_qid(qid) in xml_qid_set)
             return _locator_failure_result(tc, qid, xml_known, diag, ss, t0)
 
         res["locator_strategy"] = "navigated"
@@ -1023,7 +1025,7 @@ def run_playwright_tests(
         for xq in xml_questions:
             raw_qid = xq.get("qid") or xq.get("qid_normalized") or ""
             if raw_qid:
-                key = raw_qid.upper()
+                key = normalize_qid(raw_qid)
                 xml_text_map[key] = xq.get("text", "")
                 xml_qid_set.add(key)
 

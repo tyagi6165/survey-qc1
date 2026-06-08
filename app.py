@@ -39,6 +39,7 @@ from qid_normalizer import (
     verify_extraction, get_parent_qid,
     INTERNAL_NORMS, S99_DATE_PAT, FW_NORM_PAT,
     SCREENER_QIDS, build_strip_candidates,
+    normalize_qid, qid_alias_candidates,
 )
 try:
     from loop_detector import build_loop_map as _ld_build_loop_map, get_loop_skip_set as _ld_skip_set
@@ -1254,6 +1255,9 @@ def new_qc():
     _reports_used = user.get('reports_used', 0) if user else 0
     _reports_limit = UserDB.PLAN_LIMITS.get(plan, 3)
     _at_limit = not users_db.can_run_report(session['user_email'])
+    # Keep /new-qc simple for all users. Diagnostic/debug fields remain
+    # supported by backend request handling, but are not rendered in this UI.
+    _show_debug_options = False
 
     _msg_param = request.args.get('msg', '')
     _top_banner = ''
@@ -1337,6 +1341,187 @@ def new_qc():
 
     _ss_label = 'Optional' if is_pro else 'Pro+'
 
+    _adv_link_html = ''
+    if _show_debug_options:
+        _adv_link_html = (
+            '<span style="color:#DDE1E7">|</span>'
+            '<button type="button" class="adv-lnk" onclick="toggleAdv()">'
+            'Debug options <span id="advChev">&#9662;</span>'
+            '</button>'
+        )
+
+    _advanced_panel_html = ''
+    if _show_debug_options:
+        _advanced_panel_html = f'''
+    <!-- Debug/admin panel (hidden by default) -->
+    <div id="advPanel" style="display:none" class="adv-panel">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label class="adv-lbl">Country (screener)</label>
+          <input type="text" name="country" placeholder="e.g. United Kingdom"
+                 style="width:100%;padding:7px 10px;border:1px solid var(--border);
+                 border-radius:7px;font-size:12px;font-family:inherit;outline:none;
+                 box-sizing:border-box;background:white"
+                 onfocus="this.style.borderColor=\\'#C46A2B\\'"
+                 onblur="this.style.borderColor=\\'var(--border)\\'">
+        </div>
+        <div>
+          <label class="adv-lbl">Specific QIDs only</label>
+          <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12"
+                 style="width:100%;padding:7px 10px;border:1px solid var(--border);
+                 border-radius:7px;font-size:12px;font-family:inherit;outline:none;
+                 box-sizing:border-box;background:white"
+                 onfocus="this.style.borderColor=\\'#C46A2B\\'"
+                 onblur="this.style.borderColor=\\'var(--border)\\'">
+        </div>
+      </div>
+      <span class="adv-lbl">Checks to run</span>
+      <div class="chk-grid">{_chk_html}</div>
+      <label class="qc-chk" style="margin:2px 0 12px">
+        <input type="checkbox" name="diagnostic_evidence_mode" value="1" checked>
+        Diagnostic Evidence Mode
+      </label>
+      <span class="adv-lbl" style="margin-top:8px">
+        Data Export Schema <span class="fc-opt">Optional</span>
+      </span>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:7px;line-height:1.4">
+        Validates variable names, codes, and types against the spec doc.
+      </p>
+      <div class="dz dz-sm" id="exportZone"
+           onclick="document.getElementById('exportFileInput').click()"
+           ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
+           ondrop="dzDrop(event,this,'exportFileInput','exportFileDone')">
+        <i class="ti ti-table" style="font-size:18px;color:#9CA3AF"></i>
+        <p style="font-size:11px;color:#6B7280;margin-top:3px">
+          Drop <b>.csv</b> / <b>.txt</b> / <b>.xlsx</b> or
+          <span class="dz-browse" style="font-size:11px">browse</span>
+        </p>
+      </div>
+      <input type="file" name="export_schema_file" id="exportFileInput"
+             accept=".csv,.txt,.xlsx" style="display:none"
+             onchange="dzPick(this,'exportZone','exportFileDone');onExportFile(this)">
+      <div id="exportFileDone" class="dz-done" style="display:none"></div>
+      <textarea name="export_headers_text" id="exportHeadersText"
+        placeholder="Or paste headers: R0, R1, S1, S2, Q14_1, Q14_2..."
+        style="width:100%;height:52px;padding:7px 10px;border:1px solid var(--border);
+               margin-top:8px;border-radius:8px;font-size:11px;font-family:monospace;
+               resize:vertical;outline:none;box-sizing:border-box;
+               color:var(--text);line-height:1.5;background:white"
+        onfocus="this.style.borderColor=\\'#C46A2B\\'"
+        onblur="this.style.borderColor=\\'var(--border)\\'"></textarea>
+      <span class="adv-lbl" style="margin-top:12px">
+        Screenshots <span class="fc-opt">{_ss_label}</span>
+      </span>
+      {_ss_field}
+    </div>
+'''
+
+    _right_sidebar_html = f'''
+  <!-- ══ RIGHT — HELPER SIDEBAR ═══════════════════════════════════════ -->
+  <div>
+
+    <!-- Recent Reports -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">Recent Reports</span>
+        <a href="/reports" class="sb-view-all">View all &#8594;</a>
+      </div>
+      {_recent_rows}
+    </div>
+
+    <!-- Why SurveyQC -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">Why use SurveyQC?</span>
+      </div>
+      <ul class="sb-checklist">
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Standard QC: Doc + XML (no live URL needed)</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Advanced QC: Add live URL for full verification</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>32+ quality checks automated</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Smart issue detection &amp; evidence</li>
+        <li><i class="ti ti-circle-check sb-check-icon"></i>Downloadable Word report</li>
+      </ul>
+    </div>
+
+    <!-- Supported Platforms -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">Supported Platforms</span>
+      </div>
+      <div class="sb-plat-grid">
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#EBF5FF">
+            <i class="ti ti-chart-bar" style="color:#1D6FAE"></i>
+          </div>
+          <span class="sb-plat-name">Confirmit</span>
+        </div>
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#FFF4E6">
+            <i class="ti ti-analyze" style="color:#C46A2B"></i>
+          </div>
+          <span class="sb-plat-name">Decipher</span>
+        </div>
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#F0FDF4">
+            <i class="ti ti-sitemap" style="color:#16A34A"></i>
+          </div>
+          <span class="sb-plat-name">Forsta</span>
+        </div>
+        <div class="sb-plat">
+          <div class="sb-plat-icon" style="background:#FDF4FF">
+            <i class="ti ti-clipboard-list" style="color:#9333EA"></i>
+          </div>
+          <span class="sb-plat-name">Qualtrics</span>
+        </div>
+      </div>
+      <p class="sb-more">and more&#8230;</p>
+    </div>
+
+    <!-- Tips -->
+    <div class="sb-card">
+      <div class="sb-card-hdr">
+        <span class="sb-card-title">
+          <i class="ti ti-bulb" style="color:#F59E0B;margin-right:4px"></i>Tips
+        </span>
+      </div>
+      <div class="sb-tips">
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          <b>Standard QC</b>: Doc + XML only — no live URL needed, 85-95% accuracy
+        </div>
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          <b>Advanced QC</b>: Add live survey URL to verify routing, piping &amp; mandatory
+        </div>
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          XML export must be from same survey version as the spec doc
+        </div>
+        <div class="sb-tip">
+          <span class="sb-tip-arr">&#8594;</span>
+          If using a live URL, make sure it is publicly accessible (no login)
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /helper sidebar col -->
+'''
+
+    _layout_class = 'nqc-layout'
+    _acc_style = '' if _show_debug_options else 'display:none'
+    _run_sub_style = '' if _show_debug_options else 'display:none'
+    _plat_pills_html = ''
+    if _show_debug_options:
+        _plat_pills_html = '''
+      <div class="plat-pills">
+        <button type="button" class="pp" onclick="setUrlHint('confirmit')">Confirmit</button>
+        <button type="button" class="pp" onclick="setUrlHint('decipher')">Decipher</button>
+        <button type="button" class="pp" onclick="setUrlHint('forsta')">Forsta</button>
+        <button type="button" class="pp" onclick="setUrlHint('qualtrics')">Qualtrics</button>
+        <button type="button" class="pp" onclick="setUrlHint('surveymonkey')">SurveyMonkey</button>
+      </div>
+'''
+
     page = SHARED_CSS + f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1349,8 +1534,9 @@ body.new-qc-page .nqc-wrap{{max-width:1100px;margin:0 auto;padding:0 0 48px;min-
 body.new-qc-page .nqc-banner{{border-radius:10px;padding:11px 16px;margin-bottom:18px;font-size:13px;line-height:1.5}}
 body.new-qc-page .nqc-banner-warn{{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E}}
 
-/* 2-col layout: form + fixed 300px sidebar */
-body.new-qc-page .nqc-layout{{display:grid;grid-template-columns:1fr 300px;gap:1.5rem;align-items:start;max-width:1100px}}
+/* Main layout */
+body.new-qc-page .nqc-layout{{display:grid;gap:1.5rem;align-items:start;max-width:1100px}}
+body.new-qc-page .nqc-layout{{grid-template-columns:1fr 300px}}
 
 /* Form cards */
 body.new-qc-page .fc{{background:#fff;border:0.5px solid var(--border);border-radius:14px;padding:18px 20px;
@@ -1512,7 +1698,7 @@ body.new-qc-page .sb-tip-arr{{color:var(--accent);flex-shrink:0;font-weight:700;
 {_top_banner}
 <div class="nqc-wrap">
 <form action="/run-qc" method="POST" enctype="multipart/form-data" id="qcForm" data-at-limit="{'1' if _at_limit else '0'}">
-<div class="nqc-layout">
+<div class="{_layout_class}">
 
   <!-- ══ LEFT — FORM ════════════════════════════════════════════════ -->
   <div>
@@ -1587,17 +1773,11 @@ body.new-qc-page .sb-tip-arr{{color:var(--accent);flex-shrink:0;font-weight:700;
                placeholder="https://survey.confirmit.com/... (optional)"
                oninput="detectPlat(this.value);updateMeter()">
       </div>
-      <div class="plat-pills">
-        <button type="button" class="pp" onclick="setUrlHint('confirmit')">Confirmit</button>
-        <button type="button" class="pp" onclick="setUrlHint('decipher')">Decipher</button>
-        <button type="button" class="pp" onclick="setUrlHint('forsta')">Forsta</button>
-        <button type="button" class="pp" onclick="setUrlHint('qualtrics')">Qualtrics</button>
-        <button type="button" class="pp" onclick="setUrlHint('surveymonkey')">SurveyMonkey</button>
-      </div>
+      {_plat_pills_html}
     </div>
 
     <!-- QC Mode meter -->
-    <div class="acc-strip">
+    <div class="acc-strip" style="{_acc_style}">
       <div class="acc-bar">
         <div class="acc-fill" id="accFill" style="width:0%;background:#E5E7EB"></div>
       </div>
@@ -1609,162 +1789,16 @@ body.new-qc-page .sb-tip-arr{{color:var(--accent);flex-shrink:0;font-weight:700;
       <i class="ti ti-player-play" style="font-size:16px"></i>
       <span id="runBtnText">&#9654; Run QC &#8212; Upload files above</span>
     </button>
-    <div class="run-sub">
+    <div class="run-sub" style="{_run_sub_style}">
       <span id="runBtnSub">Upload Spec Document + Survey Export to run</span>
-      <span style="color:#DDE1E7">|</span>
-      <button type="button" class="adv-lnk" onclick="toggleAdv()">
-        Advanced options <span id="advChev">&#9662;</span>
-      </button>
+      {_adv_link_html}
     </div>
 
-    <!-- Advanced panel (hidden by default) -->
-    <div id="advPanel" style="display:none" class="adv-panel">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-        <div>
-          <label class="adv-lbl">Country (screener)</label>
-          <input type="text" name="country" placeholder="e.g. United Kingdom"
-                 style="width:100%;padding:7px 10px;border:1px solid var(--border);
-                 border-radius:7px;font-size:12px;font-family:inherit;outline:none;
-                 box-sizing:border-box;background:white"
-                 onfocus="this.style.borderColor=\'#C46A2B\'"
-                 onblur="this.style.borderColor=\'var(--border)\'">
-        </div>
-        <div>
-          <label class="adv-lbl">Specific QIDs only</label>
-          <input type="text" name="specific_questions" placeholder="e.g. Q1, Q3, Q7-Q12"
-                 style="width:100%;padding:7px 10px;border:1px solid var(--border);
-                 border-radius:7px;font-size:12px;font-family:inherit;outline:none;
-                 box-sizing:border-box;background:white"
-                 onfocus="this.style.borderColor=\'#C46A2B\'"
-                 onblur="this.style.borderColor=\'var(--border)\'">
-        </div>
-      </div>
-      <span class="adv-lbl">Checks to run</span>
-      <div class="chk-grid">{_chk_html}</div>
-      <span class="adv-lbl" style="margin-top:8px">
-        Data Export Schema <span class="fc-opt">Optional</span>
-      </span>
-      <p style="font-size:11px;color:var(--text3);margin-bottom:7px;line-height:1.4">
-        Validates variable names, codes, and types against the spec doc.
-      </p>
-      <div class="dz dz-sm" id="exportZone"
-           onclick="document.getElementById('exportFileInput').click()"
-           ondragover="dzOver(event,this)" ondragleave="dzLeave(this)"
-           ondrop="dzDrop(event,this,'exportFileInput','exportFileDone')">
-        <i class="ti ti-table" style="font-size:18px;color:#9CA3AF"></i>
-        <p style="font-size:11px;color:#6B7280;margin-top:3px">
-          Drop <b>.csv</b> / <b>.txt</b> / <b>.xlsx</b> or
-          <span class="dz-browse" style="font-size:11px">browse</span>
-        </p>
-      </div>
-      <input type="file" name="export_schema_file" id="exportFileInput"
-             accept=".csv,.txt,.xlsx" style="display:none"
-             onchange="dzPick(this,'exportZone','exportFileDone');onExportFile(this)">
-      <div id="exportFileDone" class="dz-done" style="display:none"></div>
-      <textarea name="export_headers_text" id="exportHeadersText"
-        placeholder="Or paste headers: R0, R1, S1, S2, Q14_1, Q14_2..."
-        style="width:100%;height:52px;padding:7px 10px;border:1px solid var(--border);
-               margin-top:8px;border-radius:8px;font-size:11px;font-family:monospace;
-               resize:vertical;outline:none;box-sizing:border-box;
-               color:var(--text);line-height:1.5;background:white"
-        onfocus="this.style.borderColor=\'#C46A2B\'"
-        onblur="this.style.borderColor=\'var(--border)\'"></textarea>
-      <span class="adv-lbl" style="margin-top:12px">
-        Screenshots <span class="fc-opt">{_ss_label}</span>
-      </span>
-      {_ss_field}
-    </div>
+    {_advanced_panel_html}
 
   </div><!-- /left col -->
 
-  <!-- ══ RIGHT — SIDEBAR ═════════════════════════════════════════════ -->
-  <div>
-
-    <!-- Recent Reports -->
-    <div class="sb-card">
-      <div class="sb-card-hdr">
-        <span class="sb-card-title">Recent Reports</span>
-        <a href="/reports" class="sb-view-all">View all &#8594;</a>
-      </div>
-      {_recent_rows}
-    </div>
-
-    <!-- Why SurveyQC -->
-    <div class="sb-card">
-      <div class="sb-card-hdr">
-        <span class="sb-card-title">Why use SurveyQC?</span>
-      </div>
-      <ul class="sb-checklist">
-        <li><i class="ti ti-circle-check sb-check-icon"></i>Standard QC: Doc + XML (no live URL needed)</li>
-        <li><i class="ti ti-circle-check sb-check-icon"></i>Advanced QC: Add live URL for full verification</li>
-        <li><i class="ti ti-circle-check sb-check-icon"></i>32+ quality checks automated</li>
-        <li><i class="ti ti-circle-check sb-check-icon"></i>Smart issue detection &amp; evidence</li>
-        <li><i class="ti ti-circle-check sb-check-icon"></i>Downloadable Word report</li>
-      </ul>
-    </div>
-
-    <!-- Supported Platforms -->
-    <div class="sb-card">
-      <div class="sb-card-hdr">
-        <span class="sb-card-title">Supported Platforms</span>
-      </div>
-      <div class="sb-plat-grid">
-        <div class="sb-plat">
-          <div class="sb-plat-icon" style="background:#EBF5FF">
-            <i class="ti ti-chart-bar" style="color:#1D6FAE"></i>
-          </div>
-          <span class="sb-plat-name">Confirmit</span>
-        </div>
-        <div class="sb-plat">
-          <div class="sb-plat-icon" style="background:#FFF4E6">
-            <i class="ti ti-analyze" style="color:#C46A2B"></i>
-          </div>
-          <span class="sb-plat-name">Decipher</span>
-        </div>
-        <div class="sb-plat">
-          <div class="sb-plat-icon" style="background:#F0FDF4">
-            <i class="ti ti-sitemap" style="color:#16A34A"></i>
-          </div>
-          <span class="sb-plat-name">Forsta</span>
-        </div>
-        <div class="sb-plat">
-          <div class="sb-plat-icon" style="background:#FDF4FF">
-            <i class="ti ti-clipboard-list" style="color:#9333EA"></i>
-          </div>
-          <span class="sb-plat-name">Qualtrics</span>
-        </div>
-      </div>
-      <p class="sb-more">and more&#8230;</p>
-    </div>
-
-    <!-- Tips -->
-    <div class="sb-card">
-      <div class="sb-card-hdr">
-        <span class="sb-card-title">
-          <i class="ti ti-bulb" style="color:#F59E0B;margin-right:4px"></i>Tips
-        </span>
-      </div>
-      <div class="sb-tips">
-        <div class="sb-tip">
-          <span class="sb-tip-arr">&#8594;</span>
-          <b>Standard QC</b>: Doc + XML only — no live URL needed, 85-95% accuracy
-        </div>
-        <div class="sb-tip">
-          <span class="sb-tip-arr">&#8594;</span>
-          <b>Advanced QC</b>: Add live survey URL to verify routing, piping &amp; mandatory
-        </div>
-        <div class="sb-tip">
-          <span class="sb-tip-arr">&#8594;</span>
-          XML export must be from same survey version as the spec doc
-        </div>
-        <div class="sb-tip">
-          <span class="sb-tip-arr">&#8594;</span>
-          If using a live URL, make sure it is publicly accessible (no login)
-        </div>
-      </div>
-    </div>
-
-  </div><!-- /sidebar col -->
+  {_right_sidebar_html}
 
 </div><!-- /nqc-layout -->
 </form>
@@ -1877,7 +1911,9 @@ body.new-qc-page .sb-tip-arr{{color:var(--accent);flex-shrink:0;font-weight:700;
 @login_required
 def run_qc_submit():
     doc_file = request.files.get('doc')
-    survey_url = request.form.get('url', '').strip()
+    survey_url = _normalize_live_url(
+        request.form.get('survey_url') or request.form.get('url') or ''
+    )
 
     def _validation_error(msg):
         return render_template_string(SHARED_CSS + f"""
@@ -1898,8 +1934,9 @@ def run_qc_submit():
 
     if not doc_file or not doc_file.filename:
         return _validation_error("Please upload a .docx spec document.")
-    # URL is optional: absent → STANDARD QC (DOC+XML only), present → ADVANCED QC
+    # URL is optional: absent/invalid → STANDARD QC (DOC+XML only), valid → ADVANCED QC
     qc_mode = 'ADVANCED' if survey_url else 'STANDARD'
+    qc_mode_label = 'ADVANCED QC — DOC + XML + LIVE' if qc_mode == 'ADVANCED' else 'STANDARD QC — DOC + XML'
 
     # Plan-limit gate — checked before creating the job
     _email = session['user_email']
@@ -1957,6 +1994,8 @@ def run_qc_submit():
     elif export_text_field:
         export_schema_text = export_text_field
 
+    diagnostic_evidence_mode = request.form.get("diagnostic_evidence_mode") == "1"
+
     # Memory guard: evict oldest finished jobs from RAM when count > 50.
     # Records stay in SQLite; only the in-memory cache is trimmed.
     if len(jobs) >= 50:
@@ -1976,6 +2015,10 @@ def run_qc_submit():
         'doc_path': doc_path,
         'survey_url': survey_url,
         'qc_mode': qc_mode,
+        'qc_mode_label': qc_mode_label,
+        'live_status': 'PENDING' if qc_mode == 'ADVANCED' else 'NOT_PROVIDED',
+        'termination_live_status': 'PENDING' if qc_mode == 'ADVANCED' else 'SKIPPED_NO_LIVE_URL',
+        'playwright_status': 'PENDING' if qc_mode == 'ADVANCED' else 'SKIPPED_NO_LIVE_URL',
         'xml_path': xml_path,
         'platform': request.form.get('platform', 'Confirmit'),
         'country': request.form.get('country', ''),
@@ -1983,6 +2026,8 @@ def run_qc_submit():
         'user_email': session['user_email'],
         'created_at': datetime.now().isoformat(),
         'export_schema_text': export_schema_text,
+        'diagnostic_evidence_mode': diagnostic_evidence_mode,
+        'diagnostic_evidence': {},
         'verdict': None,
         'issues': [],
         'term_results': [],
@@ -2159,8 +2204,15 @@ def report_detail(job_id):
     term_review = j.get('term_review', 0)
     term_total = j.get('term_total', 0)
     total_issues = j.get('total_issues', 0)
+    main_issues_count = j.get('main_issues_count', total_issues)
+    review_items_count = j.get('review_items_count', sum(1 for i in issues if _is_review_item(i)))
     created = j.get('created_at', '')[:16]
     qc_mode = j.get('qc_mode', 'STANDARD')
+    scope_type = j.get('scope_type', 'FULL_DOC_SCOPE')
+    out_scope_count = j.get('suppressed_out_of_scope_count', len(j.get('xml_out_of_scope_questions', []) or []))
+    suppressed_internal_count = j.get('suppressed_internal_count', len(j.get('suppressed_internal_xml_items', []) or []))
+    suppressed_count = j.get('suppressed_count', suppressed_internal_count + out_scope_count)
+    mapping_summary = j.get('mapping_quality_summary', {}) or {}
 
     verdict_class = 'badge-red' if verdict == 'FAIL' else ('badge-green' if verdict == 'PASS' else 'badge-amber')
     verdict_icon = 'ti-x' if verdict == 'FAIL' else ('ti-check' if verdict == 'PASS' else 'ti-alert-triangle')
@@ -2177,6 +2229,34 @@ def report_detail(job_id):
                        'border-radius:20px;background:#DBEAFE;color:#1D4ED8;white-space:nowrap">'
                        '&#9632; STANDARD QC &mdash; DOC + XML</span>')
         _mode_note = 'XML-based QC — add live survey URL for full advanced verification'
+
+    _scope_note_html = ''
+    if scope_type in ('SCREENER_ONLY_DOC', 'PARTIAL_DOC_SCOPE'):
+        _scope_note_html = (
+            f'<div class="alert alert-info" style="margin-bottom:16px">'
+            f'<p style="font-weight:600">Uploaded DOC appears to be a screener/partial spec.</p>'
+            f'<p style="font-size:12px;margin-top:4px">Scope Type: {scope_type}. '
+            f'XML-only main-survey questions were separated from main bugs. '
+            f'Out-of-scope: {out_scope_count}; internal/template suppressed: {suppressed_internal_count}.</p>'
+            f'</div>'
+        )
+
+    _mapping_summary_html = ''
+    if mapping_summary:
+        _mapping_summary_html = (
+            '<div class="card" style="margin-bottom:16px">'
+            '<p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:10px">Mapping Quality Summary</p>'
+            '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:12px;color:var(--text2)">'
+            f'<div>Exact matches<br><b>{mapping_summary.get("exact_matches", 0)}</b></div>'
+            f'<div>Normalized matches<br><b>{mapping_summary.get("normalized_matches", 0)}</b></div>'
+            f'<div>Alias matches<br><b>{mapping_summary.get("alias_matches", 0)}</b></div>'
+            f'<div>Block/text matches<br><b>{mapping_summary.get("block_text_matches", 0)}</b></div>'
+            f'<div>Low-confidence<br><b>{mapping_summary.get("low_confidence_mappings", 0)}</b></div>'
+            f'<div>Unmapped DOC<br><b>{mapping_summary.get("unmapped_doc_questions", 0)}</b></div>'
+            f'<div>Unmapped XML<br><b>{mapping_summary.get("unmapped_xml_questions", 0)}</b></div>'
+            f'<div>Skipped internal/live<br><b>{mapping_summary.get("skipped_internal_xml_items", 0) + mapping_summary.get("skipped_live_navigator_nodes", 0)}</b></div>'
+            '</div></div>'
+        )
 
     issues_html = ''
     _ui_type_names = {
@@ -2196,7 +2276,8 @@ def report_detail(job_id):
         'NAMING MISMATCH': 'Naming mismatch',
         'ERROR PAGE': 'Page error',
     }
-    for i, iss in enumerate(issues[:20]):
+    _main_issues_for_display = [iss for iss in issues if _is_main_issue(iss)]
+    for i, iss in enumerate(_main_issues_for_display[:20]):
         sev = iss.get('severity', 'INFO')
         cls = 'badge-red' if sev == 'HIGH' else ('badge-amber' if sev == 'MEDIUM' else 'badge-blue')
         conf_lvl   = iss.get('conf_level', '')
@@ -2215,6 +2296,9 @@ def report_detail(job_id):
         simple_type = _ui_type_names.get(iss.get('type',''), iss.get('type',''))
         ev = iss.get('evidence', {})
         detail = ev.get('mismatch_detail') or iss.get('details','')
+        map_conf = iss.get('mapping_confidence', '')
+        matched_id = iss.get('matched_id', '')
+        root_cause = (iss.get('diagnostic') or {}).get('root_cause') or iss.get('root_cause', '')
         reasons = iss.get('confidence_reasons', [])
         reason_tip = ' · '.join(reasons[:3]) if reasons else ''
         issues_html += f"""
@@ -2222,6 +2306,8 @@ def report_detail(job_id):
           <td class="primary">{iss.get('qid','')}</td>
           <td>{simple_type}</td>
           <td><span class="badge {cls}">{sev}</span>&nbsp;{conf_badge}</td>
+          <td style="font-size:11px;color:var(--text3)">{matched_id}<br>{map_conf}</td>
+          <td style="font-size:11px;color:var(--text3)">{root_cause}</td>
           <td style="font-size:11px;color:var(--text3)" title="{reason_tip}">{str(detail)[:120]}</td>
         </tr>"""
 
@@ -2261,7 +2347,12 @@ def report_detail(job_id):
     }
     _re_sev_cls = {'HIGH': 'badge-red', 'MEDIUM': 'badge-amber',
                    'LOW': 'badge-blue', 'INFO': 'badge-grey'}
-    _re_display = [f for f in re_findings if f.get('severity') not in ('INFO',)]
+    _re_display = [
+        f for f in re_findings
+        if f.get('severity') not in ('INFO',)
+        and f.get('rule_group') != 1
+        and not (f.get('rule_group') == 9 and f.get('severity') in ('LOW', 'MEDIUM'))
+    ]
     _re_by_grp: dict = {}
     for _rf in _re_display:
         _gn = _rf.get('rule_group', 0)
@@ -2319,12 +2410,14 @@ def report_detail(job_id):
             _tm_extra  = ', '.join(_tm.get('extra_in_xml', [])) or '—'
             if _tm_status == 'MATCH':
                 _tm_scls = 'badge-green'; _tm_slbl = '✓ MATCH'
-            elif _tm_status == 'MISMATCH':
-                _tm_scls = 'badge-red'; _tm_slbl = '✗ MISMATCH'
-            elif _tm_status == 'DOC_ONLY':
-                _tm_scls = 'badge-amber'; _tm_slbl = '⚠ DOC ONLY'
-            elif _tm_status == 'XML_ONLY':
-                _tm_scls = 'badge-blue'; _tm_slbl = '◈ XML ONLY'
+            elif _tm_status == 'MISSING_IN_XML':
+                _tm_scls = 'badge-amber'; _tm_slbl = 'MISSING IN XML'
+            elif _tm_status == 'XML_NOT_PARSEABLE':
+                _tm_scls = 'badge-blue'; _tm_slbl = 'XML NOT PARSEABLE'
+            elif _tm_status == 'COMPOUND_MANUAL_REVIEW':
+                _tm_scls = 'badge-blue'; _tm_slbl = 'COMPOUND REVIEW'
+            elif _tm_status == 'NEEDS_REVIEW':
+                _tm_scls = 'badge-blue'; _tm_slbl = 'NEEDS REVIEW'
             else:
                 _tm_scls = 'badge-grey'; _tm_slbl = _tm_status
             _tm_rows += (
@@ -2338,27 +2431,26 @@ def report_detail(job_id):
                 f'</tr>'
             )
         _tm_match   = sum(1 for r in re_term_matrix if r.get('status') == 'MATCH')
-        _tm_mismatch = sum(1 for r in re_term_matrix if r.get('status') == 'MISMATCH')
-        _tm_doconly  = sum(1 for r in re_term_matrix if r.get('status') == 'DOC_ONLY')
-        _tm_xmlonly  = sum(1 for r in re_term_matrix if r.get('status') == 'XML_ONLY')
+        _tm_missing = sum(1 for r in re_term_matrix if r.get('status') == 'MISSING_IN_XML')
+        _tm_parse   = sum(1 for r in re_term_matrix if r.get('status') == 'XML_NOT_PARSEABLE')
+        _tm_review  = sum(1 for r in re_term_matrix if r.get('status') in ('NEEDS_REVIEW', 'COMPOUND_MANUAL_REVIEW'))
         _tm_card_html = f"""
     <div class="card" style="margin-top:16px;border-left:3px solid #C84B31">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:14px;font-weight:700;color:#C84B31">&#9888; Termination Matrix</span>
+          <span style="font-size:14px;font-weight:700;color:#C84B31">&#9888; Termination Logic Review — DOC vs XML</span>
           <span style="font-size:11px;background:rgba(200,75,49,.1);color:#C84B31;border-radius:4px;padding:2px 8px;font-weight:600">{len(re_term_matrix)} termination point(s)</span>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <span class="badge badge-green">MATCH {_tm_match}</span>
-          <span class="badge badge-red">MISMATCH {_tm_mismatch}</span>
-          <span class="badge badge-amber">DOC ONLY {_tm_doconly}</span>
-          <span class="badge badge-blue">XML ONLY {_tm_xmlonly}</span>
+          <span class="badge badge-amber">MISSING {_tm_missing}</span>
+          <span class="badge badge-blue">XML NOT PARSEABLE {_tm_parse}</span>
+          <span class="badge badge-blue">REVIEW {_tm_review}</span>
         </div>
       </div>
       <p style="font-size:11px;color:var(--text3);margin-bottom:10px">
         Generated from doc termination rules vs XML termination conditions.
-        MISMATCH = doc and XML disagree on which codes terminate.
-        DOC ONLY = spec defines termination but not in XML.
+        No live URL is required. Complex/script-based rows are review items, not live failures.
       </p>
       <table class="data-table">
         <thead><tr>
@@ -2386,9 +2478,9 @@ def report_detail(job_id):
 
     re_card_html = ''
     if re_findings or re_term_matrix:
-        re_high   = re_summary.get('high', 0)
-        re_medium = re_summary.get('medium', 0)
-        re_low    = re_summary.get('low', 0)
+        re_high   = sum(1 for f in _re_display if f.get('severity') == 'HIGH')
+        re_medium = sum(1 for f in _re_display if f.get('severity') == 'MEDIUM')
+        re_low    = sum(1 for f in _re_display if f.get('severity') == 'LOW')
 
         # Build per-group mini-badges with color
         _re_group_pill_html = ''
@@ -2413,8 +2505,8 @@ def report_detail(job_id):
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:10px">
           <i class="ti ti-engine" style="font-size:16px;color:#6D28D9"></i>
-          <span style="font-size:14px;font-weight:700;color:#6D28D9">Rule Engine Findings</span>
-          <span style="font-size:11px;background:rgba(109,40,217,.1);color:#6D28D9;border-radius:4px;padding:2px 8px;font-weight:600">{re_total_display} findings</span>
+          <span style="font-size:14px;font-weight:700;color:#6D28D9">Rule Engine Supporting Findings</span>
+          <span style="font-size:11px;background:rgba(109,40,217,.1);color:#6D28D9;border-radius:4px;padding:2px 8px;font-weight:600">{re_total_display} supporting</span>
         </div>
         <div style="display:flex;gap:6px">
           <span class="badge badge-red">HIGH {re_high}</span>
@@ -2423,6 +2515,7 @@ def report_detail(job_id):
         </div>
       </div>
       <p style="font-size:11px;color:var(--text3);margin-bottom:10px">
+        Supporting evidence only unless promoted to the main issue list. These findings do not change the main issue count.
         10-group deterministic rule engine &mdash; runs directly on survey model (no DOM, no Playwright).
         Groups: Routing · Termination · Mandatory · Piping · Loop · Variable · Type · Options · Graph · Export
       </p>
@@ -2435,10 +2528,10 @@ def report_detail(job_id):
     # ─────────────────────────────────────────────────────────────────────
 
     # ── Section 1: Executive Summary + Health Score ───────────────────────────
-    _hs_confirmed  = consensus.get('confirmed_count', 0)
-    _hs_likely     = consensus.get('likely_count', 0)
-    _hs_review     = consensus.get('review_count', 0)
-    _hs_suppressed = consensus.get('suppressed_count', 0)
+    _hs_confirmed  = main_issues_count
+    _hs_likely     = review_items_count
+    _hs_review     = re_total_display
+    _hs_suppressed = suppressed_count
     _hs_by_cat     = consensus.get('health_by_category', {})
     _hs_reasons    = consensus.get('suppressed_reasons', {})
 
@@ -2481,16 +2574,16 @@ def report_detail(job_id):
             f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">'
             f'<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:8px;text-align:center">'
             f'<p style="font-size:20px;font-weight:800;color:#DC2626">{_hs_confirmed}</p>'
-            f'<p style="font-size:9px;color:#DC2626;font-weight:700;text-transform:uppercase">Confirmed</p></div>'
+            f'<p style="font-size:9px;color:#DC2626;font-weight:700;text-transform:uppercase">Main Issues</p></div>'
             f'<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;text-align:center">'
             f'<p style="font-size:20px;font-weight:800;color:#D97706">{_hs_likely}</p>'
-            f'<p style="font-size:9px;color:#D97706;font-weight:700;text-transform:uppercase">Likely Bugs</p></div>'
+            f'<p style="font-size:9px;color:#D97706;font-weight:700;text-transform:uppercase">Review Items</p></div>'
             f'<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:8px;text-align:center">'
             f'<p style="font-size:20px;font-weight:800;color:#2563EB">{_hs_review}</p>'
-            f'<p style="font-size:9px;color:#2563EB;font-weight:700;text-transform:uppercase">Needs Review</p></div>'
+            f'<p style="font-size:9px;color:#2563EB;font-weight:700;text-transform:uppercase">Supporting</p></div>'
             f'<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:8px;text-align:center">'
             f'<p style="font-size:20px;font-weight:800;color:#6B7280">{_hs_suppressed}</p>'
-            f'<p style="font-size:9px;color:#6B7280;font-weight:700;text-transform:uppercase">Suppressed</p></div>'
+            f'<p style="font-size:9px;color:#6B7280;font-weight:700;text-transform:uppercase">Suppressed/Internal</p></div>'
             f'</div>'
             # Category health bars
             f'<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">'
@@ -2501,12 +2594,9 @@ def report_detail(job_id):
             f'</div>'
         )
 
-    # ── Tiered issue sections (2-5) ───────────────────────────────────────────
-    # Bucket all issues + rule findings by consensus_tier
-    _all_for_tiers = issues + re_findings
-    _tier_confirmed = [i for i in _all_for_tiers if i.get('consensus_tier') == 'CONFIRMED_BUG']
-    _tier_likely    = [i for i in _all_for_tiers if i.get('consensus_tier') == 'LIKELY_BUG']
-    _tier_review    = [i for i in _all_for_tiers if i.get('consensus_tier') == 'NEEDS_REVIEW']
+    # ── Final report buckets (same filters as top cards) ─────────────────────
+    _bucket_main = [i for i in issues if _is_main_issue(i)]
+    _bucket_review = [i for i in issues if _is_review_item(i)]
 
     _tbl_hdr6 = ("<table class='data-table'><thead><tr>"
                  "<th>QID</th><th>Type</th><th>Severity</th><th>Details</th>"
@@ -2522,6 +2612,13 @@ def report_detail(job_id):
             _tsev  = _ti.get('severity', 'INFO')
             _tsc   = _ti.get('consensus_score', '')
             _tdet  = str(_ti.get('details') or str(_ti.get('evidence', ''))[:100])[:120]
+            _trc   = ((_ti.get('diagnostic') or {}).get('root_cause', '') if j.get('diagnostic_evidence_mode') else '')
+            _trc_badge = (
+                f'<span style="display:inline-block;margin-top:3px;font-size:9px;'
+                f'font-weight:700;color:#0F766E;background:#ECFDF5;border:1px solid #A7F3D0;'
+                f'border-radius:4px;padding:1px 5px">{_trc}</span>'
+                if _trc else ''
+            )
             _tcls  = 'badge-red' if _tsev == 'HIGH' else ('badge-amber' if _tsev == 'MEDIUM' else 'badge-blue')
             # Escape for inline JS onclick — replace single quotes
             _qid_j = _tqid.replace("'", '').replace('"', '')
@@ -2529,7 +2626,7 @@ def report_detail(job_id):
             rows += (
                 f'<tr>'
                 f'<td class="primary">{_tqid}</td>'
-                f'<td style="font-size:11px">{_ttype}</td>'
+                f'<td style="font-size:11px">{_ttype}<br>{_trc_badge}</td>'
                 f'<td><span class="badge {_tcls}">{_tsev}</span></td>'
                 f'<td style="font-size:10px;color:var(--text3)" title="{_tdet}">{_tdet[:80]}</td>'
                 f'<td style="font-size:11px;font-weight:700;color:#6D28D9">{_tsc}%</td>'
@@ -2546,9 +2643,8 @@ def report_detail(job_id):
                      f'... and {len(tier_issues) - max_n} more findings</td></tr>')
         return rows
 
-    _rows_confirmed = _tier_rows(_tier_confirmed)
-    _rows_likely    = _tier_rows(_tier_likely)
-    _rows_review    = _tier_rows(_tier_review)
+    _rows_main = _tier_rows(_bucket_main)
+    _rows_review = _tier_rows(_bucket_review)
 
     def _tier_card(title, color, icon, count, badge_bg, badge_border, rows, section_num):
         _inner = ((_tbl_hdr6 + rows + '</tbody></table>') if rows
@@ -2560,7 +2656,7 @@ def report_detail(job_id):
             f'<span style="font-size:14px;font-weight:700;color:{color}">Section {section_num} — {title} ({count})</span>'
             f'<span style="font-size:10px;background:{badge_bg};color:{color};'
             f'border:1px solid {badge_border};border-radius:4px;padding:2px 8px;font-weight:600">'
-            f'{"95%+ confidence" if section_num==2 else ("65–94% confidence" if section_num==3 else "35–64% confidence")}</span>'
+            f'{"counted in Main Issues" if section_num==2 else ("manual/mapping review only" if section_num==3 else "supporting evidence only")}</span>'
             f'</div>'
             f'{_inner}'
             f'</div>'
@@ -2569,26 +2665,25 @@ def report_detail(job_id):
     _tiered_sections_html = ''
     if health_score is not None:
         _tiered_sections_html += _tier_card(
-            'Confirmed Bugs', '#DC2626', 'ti-bug', len(_tier_confirmed),
-            '#FEF2F2', '#FECACA', _rows_confirmed, 2)
+            'Confirmed/Main Issues', '#DC2626', 'ti-bug', len(_bucket_main),
+            '#FEF2F2', '#FECACA', _rows_main, 2)
         _tiered_sections_html += _tier_card(
-            'Likely Bugs', '#D97706', 'ti-alert-triangle', len(_tier_likely),
-            '#FFFBEB', '#FDE68A', _rows_likely, 3)
-        _tiered_sections_html += _tier_card(
-            'Needs Review', '#2563EB', 'ti-eye', len(_tier_review),
-            '#EFF6FF', '#BFDBFE', _rows_review, 4)
-        # Section 5: Suppressed
-        if _hs_suppressed > 0:
+            'Review Items', '#D97706', 'ti-eye', len(_bucket_review),
+            '#FFFBEB', '#FDE68A', _rows_review, 3)
+        # Section 5: Suppressed/Internal
+        if suppressed_count > 0:
             _supp_items = ''.join(
                 f'<li><span style="color:var(--text3)">{_r}</span>: <strong>{_c}</strong></li>'
                 for _r, _c in _hs_reasons.items()
             )
+            if not _supp_items:
+                _supp_items = f'<li><span style="color:var(--text3)">Suppressed/internal items</span>: <strong>{suppressed_count}</strong></li>'
             _tiered_sections_html += (
                 f'<div class="card" style="margin-top:16px;border-left:3px solid #9CA3AF">'
                 f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
                 f'<i class="ti ti-eye-off" style="color:#9CA3AF;font-size:16px"></i>'
                 f'<span style="font-size:14px;font-weight:700;color:#6B7280">'
-                f'Section 5 — Suppressed Findings ({_hs_suppressed})</span>'
+                f'Suppressed/Internal Items ({suppressed_count})</span>'
                 f'</div>'
                 f'<p style="font-size:11px;color:var(--text3);margin-bottom:8px">'
                 f'These findings were filtered out automatically to reduce noise. '
@@ -2602,11 +2697,24 @@ def report_detail(job_id):
     _pw_data    = j.get('playwright_tests', {})
     _pw_res     = _pw_data.get('results', [])
     _pw_sum     = _pw_data.get('summary', {})
-    _term_card_html = (
+    if qc_mode == 'STANDARD':
+        _term_card_html = (
+            f'<div class="card" style="margin-top:16px;border-left:3px solid #0891B2">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+            f'<i class="ti ti-player-pause" style="color:#0891B2;font-size:16px"></i>'
+            f'<span style="font-size:14px;font-weight:700;color:#0891B2">Live Verification Skipped</span>'
+            f'<span class="badge badge-blue">SKIPPED_NO_LIVE_URL</span>'
+            f'</div>'
+            f'<p style="font-size:12px;color:var(--text3)">STANDARD QC uses DOC + XML only. '
+            f'Playwright, Page.goto, live termination tests, locator checks, and render checks were not run.</p>'
+            f'</div>'
+        )
+    else:
+        _term_card_html = (
         f'<div class="card" style="margin-top:16px;border-left:3px solid #0891B2">'
         f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
         f'<i class="ti ti-player-play" style="color:#0891B2;font-size:16px"></i>'
-        f'<span style="font-size:14px;font-weight:700;color:#0891B2">Section 7 — Playwright / Termination Results</span>'
+        f'<span style="font-size:14px;font-weight:700;color:#0891B2">Section 7 — Live Termination Verification — Playwright</span>'
         f'<span style="font-size:11px;background:#E0F2FE;color:#0891B2;border-radius:4px;'
         f'padding:2px 8px;font-weight:600">{term_passed}/{term_total - term_review} validated · {term_review} review</span>'
         f'</div>'
@@ -2615,7 +2723,134 @@ def report_detail(job_id):
            if term_html
            else "<p style='color:var(--text3);text-align:center;padding:14px'>No termination rules found in spec.</p>")
         + f'</div>'
-    )
+        )
+
+    _root_cause_summary_html = ''
+    if j.get('diagnostic_evidence_mode'):
+        _rc_summary = (
+            j.get('root_cause_summary')
+            or (j.get('diagnostic_evidence') or {}).get('root_cause_summary')
+            or {}
+        )
+        if _rc_summary:
+            _rc_colors = {
+                'REAL_BUG': '#DC2626',
+                'DOC_PARSER': '#7C3AED',
+                'XML_PARSER': '#2563EB',
+                'LIVE_RENDER': '#0891B2',
+                'MAPPING': '#D97706',
+                'AI_UNCERTAIN': '#9333EA',
+                'REVIEW_REQUIRED': '#6B7280',
+                'UNCLASSIFIED': '#9CA3AF',
+            }
+            _rc_pills = ''
+            for _rc in ROOT_CAUSE_BUCKETS:
+                if _rc == 'UNCLASSIFIED' and not _rc_summary.get(_rc, 0):
+                    continue
+                _rc_count = _rc_summary.get(_rc, 0)
+                _rc_pills += (
+                    f'<span style="display:inline-flex;align-items:center;gap:5px;'
+                    f'border:1px solid #E5E7EB;background:#F9FAFB;border-radius:6px;'
+                    f'padding:5px 8px;font-size:10px;font-weight:700;color:{_rc_colors.get(_rc, "#6B7280")}">'
+                    f'{_rc}: {_rc_count}</span>'
+                )
+            _root_cause_summary_html = (
+                f'<div class="card" style="margin-bottom:16px;border-left:3px solid #0F766E">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+                f'<i class="ti ti-filter-search" style="color:#0F766E;font-size:16px"></i>'
+                f'<span style="font-size:13px;font-weight:700;color:#0F766E">Root Cause Breakdown</span>'
+                f'</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:6px">{_rc_pills}</div>'
+                f'</div>'
+            )
+
+    # ── Diagnostic Evidence Mode ───────────────────────────────────────────
+    _diagnostic_html = ''
+    if j.get('diagnostic_evidence_mode'):
+        import html as _html
+
+        def _h(v):
+            return _html.escape(str(v or ''))
+
+        def _diag_source_block(title, src):
+            src = src or {}
+            opts = src.get('options', []) or []
+            codes = src.get('codes', []) or []
+            opts_txt = ', '.join(_h(o) for o in opts[:8]) or '—'
+            codes_txt = ', '.join(_h(c) for c in codes[:12]) or '—'
+            return (
+                f'<div style="background:#F9FAFB;border:1px solid #E5E7EB;'
+                f'border-radius:6px;padding:9px;min-width:0">'
+                f'<p style="font-size:11px;font-weight:700;color:#374151;margin-bottom:5px">{title}</p>'
+                f'<p style="font-size:10px;color:#6B7280;margin-bottom:4px"><b>QID:</b> {_h(src.get("qid")) or "—"}</p>'
+                f'<p style="font-size:10px;color:#374151;line-height:1.45;margin-bottom:4px">{_h(src.get("text")) or "—"}</p>'
+                f'<p style="font-size:10px;color:#6B7280;margin-bottom:2px"><b>Options:</b> {opts_txt}</p>'
+                f'<p style="font-size:10px;color:#6B7280"><b>Codes:</b> {codes_txt}</p>'
+                f'</div>'
+            )
+
+        _diag_rows = ''
+        _diag_issues = [i for i in (issues or []) if i.get('diagnostic')]
+        for _di in _diag_issues[:50]:
+            _dg = _di.get('diagnostic', {})
+            _src_live = _dg.get('source_live', {}) or {}
+            _rc = _dg.get('root_cause', 'UNCLASSIFIED')
+            _rc_reason = _dg.get('root_cause_reason', '')
+            _rc_signals = ', '.join(_h(s) for s in (_dg.get('classification_signals') or [])[:5]) or '—'
+            _diag_rows += (
+                f'<details style="border-top:1px solid #E5E7EB;padding:10px 0">'
+                f'<summary style="cursor:pointer;font-size:12px;font-weight:700;color:#111827">'
+                f'{_h(_di.get("qid"))} · {_h(_di.get("type"))} · {_h(_di.get("severity"))} · '
+                f'{_h(_di.get("confidence"))}% · <span style="color:#0F766E">{_h(_rc)}</span></summary>'
+                f'<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px">'
+                f'{_diag_source_block("DOC", _dg.get("source_doc"))}'
+                f'{_diag_source_block("XML", _dg.get("source_xml"))}'
+                f'<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:9px;min-width:0">'
+                f'<p style="font-size:11px;font-weight:700;color:#374151;margin-bottom:5px">LIVE</p>'
+                f'<p style="font-size:10px;color:#6B7280;margin-bottom:4px"><b>QID:</b> {_h(_src_live.get("qid")) or "—"}</p>'
+                f'<p style="font-size:10px;color:#374151;line-height:1.45;margin-bottom:4px">{_h(_src_live.get("text")) or "—"}</p>'
+                f'<p style="font-size:10px;color:#6B7280;margin-bottom:2px"><b>Status:</b> {_h(_src_live.get("status")) or "—"}</p>'
+                f'<p style="font-size:10px;color:#6B7280"><b>Selector:</b> {_h(_src_live.get("selector_status")) or "—"}</p>'
+                f'</div>'
+                f'</div>'
+                f'<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px">'
+                f'<p style="font-size:10px;color:#374151"><b>Root Cause:</b> {_h(_dg.get("root_cause"))}</p>'
+                f'<p style="font-size:10px;color:#374151"><b>Created By:</b> {_h(_dg.get("created_by_engine"))}</p>'
+                f'<p style="font-size:10px;color:#374151"><b>Mapping Confidence:</b> {_h(_dg.get("mapping_confidence"))}</p>'
+                f'<p style="font-size:10px;color:#374151"><b>Parser Health:</b> {_h(_dg.get("parser_health"))}</p>'
+                f'<p style="font-size:10px;color:#374151"><b>Live Status:</b> {_h(_dg.get("live_status")) or "—"}</p>'
+                f'<p style="font-size:10px;color:#374151"><b>Matched ID:</b> {_h(_dg.get("matched_id")) or "—"}</p>'
+                f'</div>'
+                f'<p style="font-size:10px;color:#374151;margin-top:8px;line-height:1.45">'
+                f'<b>Root Cause Reason:</b> {_h(_rc_reason) or "—"}</p>'
+                f'<p style="font-size:10px;color:#6B7280;margin-top:4px;line-height:1.45">'
+                f'<b>Classification Signals:</b> {_rc_signals}</p>'
+                f'<p style="font-size:10px;color:#6B7280;margin-top:8px;line-height:1.45">'
+                f'<b>Evidence Notes:</b> {_h(_dg.get("evidence_notes")) or "—"}</p>'
+                f'</details>'
+            )
+        if len(_diag_issues) > 50:
+            _diag_rows += (
+                f'<p style="font-size:11px;color:#6B7280;text-align:center;padding:10px">'
+                f'Showing 50 of {len(_diag_issues)} diagnostic issue records.</p>'
+            )
+
+        _diag_rule_count = len((j.get('diagnostic_evidence') or {}).get('rule_findings', []))
+        _diag_body = (_diag_rows if _diag_rows else
+                      '<p style="color:var(--text3);text-align:center;padding:12px">'
+                      'No diagnostic issue records.</p>')
+        _diagnostic_html = (
+            f'<div class="card" style="margin-top:16px;border-left:3px solid #0F766E">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+            f'<i class="ti ti-stethoscope" style="color:#0F766E;font-size:16px"></i>'
+            f'<span style="font-size:14px;font-weight:700;color:#0F766E">Diagnostic Evidence</span>'
+            f'<span class="badge badge-blue">{len(_diag_issues)} issues · {_diag_rule_count} rule findings</span>'
+            f'</div>'
+            f'<p style="font-size:11px;color:var(--text3);margin-bottom:6px">'
+            f'Compact source evidence captured for debugging. Normal QC counts, severity, and confidence are unchanged.</p>'
+            f'{_diag_body}'
+            f'</div>'
+        )
 
     return render_template_string(SHARED_CSS + f"""
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0"><title>Report — SurveyQC</title></head><body>
@@ -2643,21 +2878,27 @@ def report_detail(job_id):
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px">
       <div class="stat-card"><p class="stat-num">{doc_qids}</p><p class="stat-label">Doc questions</p></div>
       <div class="stat-card"><p class="stat-num" style="color:#2563EB">{xml_qids}</p><p class="stat-label">XML questions</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#1D9E75">{term_passed}/{term_total}</p><p class="stat-label">Term. passed</p></div>
-      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">{total_issues}</p><p class="stat-label">Issues found</p></div>
-      <div class="stat-card" style="background:rgba(29,158,117,.1);border-color:rgba(29,158,117,.2)"><p class="stat-num" style="color:#1D9E75">~8h</p><p class="stat-label">Time saved</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#E24B4A">{main_issues_count}</p><p class="stat-label">Main issues</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#BA7517">{review_items_count}</p><p class="stat-label">Review items</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#2563EB">{re_total_display}</p><p class="stat-label">Supporting</p></div>
+      <div class="stat-card"><p class="stat-num" style="color:#6B7280">{suppressed_count}</p><p class="stat-label">Suppressed/internal</p></div>
     </div>
 
     <div class="alert {'alert-error' if verdict=='FAIL' else ('alert-success' if verdict=='PASS' else 'alert-info')}" style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <i class="ti {verdict_icon}" style="font-size:18px"></i>
       <div>
         <p style="font-weight:500">{verdict_msg}</p>
-        <p style="font-size:12px;opacity:.8">{total_issues} structural issues · {term_total - term_passed - term_review} term. failed · {term_review} need manual review</p>
+        <p style="font-size:12px;opacity:.8">{main_issues_count} main issues · {review_items_count} review items · {re_total_display} supporting findings · {suppressed_count} suppressed/internal items</p>
       </div>
     </div>
+
+    {_root_cause_summary_html}
+
+    {_scope_note_html}
+    {_mapping_summary_html}
 
     {f'<div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="ti ti-sparkles" style="color:var(--accent);font-size:16px"></i><span style="font-size:13px;font-weight:700;color:var(--text)">AI Summary</span></div><p style="font-size:14px;color:var(--text2);line-height:1.7">{ai_summary}</p></div>' if ai_summary else ''}
 
@@ -2665,11 +2906,13 @@ def report_detail(job_id):
 
     {_tiered_sections_html}
 
-    {"" if health_score is not None else f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:16px'><div class='card'><p style='font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px'>Issues found ({total_issues})</p>" + ("<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No structural issues found!</p>") + f"</div><div class='card'><p style='font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px'>Termination tests ({term_passed}/{term_total - term_review} validated · {term_review} need review)</p>" + ("<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No termination rules found in doc</p>") + "</div></div>"}
+    {"" if health_score is not None else f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:16px'><div class='card'><p style='font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px'>Main issues ({main_issues_count})</p>" + ("<table class='data-table'><thead><tr><th>QID</th><th>Type</th><th>Severity</th><th>Matched / Map</th><th>Root Cause</th><th>Details</th></tr></thead><tbody>" + issues_html + "</tbody></table>" if issues_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No confirmed structural issues found.</p>") + f"</div><div class='card'><p style='font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px'>Termination tests ({term_passed}/{term_total - term_review} validated · {term_review} need review)</p>" + ("<table class='data-table'><thead><tr><th>Status</th><th>QID</th><th>Code</th><th>Details</th></tr></thead><tbody>" + term_html + "</tbody></table>" if term_html else "<p style='color:var(--text3);text-align:center;padding:20px'>No termination rules found in doc</p>") + "</div></div>"}
 
     {re_card_html}
 
     {_term_card_html}
+
+    {_diagnostic_html}
 
     <div class="card" style="margin-top:16px">
       <p style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:14px">Rate this report</p>
@@ -4460,6 +4703,22 @@ def _parse_tn_items_from_html(html, tn_css_selectors, qid_re):
                 if _is_container_id(doc_qid):
                     skipped += 1
                     continue
+                _input_nodes = el.find_all(["input", "select", "textarea"])
+                _respondent_inputs = [
+                    _inp for _inp in _input_nodes
+                    if (_inp.get("type") or "text").lower()
+                    not in {"hidden", "submit", "button", "image", "reset"}
+                ]
+                _node = classify_live_navigator_node(
+                    doc_qid,
+                    label=el.get_text(" ", strip=True),
+                    has_inputs=bool(_respondent_inputs),
+                    input_count=len(_respondent_inputs),
+                    visible_text=el.get_text(" ", strip=True),
+                )
+                if not _node.get('is_user_question'):
+                    fw_skipped += 1
+                    continue
                 if should_skip_qid(doc_qid):
                     fw_skipped += 1
                     continue
@@ -4488,7 +4747,7 @@ def _parse_question_texts_from_html(html):
     try:
         from bs4 import BeautifulSoup
         import re as _re
-        def _nq(s): return s.replace('.','').replace('_','').replace('-','').replace(' ','').lower()
+        def _nq(s): return normalize_qid(s)
         soup = BeautifulSoup(html, "html.parser")
         # Remove TN sidebar (mirrors the Playwright evaluate removal)
         for sel in ['.sr-test-navigator', '[class*="sr-tn"]',
@@ -4950,7 +5209,7 @@ def _enrich_issues(issues, questions, live_data, xml_questions):
     Safe to call multiple times — skips issues that already have an 'evidence'
     key so existing higher-quality evidence is never overwritten.
     """
-    def _n(q): return re.sub(r'[^a-z0-9]', '', q.lower())
+    def _n(q): return normalize_qid(q)
 
     _xml_by_n  = {_n(xq.get('qid_normalized') or xq.get('qid', '')): xq
                   for xq in (xml_questions or []) if xq.get('qid')}
@@ -5007,34 +5266,854 @@ def _enrich_issues(issues, questions, live_data, xml_questions):
         issue['conf_level'] = 'HIGH' if score >= 75 else 'MEDIUM' if score >= 55 else 'LOW'
 
 
+def _normalize_rule_finding_diagnostics(rule_findings):
+    """Return compact diagnostic records for rule-engine findings."""
+    records = []
+    for rf in rule_findings or []:
+        diag = {
+            "source": "rule_engine",
+            "rule_id": rf.get("rule_id", ""),
+            "rule_group": rf.get("rule_group_name") or rf.get("rule_group", ""),
+            "qid": rf.get("qid", ""),
+            "evidence_text": str(rf.get("evidence", ""))[:500],
+            "recommendation": str(rf.get("recommendation", ""))[:300],
+        }
+        rf["diagnostic"] = diag
+        records.append(diag)
+    return records
+
+
+ROOT_CAUSE_BUCKETS = (
+    "REAL_BUG",
+    "DOC_PARSER",
+    "XML_PARSER",
+    "LIVE_RENDER",
+    "MAPPING",
+    "AI_UNCERTAIN",
+    "REVIEW_REQUIRED",
+    "XML_OUT_OF_DOC_SCOPE",
+    "FULL_SURVEY_EXTRA",
+    "TEMPLATE_OR_INTERNAL",
+    "POSSIBLE_WRONG_XML_EXPORT",
+    "SUPPRESSED_INTERNAL",
+    "UNCLASSIFIED",
+)
+
+
+def _is_main_issue(issue: dict) -> bool:
+    """Confirmed/likely DOC/XML/live issues used for the top-line count."""
+    if not isinstance(issue, dict):
+        return False
+    if issue.get('suppressed_from_main_count'):
+        return False
+    if issue.get('severity') not in ('HIGH', 'MEDIUM'):
+        return False
+    if issue.get('conf_level') in ('LOW', 'NEEDS_MANUAL'):
+        return False
+    root = ((issue.get('diagnostic') or {}).get('root_cause') or issue.get('root_cause') or '').upper()
+    if root in {
+        'MAPPING', 'REVIEW_REQUIRED', 'XML_PARSER', 'DOC_PARSER', 'LIVE_RENDER',
+        'XML_OUT_OF_DOC_SCOPE', 'FULL_SURVEY_EXTRA', 'TEMPLATE_OR_INTERNAL',
+        'SUPPRESSED_INTERNAL',
+    }:
+        return False
+    if issue.get('type') in ('IN_XML_NOT_IN_DOC', 'QID IN EXPORT NOT IN DOC/LIVE', 'MAPPING / REVIEW_REQUIRED'):
+        return False
+    return True
+
+
+def _is_review_item(issue: dict) -> bool:
+    if not isinstance(issue, dict) or issue.get('suppressed_from_main_count'):
+        return False
+    return not _is_main_issue(issue)
+
+
+def _normalize_live_url(raw_url: str) -> str:
+    """Return a usable live survey URL or '' for Standard QC."""
+    url = (raw_url or '').strip()
+    if not url:
+        return ''
+    low = url.lower()
+    placeholders = (
+        'optional', 'none', 'n/a', 'na', 'null', 'undefined',
+        'https://...', 'http://...', 'https://survey.confirmit.com/...',
+        'paste live survey url', 'live survey url',
+    )
+    if low in placeholders or 'optional' in low or 'placeholder' in low:
+        return ''
+    if not (low.startswith('http://') or low.startswith('https://')):
+        return ''
+    return url
+
+
+def _norm_qid_for_scope(qid: str) -> str:
+    return normalize_qid(qid).lower()
+
+
+def _qid_key(qid: str) -> str:
+    return normalize_qid(qid)
+
+
+def _qid_alias_keys(qid: str) -> set:
+    return set(qid_alias_candidates(qid))
+
+
+def _question_block(qid: str) -> str:
+    q = normalize_qid(qid)
+    if not q:
+        return 'UNKNOWN'
+    if re.match(r'^R\d+', q):
+        return 'INTRO_CONSENT'
+    if re.match(r'^S[1-7]([A-Z]|BIS)?$', q) or q == 'S3':
+        return 'SCREENER'
+    if q in {'Q1', 'Q5', 'Q7'}:
+        return 'ACTIVITY_OPINION'
+    if q in {'D1', 'D2', 'D3A', 'D3B', 'D3C', 'D4', 'D4BIS', 'D5'}:
+        return 'DELIVERANCES_LOOP'
+    if q in {'Q20', 'Q20BIS'}:
+        return 'FINAL'
+    if q.startswith('D'):
+        return 'DELIVERANCES_LOOP'
+    if q.startswith('S'):
+        return 'SCREENER'
+    if q.startswith('Q20'):
+        return 'FINAL'
+    if q.startswith('Q'):
+        return 'Q_BLOCK'
+    return 'UNKNOWN'
+
+
+def _xml_block(qid: str) -> str:
+    q = normalize_qid(qid)
+    if _is_internal_xml_qid(qid):
+        return 'HIDDEN_INTERNAL_TEMPLATE'
+    if re.match(r'^C\d+$', q) or any(tok in q for tok in ('AGREEMENT', 'FEEINVOICE', 'FACTURE', 'HONORAIRE', 'PAYMENT', 'EMAIL')):
+        return 'ADMIN_PAYMENT_CONTRACT'
+    if q.startswith('R'):
+        return 'R_BLOCK'
+    if q.startswith('S'):
+        return 'S_BLOCK'
+    if q.startswith('D'):
+        return 'D_LOOP_BLOCK'
+    if q in {'Q20', 'Q20BIS'}:
+        return 'Q20_BLOCK'
+    if q.startswith('Q'):
+        return 'Q_BLOCK'
+    return 'HIDDEN_INTERNAL_TEMPLATE'
+
+
+def _blocks_compatible(doc_block: str, xml_block: str) -> bool:
+    return {
+        'INTRO_CONSENT': {'R_BLOCK'},
+        'SCREENER': {'S_BLOCK'},
+        'ACTIVITY_OPINION': {'Q_BLOCK'},
+        'DELIVERANCES_LOOP': {'D_LOOP_BLOCK'},
+        'FINAL': {'Q20_BLOCK', 'Q_BLOCK'},
+        'Q_BLOCK': {'Q_BLOCK', 'Q20_BLOCK'},
+        'UNKNOWN': {'R_BLOCK', 'S_BLOCK', 'Q_BLOCK', 'D_LOOP_BLOCK', 'Q20_BLOCK'},
+    }.get(doc_block, set()).__contains__(xml_block)
+
+
+def _text_similarity(a: str, b: str) -> float:
+    aa = normalize(a)[:500]
+    bb = normalize(b)[:500]
+    if not aa or not bb:
+        return 0.0
+    return SequenceMatcher(None, aa, bb).ratio()
+
+
+def _option_overlap(doc_q: dict, xml_q: dict) -> float:
+    def _opts(q):
+        vals = set()
+        for o in (q or {}).get('options', []) or []:
+            txt = normalize(o.get('text', '') if isinstance(o, dict) else str(o))
+            if len(txt) >= 3:
+                vals.add(txt[:80])
+        return vals
+    d = _opts(doc_q)
+    x = _opts(xml_q)
+    if not d or not x:
+        return 0.0
+    return len(d & x) / max(1, min(len(d), len(x)))
+
+
+def _xml_only_duplicate_evidence(xml_qid: str, xml_q: dict, doc_by_norm: dict,
+                                 matched_doc_norms: set) -> tuple:
+    """Return (is_duplicate, reason) for XML-only variants.
+
+    Parent/sibling existence alone is intentionally not enough. Suppression
+    requires alias, loop-child metadata, or same-block content overlap.
+    """
+    xnorm = normalize_qid(xml_qid)
+    if not xnorm:
+        return False, ''
+    parent_keys = {
+        re.sub(r'(BIS|TER|NEW)$', '', xnorm, flags=re.I),
+        re.sub(r'(?<=\d)[A-Z]$', '', xnorm),
+    }
+    if re.search(r'(X\d+|_\d+)$', str(xml_qid), re.I) and normalize_qid(get_parent_qid(xml_qid)) in matched_doc_norms:
+        return True, 'loop metadata confirms repeated loop child'
+    for pk in parent_keys:
+        if not pk or pk not in doc_by_norm:
+            continue
+        doc_qid, doc_q = doc_by_norm[pk]
+        if _qid_alias_keys(doc_qid) & _qid_alias_keys(xml_qid):
+            return True, 'alias mapping confirms duplicate representation'
+        same_block = _blocks_compatible(_question_block(doc_qid), _xml_block(xml_qid))
+        if same_block and _text_similarity((doc_q or {}).get('text', ''), (xml_q or {}).get('text', '')) >= 0.72:
+            return True, 'same block + strong text similarity'
+        if same_block and _option_overlap(doc_q or {}, xml_q or {}) >= 0.40:
+            return True, 'same block + option overlap'
+    return False, ''
+
+
+def _mapping_confidence(doc_qid: str, doc_q: dict, xml_q: dict) -> tuple:
+    xml_qid = (xml_q or {}).get('qid') or (xml_q or {}).get('qid_normalized') or ''
+    if not xml_qid:
+        return 0.0, 'no match'
+    if str(doc_qid).strip().upper() == str(xml_qid).strip().upper():
+        return 1.00, 'exact qid match'
+    if normalize_qid(doc_qid) == normalize_qid(xml_qid):
+        return 0.95, 'normalized qid match'
+    if _qid_alias_keys(doc_qid) & _qid_alias_keys(xml_qid):
+        return 0.90, 'alias match'
+    same_block = _blocks_compatible(_question_block(doc_qid), _xml_block(xml_qid))
+    sim = _text_similarity((doc_q or {}).get('text', ''), (xml_q or {}).get('text', ''))
+    overlap = _option_overlap(doc_q or {}, xml_q or {})
+    if same_block and sim >= 0.72:
+        return 0.75, 'same block + strong text similarity'
+    if same_block and overlap >= 0.40:
+        return 0.70, 'same block + option overlap'
+    if sim >= 0.58:
+        return 0.50, 'weak text-only match'
+    return 0.0, 'no match'
+
+
+def _is_grid_or_loop_qid(qid: str) -> bool:
+    q = normalize_qid(qid)
+    return q in {'S4', 'Q1', 'Q5', 'D3A', 'D3B', 'D3C'} or q.startswith('D')
+
+
+def _issue_with_mapping(issue: dict, match: dict = None) -> dict:
+    match = match or {}
+    conf = float(match.get('mapping_confidence', 1.0))
+    issue['matched_id'] = match.get('xml_qid') or match.get('doc_qid') or issue.get('qid', '')
+    issue['mapping_confidence'] = round(conf, 2)
+    issue.setdefault('root_cause', 'MAPPING' if conf < 0.70 else 'REVIEW_REQUIRED')
+    issue.setdefault('evidence_source', issue.get('source_phase', 'PHASE_2.5_XML'))
+    issue.setdefault('suggested_fix', _suggested_fix_for_issue(issue))
+    issue.setdefault('evidence', {})
+    if isinstance(issue['evidence'], dict):
+        issue['evidence']['mapping_confidence'] = round(conf, 2)
+        issue['evidence']['matched_id'] = issue['matched_id']
+        issue['evidence']['mapping_method'] = match.get('mapping_method', '')
+    if conf < 0.70:
+        issue['severity'] = 'INFO'
+        issue['conf_level'] = 'NEEDS_MANUAL'
+        issue['confidence'] = min(int(conf * 100), 55)
+        issue['root_cause'] = 'MAPPING'
+        issue['type'] = 'MAPPING / REVIEW_REQUIRED'
+    return issue
+
+
+def _suggested_fix_for_issue(issue: dict) -> str:
+    t = (issue or {}).get('type', '')
+    return {
+        'IN_XML_NOT_IN_DOC': 'Confirm whether this is visible and in DOC scope; otherwise suppress as internal/out-of-scope.',
+        'OPTIONS COUNT MISMATCH': 'Compare answer list in the DOC against the XML question within the same block.',
+        'OPTION TEXT MISSING IN XML': 'Check whether the option is present under an alias, grid row, or loop iteration before editing XML.',
+        'CODE MISMATCH': 'Verify answer codes in the programmed export against the DOC specification.',
+        'ROUTING IN XML NOT IN DOC': 'Review termination/routing table in the DOC and programmed XML logic.',
+        'PIPING IN DOC NOT IN XML': 'Verify piping expression in the programmed XML question text.',
+    }.get(t, 'Manual review required; inspect DOC source and programmed XML evidence.')
+
+
+def _build_loop_metadata(doc_questions: dict, xml_questions: list) -> dict:
+    doc_d = [q for q in (doc_questions or {}) if normalize_qid(q).startswith('D')]
+    xml_d = [(x.get('qid') or '') for x in (xml_questions or []) if normalize_qid(x.get('qid') or '').startswith('D')]
+    if not doc_d and not xml_d:
+        return {}
+    repeated = sorted(set(normalize_qid(q) for q in xml_d if re.search(r'(X\d+|_\d+)$', str(q), re.I)))
+    return {
+        'loop_name': 'DELIVERANCES_LOOP',
+        'source_qids': sorted(set(normalize_qid(q) for q in doc_d)),
+        'max_iterations': 50 if any(normalize_qid(q) in {'D1', 'D5'} for q in doc_d + xml_d) else None,
+        'loop_count_source': 'SUM_Q1',
+        'mandatory_per_iteration': True,
+        'repeated_question_ids': repeated,
+    }
+
+
+def _looks_like_qid(qid: str) -> bool:
+    q = normalize_qid(qid)
+    return bool(q and re.match(r'^[A-Z]{1,8}\d+[A-Z]*$', q))
+
+
+def _looks_question_like(label: str) -> bool:
+    lab = str(label or '').strip().lower()
+    if not lab:
+        return False
+    question_words = (
+        '?', 'which', 'what', 'how', 'when', 'where', 'who',
+        'quel', 'quelle', 'quels', 'quelles', 'comment', 'combien',
+        'select', 'choose', 'enter', 'saisir', 'indiquez', 'choisissez',
+        'veuillez', 'répondez', 'repondez',
+    )
+    return any(w in lab for w in question_words)
+
+
+def classify_live_navigator_node(raw_id: str, normalized_id: str = '', label: str = '',
+                                 has_inputs=None, input_count: int = 0,
+                                 visible_text: str = '', doc_qids=None,
+                                 xml_qids=None, block_context: str = '') -> dict:
+    raw = str(raw_id or '').strip()
+    lab = str(label or '').strip()
+    vis = str(visible_text or '').strip()
+    q = normalize_qid(normalized_id or raw)
+    blob = f'{raw} {lab} {vis} {block_context}'.lower()
+    doc_norms = {normalize_qid(x) for x in (doc_qids or []) if x}
+    xml_norms = {normalize_qid(x) for x in (xml_qids or []) if x}
+    has_inputs_bool = bool(has_inputs) or int(input_count or 0) > 0
+    qid_shaped = _looks_like_qid(q)
+    in_doc_xml = q in doc_norms or q in xml_norms
+    question_like = _looks_question_like(f'{lab} {vis}')
+    strong_internal = any(k in blob for k in (
+        'helper', 'recode', 'timing', 'quota', 'system', 'internal',
+        'template', 'dummy', 'hidden', 'calc', 'debug',
+    ))
+    node_type = 'TEMPLATE_INTERNAL'
+    if re.match(r'^C\d+$', q) or any(k in blob for k in ('agreement', 'invoice', 'facture', 'honoraire', 'payment', 'signature', 'email')):
+        node_type = 'ADMIN_CONTRACT_PAYMENT'
+    elif q in {'S99', 'S99DATE', 'HIDLASTQ', 'QTEXTTITLE'} or any(k in blob for k in ('hidden variable', 'hidden table')):
+        node_type = 'HIDDEN_VARIABLE'
+    elif any(k in blob for k in ('intro', 'info', 'loibertrand', 'ppdintro', 'privacy', 'legal', 'information')):
+        node_type = 'INFO_TEXT'
+    elif re.search(r'(loop|iteration|child|_\d+$|x\d+$)', blob):
+        node_type = 'LOOP_CHILD'
+    elif qid_shaped and (has_inputs_bool or in_doc_xml):
+        node_type = 'USER_QUESTION'
+    elif has_inputs_bool and question_like:
+        node_type = 'USER_QUESTION'
+    elif qid_shaped and question_like and not strong_internal:
+        node_type = 'USER_QUESTION'
+    elif qid_shaped and not strong_internal:
+        node_type = 'USER_QUESTION'
+    elif strong_internal and not has_inputs_bool and not in_doc_xml:
+        node_type = 'TEMPLATE_INTERNAL'
+    elif not qid_shaped and not has_inputs_bool and any(k in blob for k in ('intro', 'welcome', 'information')):
+        node_type = 'INFO_TEXT'
+    return {
+        'raw_id': raw,
+        'normalized_id': q,
+        'label': lab,
+        'input_count': int(input_count or 0),
+        'visible_text': vis,
+        'node_type': node_type,
+        'is_user_question': node_type == 'USER_QUESTION',
+        'is_hidden_or_internal': node_type in ('HIDDEN_VARIABLE', 'TEMPLATE_INTERNAL'),
+        'is_info_text': node_type == 'INFO_TEXT',
+        'is_admin_contract_payment': node_type == 'ADMIN_CONTRACT_PAYMENT',
+        'is_loop_child': node_type == 'LOOP_CHILD',
+        'source': 'live_navigator',
+    }
+
+
+def _is_internal_xml_qid(qid: str) -> bool:
+    q = str(qid or '').strip()
+    qn = _norm_qid_for_scope(q)
+    if not qn:
+        return True
+    if should_skip_qid(q):
+        return True
+    return bool(re.match(
+        r'^(hid|hidden|sys|system|tmp|template|dummy|test|quota|recode|calc|'
+        r'data|dacima|inloop|hidlang|status|complete|wi|url)',
+        qn,
+        re.I,
+    ))
+
+
+def _detect_doc_xml_scope(doc_filename: str, questions: dict, xml_questions: list) -> dict:
+    doc_ids = [str(q or '') for q in (questions or {}).keys()]
+    xml_ids = [str((q or {}).get('qid') or '') for q in (xml_questions or [])]
+    doc_norms = [_norm_qid_for_scope(q) for q in doc_ids]
+    xml_norms = [_norm_qid_for_scope(q) for q in xml_ids]
+    doc_count = len(doc_norms)
+    xml_count = len(xml_norms)
+    screenish = sum(1 for q in doc_norms if re.match(r'^(r|s|sc|sa)\d', q))
+    main_xml = sum(1 for q in xml_norms if re.match(r'^(q|d)\d', q))
+    filename_screener = 'screener' in str(doc_filename or '').lower()
+    partial_signals = []
+    if filename_screener:
+        partial_signals.append('filename_contains_screener')
+    if doc_count and screenish / max(1, doc_count) >= 0.55:
+        partial_signals.append('doc_mostly_screener_qids')
+    if doc_count and xml_count >= doc_count * 1.35:
+        partial_signals.append('xml_has_many_more_questions')
+    if main_xml and filename_screener:
+        partial_signals.append('xml_has_main_survey_qids')
+    scope_type = 'FULL_DOC_SCOPE'
+    if filename_screener and partial_signals:
+        scope_type = 'SCREENER_ONLY_DOC'
+    elif len(partial_signals) >= 2:
+        scope_type = 'PARTIAL_DOC_SCOPE'
+    return {
+        'scope_type': scope_type,
+        'signals': partial_signals,
+        'doc_qids': doc_ids[:60],
+        'xml_qids': xml_ids[:80],
+        'doc_question_count': doc_count,
+        'xml_question_count': xml_count,
+    }
+
+
+def _classify_xml_only_scope(qid: str, scope_info: dict) -> str:
+    if _is_internal_xml_qid(qid):
+        return 'TEMPLATE_OR_INTERNAL'
+    qn = _norm_qid_for_scope(qid)
+    scope_type = (scope_info or {}).get('scope_type', 'FULL_DOC_SCOPE')
+    if scope_type in ('SCREENER_ONLY_DOC', 'PARTIAL_DOC_SCOPE'):
+        if re.match(r'^(q|d)\d', qn):
+            return 'FULL_SURVEY_EXTRA'
+        return 'XML_OUT_OF_DOC_SCOPE'
+    return 'IN_SCOPE_XML_ONLY'
+
+
+def _move_suppressed_standard_findings(issues: list, job: dict, scope_info: dict) -> list:
+    kept = []
+    out_of_scope = list(job.get('xml_out_of_scope_questions') or [])
+    suppressed_internal = list(job.get('suppressed_internal_xml_items') or [])
+    for issue in issues or []:
+        if issue.get('type') in ('IN_XML_NOT_IN_DOC', 'QID IN EXPORT NOT IN DOC/LIVE'):
+            cls = issue.get('scope_classification') or _classify_xml_only_scope(issue.get('qid'), scope_info)
+            issue['scope_classification'] = cls
+            if cls in ('XML_OUT_OF_DOC_SCOPE', 'FULL_SURVEY_EXTRA'):
+                issue['suppressed_from_main_count'] = True
+                issue['root_cause'] = cls
+                out_of_scope.append(issue)
+                continue
+            if cls in ('TEMPLATE_OR_INTERNAL', 'SUPPRESSED_INTERNAL'):
+                issue['suppressed_from_main_count'] = True
+                issue['root_cause'] = 'SUPPRESSED_INTERNAL'
+                suppressed_internal.append(issue)
+                continue
+        kept.append(issue)
+    job['xml_out_of_scope_questions'] = out_of_scope
+    job['suppressed_internal_xml_items'] = suppressed_internal
+    job['suppressed_out_of_scope_count'] = len(out_of_scope)
+    job['suppressed_internal_count'] = len(suppressed_internal)
+    return kept
+
+
+def _classify_issue_root_cause(issue, diagnostic, questions, live_data,
+                               xml_questions, rule_findings=None,
+                               term_results=None):
+    """Classify diagnostic evidence into a root-cause bucket.
+
+    This is intentionally diagnostic-only. It must not change issue count,
+    severity, confidence, suppression, parser output, or comparison behavior.
+    """
+    def _txt(v):
+        return str(v or '').strip()
+
+    def _norm(v):
+        return normalize_qid(_txt(v))
+
+    def _has_opts(src):
+        return bool((src or {}).get('options') or (src or {}).get('codes'))
+
+    def _qid_alias(a, b):
+        a0, b0 = _txt(a), _txt(b)
+        an, bn = _norm(a0), _norm(b0)
+        if not an or not bn or an == bn:
+            return False
+        if an.replace('new', '') == bn.replace('new', ''):
+            return True
+        if an.replace('x', '') == bn.replace('x', ''):
+            return True
+        if an.rstrip('abcdefghijklmnopqrstuvwxyz') == bn.rstrip('abcdefghijklmnopqrstuvwxyz'):
+            return True
+        if an in bn or bn in an:
+            return True
+        if re.match(r'^g[a-z]', b0, re.I) and an in bn:
+            return True
+        return False
+
+    issue_type = _txt(issue.get('type') or issue.get('issue_type')).upper()
+    details = _txt(issue.get('details'))
+    evidence_notes = _txt(diagnostic.get('evidence_notes'))
+    created_by = _txt(diagnostic.get('created_by_engine')).lower()
+    parser_health = _txt(diagnostic.get('parser_health'))
+    conf = issue.get('confidence')
+    conf_num = conf if isinstance(conf, (int, float)) else None
+
+    doc = diagnostic.get('source_doc', {}) or {}
+    xml = diagnostic.get('source_xml', {}) or {}
+    live = diagnostic.get('source_live', {}) or {}
+    doc_text = _txt(doc.get('text'))
+    xml_text = _txt(xml.get('text'))
+    live_text = _txt(live.get('text'))
+    doc_qid = _txt(doc.get('qid') or issue.get('qid'))
+    xml_qid = _txt(xml.get('qid'))
+    live_qid = _txt(live.get('qid'))
+    matched_id = _txt(diagnostic.get('matched_id'))
+    live_status = _txt(diagnostic.get('live_status') or live.get('status'))
+    selector_status = _txt(live.get('selector_status'))
+    notes_blob = ' '.join([details, evidence_notes, created_by]).lower()
+    live_blob = ' '.join([live_status, selector_status, notes_blob]).lower()
+    scope_cls = _txt(issue.get('scope_classification') or issue.get('root_cause'))
+
+    has_doc_evidence = bool(doc_text or _has_opts(doc))
+    has_xml_evidence = bool(xml_text or _has_opts(xml))
+    has_live_evidence = bool(live_text or live_status or selector_status)
+    has_xml_source = bool(xml_questions)
+    rule_match = any(
+        _norm(rf.get('qid')) == _norm(issue.get('qid'))
+        for rf in (rule_findings or [])
+        if isinstance(rf, dict)
+    )
+    term_match = any(
+        _norm(tr.get('test_qid')) == _norm(issue.get('qid'))
+        for tr in (term_results or [])
+        if isinstance(tr, dict)
+    )
+
+    signals = []
+
+    if scope_cls in ('XML_OUT_OF_DOC_SCOPE', 'FULL_SURVEY_EXTRA', 'TEMPLATE_OR_INTERNAL', 'SUPPRESSED_INTERNAL'):
+        signals.append(f'scope_classification={scope_cls}')
+        if scope_cls in ('TEMPLATE_OR_INTERNAL', 'SUPPRESSED_INTERNAL'):
+            return "SUPPRESSED_INTERNAL", "XML item is internal/template/programming-only", signals
+        return scope_cls, "XML question is outside the uploaded DOC scope", signals
+    if 'possible_wrong_xml_export' in notes_blob:
+        signals.append('possible project mismatch warning')
+        return "POSSIBLE_WRONG_XML_EXPORT", "DOC/XML project fingerprint may not match", signals
+
+    # LIVE_RENDER: locator/render/crawl failures are never REAL_BUG.
+    live_fail_markers = (
+        'failed', 'locator_failed', 'not_found', 'timeout',
+        'navigation_failed', 'container_failed', 'crawl_failed',
+        'selector_failure', 'full_page_extraction', 'wrong_content',
+        'could not locate', 'could not find', 'error page',
+    )
+    if any(m in live_blob for m in live_fail_markers):
+        signals.append(f'live_status={live_status or selector_status or "failure"}')
+        return "LIVE_RENDER", "Live locator/render failed before semantic validation", signals
+    if issue_type in ('MISSING IN LIVE', 'IN_XML_NOT_VERIFIED_IN_LIVE', 'MISSING IN OTHER') and (
+            has_doc_evidence or has_xml_evidence) and not live_text:
+        signals.extend(['doc/xml evidence exists', 'live_text empty'])
+        return "LIVE_RENDER", "Question was not semantically validated in live survey", signals
+    if selector_status.upper() in ('EMPTY', 'UNVERIFIED', 'CONDITIONAL') and not live_text:
+        signals.append(f'selector_status={selector_status}')
+        return "LIVE_RENDER", "Live content was not captured reliably", signals
+
+    # DOC_PARSER: doc source looks incomplete for doc-dependent issues.
+    doc_dependent = any(k in issue_type for k in (
+        'TEXT', 'WORD', 'OPTION', 'CODE', 'MANDATORY', 'ROUTING',
+        'PIPING', 'MISSING', 'TERMINATION',
+    ))
+    if doc_dependent:
+        text_sensitive = any(k in issue_type for k in ('TEXT', 'WORD', 'MANDATORY', 'ROUTING', 'PIPING', 'MISSING', 'TERMINATION'))
+        if text_sensitive and doc_qid and len(doc_text) < 12 and (xml_text or live_text or has_xml_evidence):
+            signals.extend([f'doc_text_len={len(doc_text)}', 'xml/live evidence exists'])
+            return "DOC_PARSER", "Doc evidence is empty or too short for this comparison", signals
+        if any(k in issue_type for k in ('OPTION', 'CODE')) and not _has_opts(doc) and (
+                _has_opts(xml) or _has_opts(live)):
+            signals.extend(['doc_options empty', 'xml/live options exist'])
+            return "DOC_PARSER", "Doc options/codes appear incomplete", signals
+        if 0 < len(doc_text) < 35 and doc_text.endswith((':', ';', '-', '...')):
+            signals.append('doc_text appears truncated')
+            return "DOC_PARSER", "Doc extracted text appears truncated", signals
+
+    # XML_PARSER: XML source exists but extraction is incomplete/system-like.
+    xml_dependent = has_xml_source or 'XML' in issue_type or 'EXPORT' in issue_type
+    hidden_xml_pat = re.compile(r'^(h|hid|hidden|sys|system|tmp|template|dummy|test)', re.I)
+    if xml_dependent:
+        if has_xml_source and xml_qid and not xml_text and not _has_opts(xml):
+            signals.extend(['xml source provided', 'xml_text/options empty'])
+            return "XML_PARSER", "XML question evidence is incomplete", signals
+        if len(xml.get('options') or []) > 80:
+            signals.append(f'xml_options_count={len(xml.get("options") or [])}')
+            return "XML_PARSER", "XML options look unexpectedly large", signals
+        if hidden_xml_pat.match(xml_qid or _txt(issue.get('qid'))) and issue_type in (
+                'IN_XML_NOT_IN_DOC', 'QID IN EXPORT NOT IN DOC/LIVE'):
+            signals.append(f'xml_qid={xml_qid or issue.get("qid")}')
+            return "XML_PARSER", "XML finding appears to reference hidden/system/template data", signals
+        if 'xml parse' in notes_blob or 'parser failure' in notes_blob:
+            signals.append('xml parser failure note')
+            return "XML_PARSER", "XML parser reported incomplete extraction", signals
+
+    # MAPPING: uncertain source alignment or alias-like QID mismatch.
+    alias_pairs = [(doc_qid, live_qid), (doc_qid, xml_qid), (doc_qid, matched_id)]
+    if any(_qid_alias(a, b) for a, b in alias_pairs):
+        signals.append(f'qid_alias doc={doc_qid} xml={xml_qid} live={live_qid} matched={matched_id}')
+        return "MAPPING", "Source QIDs appear aligned through an alias or platform rewrite", signals
+    if not matched_id and (has_doc_evidence or has_xml_evidence or has_live_evidence):
+        signals.append('matched_id missing')
+        return "MAPPING", "No stable matched ID is available", signals
+    map_conf = issue.get('mapping_confidence')
+    map_conf_num = map_conf if isinstance(map_conf, (int, float)) else None
+    if map_conf_num is not None and map_conf_num < 0.70:
+        signals.append(f'mapping_confidence={map_conf_num}')
+        return "MAPPING", "Low-confidence source mapping requires manual review", signals
+    if conf_num is not None and conf_num < 55 and any(k in issue_type for k in ('TEXT', 'OPTION', 'MISSING')):
+        signals.append(f'confidence={conf_num}')
+        return "MAPPING", "Low-confidence comparison may be a source mapping issue", signals
+    if any(k in notes_blob for k in ('semantic match', 'renamed', 'merged', 'matrix screen', 'same question')):
+        signals.append('mapping/alias note in evidence')
+        return "MAPPING", "Evidence suggests the same question may exist under another ID", signals
+
+    # AI_UNCERTAIN: AI-only or language indicating weak semantic evidence.
+    ai_terms = ('ai', 'semantic', 'possible', 'weak', 'fallback', 'ambiguous', 'uncertain')
+    if any(t in notes_blob for t in ai_terms):
+        if not rule_match and not term_match:
+            signals.append('ai/semantic uncertainty without deterministic support')
+            return "AI_UNCERTAIN", "Issue relies on uncertain AI or fallback evidence", signals
+    if 'ai' in created_by and (conf_num is None or conf_num < 75) and not rule_match:
+        signals.append(f'created_by={created_by}')
+        return "AI_UNCERTAIN", "AI-created issue lacks deterministic support", signals
+
+    # REAL_BUG: only when all relevant evidence looks clean and deterministic.
+    deterministic_types = (
+        'CODE MISMATCH',
+        'OPTIONS COUNT MISMATCH',
+        'OPTION TEXT MISSING IN XML',
+        'ROUTING IN XML NOT IN DOC',
+        'PIPING IN DOC NOT IN XML',
+        'MANDATORY MISSING',
+        'TERMINATION MISSING',
+    )
+    clean_sources = has_doc_evidence and (has_xml_evidence or has_live_evidence)
+    clean_mapping = bool(matched_id) and not any(_qid_alias(a, b) for a, b in alias_pairs)
+    no_parser_warning = parser_health not in ('UNKNOWN', 'LIVE_EXTRACTION_LIMITED')
+    if (issue_type in deterministic_types or rule_match or term_match) and clean_sources and clean_mapping and no_parser_warning:
+        signals.extend(['deterministic evidence', f'parser_health={parser_health}', 'mapping stable'])
+        return "REAL_BUG", "Clean deterministic evidence supports this issue", signals
+
+    # REVIEW_REQUIRED: mixed or medium/low evidence that is not safely classified.
+    if conf_num is not None and conf_num < 75:
+        signals.append(f'confidence={conf_num}')
+        return "REVIEW_REQUIRED", "Evidence is below high-confidence threshold", signals
+    if parser_health == 'UNKNOWN':
+        signals.append('parser_health=UNKNOWN')
+        return "REVIEW_REQUIRED", "Parser health is unknown and evidence is mixed", signals
+    if has_doc_evidence != has_xml_evidence or has_live_evidence != has_doc_evidence:
+        signals.append('source coverage is mixed')
+        return "REVIEW_REQUIRED", "Source evidence coverage is mixed", signals
+
+    return "UNCLASSIFIED", "No root-cause rule matched", signals
+
+
+def _build_diagnostic_evidence(issues, rule_findings, term_results,
+                               questions, live_data, xml_questions, job):
+    """Attach compact source evidence to issues without changing QC verdicts.
+
+    This is intentionally a reporting layer. It reads existing issue/evidence
+    fields and source models, caps snippets, and never changes severity,
+    confidence, issue inclusion, parser output, live crawl output, or scoring.
+    """
+    def _n(q):
+        return normalize_qid(q)
+
+    def _cap(v, n=250):
+        return re.sub(r'\s+', ' ', str(v or '')).strip()[:n]
+
+    def _opt_texts(opts):
+        out = []
+        for o in opts or []:
+            if isinstance(o, dict):
+                txt = o.get('text', '')
+            else:
+                txt = str(o)
+            if txt:
+                out.append(_cap(txt, 120))
+        return out[:20]
+
+    def _opt_codes(opts):
+        out = []
+        for o in opts or []:
+            if isinstance(o, dict):
+                code = o.get('code', '')
+                if code != '':
+                    out.append(str(code)[:40])
+        return out[:20]
+
+    doc_by_n = {_n(k): (k, v) for k, v in (questions or {}).items()}
+    live_by_n = {_n(k): (k, v) for k, v in (live_data or {}).items()}
+    xml_by_n = {
+        _n(x.get('qid_normalized') or x.get('qid', '')): x
+        for x in (xml_questions or [])
+        if x.get('qid') or x.get('qid_normalized')
+    }
+
+    issue_records = []
+    root_cause_summary = {bucket: 0 for bucket in ROOT_CAUSE_BUCKETS}
+    for issue in issues or []:
+        qid = issue.get('qid', '')
+        nqid = _n(qid)
+        doc_key, doc_q = doc_by_n.get(nqid, (qid, {}))
+        live_key, live_q = live_by_n.get(nqid, (qid, {}))
+        xml_q = xml_by_n.get(nqid, {})
+        ev = issue.get('evidence', {}) or {}
+
+        doc_opts_raw = doc_q.get('options', []) if isinstance(doc_q, dict) else []
+        live_opts_raw = live_q.get('options', []) if isinstance(live_q, dict) else []
+        xml_opts_raw = xml_q.get('options', []) if isinstance(xml_q, dict) else []
+
+        doc_text = ev.get('doc_text') or (doc_q.get('text', '') if isinstance(doc_q, dict) else '')
+        live_text = ev.get('live_text') or (live_q.get('text', '') if isinstance(live_q, dict) else '')
+        xml_text = ev.get('xml_text') or (xml_q.get('text', '') if isinstance(xml_q, dict) else '')
+
+        doc_options = ev.get('doc_options') or _opt_texts(doc_opts_raw)
+        live_options = ev.get('live_options') or _opt_texts(live_opts_raw)
+        xml_options = ev.get('xml_options') or _opt_texts(xml_opts_raw)
+
+        live_status = ev.get('live_status') or (
+            live_q.get('status', '') if isinstance(live_q, dict) else ''
+        )
+        selector_status = ev.get('extraction_status') or (
+            live_q.get('extraction_status', '') if isinstance(live_q, dict) else ''
+        )
+        created_by = (
+            issue.get('source_phase')
+            or issue.get('rule')
+            or issue.get('check')
+            or ('export_validator' if issue.get('is_export_issue') else 'app_qc_engine')
+        )
+        notes = (
+            ev.get('mismatch_detail')
+            or issue.get('details')
+            or issue.get('evidence')
+            or ''
+        )
+        parser_health = 'UNKNOWN'
+        if doc_text or xml_text or live_text:
+            parser_health = 'SOURCE_DATA_AVAILABLE'
+        if selector_status in ('WRONG_CONTENT', 'FULL_PAGE_EXTRACTION', 'SELECTOR_FAILURE'):
+            parser_health = 'LIVE_EXTRACTION_LIMITED'
+
+        diagnostic = {
+            "source_doc": {
+                "qid": doc_key if doc_q else qid,
+                "text": _cap(doc_text),
+                "options": _opt_texts(doc_options),
+                "codes": (_opt_codes(doc_opts_raw)
+                          or [str(c)[:40] for c in issue.get('doc_codes', [])][:20]),
+            },
+            "source_xml": {
+                "qid": (xml_q.get('qid', '') if isinstance(xml_q, dict) else '') or qid,
+                "text": _cap(xml_text),
+                "options": _opt_texts(xml_options),
+                "codes": (_opt_codes(xml_opts_raw)
+                          or [str(c)[:40] for c in issue.get('xml_codes', [])][:20]),
+            },
+            "source_live": {
+                "qid": live_key if live_q else qid,
+                "text": _cap(live_text),
+                "status": _cap(live_status, 120),
+                "selector_status": _cap(selector_status, 80),
+            },
+            "matched_id": (
+                issue.get('matched_id')
+                or (live_key if live_q else (xml_q.get('qid', '') if isinstance(xml_q, dict) else qid))
+            ),
+            "root_cause": "UNCLASSIFIED",
+            "root_cause_reason": "",
+            "classification_signals": [],
+            "created_by_engine": _cap(created_by, 120),
+            "mapping_confidence": issue.get('mapping_confidence', issue.get('confidence')),
+            "parser_health": parser_health,
+            "live_status": _cap(live_status, 120),
+            "evidence_notes": _cap(notes, 350),
+        }
+        root_cause, root_reason, signals = _classify_issue_root_cause(
+            issue,
+            diagnostic,
+            questions,
+            live_data,
+            xml_questions,
+            rule_findings=rule_findings,
+            term_results=term_results,
+        )
+        if root_cause not in root_cause_summary:
+            root_cause = "UNCLASSIFIED"
+        diagnostic["root_cause"] = root_cause
+        diagnostic["root_cause_reason"] = _cap(root_reason, 180)
+        diagnostic["classification_signals"] = [_cap(s, 140) for s in (signals or [])[:8]]
+        root_cause_summary[root_cause] += 1
+        issue["diagnostic"] = diagnostic
+        issue_records.append({
+            "qid": qid,
+            "type": issue.get("type") or issue.get("issue_type") or "",
+            "severity": issue.get("severity", ""),
+            "confidence": issue.get("confidence"),
+            "root_cause": root_cause,
+            "diagnostic": diagnostic,
+        })
+
+    job["root_cause_summary"] = root_cause_summary
+    return {
+        "enabled": True,
+        "job_id": job.get("id", ""),
+        "generated_at": datetime.now().isoformat(),
+        "root_cause_summary": root_cause_summary,
+        "issues": issue_records,
+        "rule_findings": _normalize_rule_finding_diagnostics(rule_findings),
+        "termination_results": [
+            {
+                "source": "termination_test",
+                "test_qid": r.get("test_qid", ""),
+                "answer_code": r.get("answer_code", ""),
+                "passed": r.get("passed"),
+                "needs_review": r.get("needs_review", False),
+                "details": _cap(r.get("details", ""), 300),
+            }
+            for r in (term_results or [])
+        ],
+    }
+
+
 def ai_generate_summary(model, questions, live_data, issues):
     """Generate a human-readable AI summary of the QC report."""
+    main_count = sum(1 for i in issues if _is_main_issue(i))
+    review_count = sum(1 for i in issues if _is_review_item(i))
     if not model:
         # Fallback: rule-based summary
-        high = sum(1 for i in issues if i.get('severity') == 'HIGH')
-        med = sum(1 for i in issues if i.get('severity') == 'MEDIUM')
-        total = len(issues)
-        if total == 0:
-            return "All checks passed. No issues detected across " + str(len(questions)) + " questions. Survey is ready to launch."
-        return (str(total) + " issue(s) detected: " + str(high) + " high-priority, " + str(med) + " medium. "
-                "Review high-priority issues before launching the survey.")
+        if main_count == 0 and review_count == 0:
+            return "All checks passed. No main issues or review items were detected across " + str(len(questions)) + " questions."
+        if main_count == 0:
+            return str(review_count) + " review item(s) identified. No confirmed main issues were detected."
+        return str(main_count) + " main issue(s) and " + str(review_count) + " review item(s) identified."
     try:
-        issue_brief = "; ".join([i.get('type', '') + " on " + i.get('qid', '') for i in issues[:15]])
+        review_brief = "; ".join([
+            i.get('type', '') + " on " + i.get('qid', '')
+            for i in issues
+            if _is_review_item(i)
+        ][:15])
+        main_brief = "; ".join([
+            i.get('type', '') + " on " + i.get('qid', '')
+            for i in issues
+            if _is_main_issue(i)
+        ][:15])
         prompt = (
             "You are a survey QC expert. Write a 2-3 sentence professional summary "
             "of this survey QC report for a client.\n\n"
             "Total questions: " + str(len(questions)) + "\n"
-            "Total issues: " + str(len(issues)) + "\n"
-            "Issues found: " + (issue_brief if issue_brief else "none") + "\n\n"
-            "Be concise, professional, actionable. Plain text only, no markdown."
+            "Main issues: " + str(main_count) + "\n"
+            "Review items: " + str(review_count) + "\n"
+            "Main issue examples: " + (main_brief if main_brief else "none") + "\n"
+            "Review item examples: " + (review_brief if review_brief else "none") + "\n\n"
+            "Be concise, professional, actionable. Plain text only, no markdown. "
+            "Do not call review items issues; say review items."
         )
         resp = _ai_call(model, prompt)
         return resp.text.strip()[:600]
     except Exception:
-        total = len(issues)
-        if total == 0:
-            return "All checks passed. No issues detected. Survey is ready to launch."
-        return str(total) + " issue(s) detected. Review before launching."
+        if main_count == 0 and review_count == 0:
+            return "All checks passed. No main issues or review items were detected."
+        if main_count == 0:
+            return str(review_count) + " review item(s) identified. No confirmed main issues were detected."
+        return str(main_count) + " main issue(s) and " + str(review_count) + " review item(s) identified."
 
 
 def _parse_tables_for_qids(doc, questions, qid_pat, junk_re):
@@ -5075,6 +6154,38 @@ def _parse_tables_for_qids(doc, questions, qid_pat, junk_re):
 
         full_text = "\n".join(c for row in rows for c in row if c)
 
+        if (
+            re.search(r'HIDDEN\s+TABLE', full_text, re.IGNORECASE)
+            and re.search(r'\bRecode\b', full_text, re.IGNORECASE)
+            and re.search(r'QUOTA\s+QUESTION', full_text, re.IGNORECASE)
+        ):
+            _hidden_qid = ''
+            if rows and rows[0]:
+                _m_hidden = re.search(r'\b([A-Za-z]{1,8}\d+[A-Za-z]*)\b', rows[0][0])
+                if _m_hidden:
+                    _hidden_qid = _m_hidden.group(1)
+            if _hidden_qid and not should_skip_qid(_hidden_qid):
+                questions.setdefault(_hidden_qid, {
+                    "text": "", "options": [],
+                    "is_mandatory": False, "has_piping": False,
+                    "termination_rules": [], "is_numeric": True,
+                    "question_type": "NUMERIC",
+                })
+                questions[_hidden_qid]["is_numeric"] = True
+                questions[_hidden_qid]["question_type"] = "NUMERIC"
+                questions[_hidden_qid]["hidden_recode_table"] = True
+                questions[_hidden_qid]["quota_variable"] = True
+                _recode_categories = []
+                for _r in rows[1:]:
+                    if len(_r) >= 2 and str(_r[0]).strip():
+                        _recode_categories.append({
+                            "code": str(_r[0]).strip(),
+                            "text": str(_r[1]).strip(),
+                            "source": "hidden_recode_table",
+                        })
+                questions[_hidden_qid]["recode_categories"] = _recode_categories
+            continue
+
         # Programming tables hold TYPE/ROUTING metadata, not answer content.
         # Extract the header QID (the question being defined) but skip the body.
         if pt_re.search(full_text):
@@ -5107,6 +6218,15 @@ def _parse_tables_for_qids(doc, questions, qid_pat, junk_re):
                                 }
                             if re.search(r'\bNUMERIC\b', full_text, re.IGNORECASE):
                                 questions[_hqid]["is_numeric"] = True
+                            if (
+                                re.search(r'\bNUMERIC\b', full_text, re.IGNORECASE)
+                                and re.search(r'HIDDEN\s+TABLE', full_text, re.IGNORECASE)
+                                and re.search(r'\bRecode\b', full_text, re.IGNORECASE)
+                                and re.search(r'QUOTA\s+QUESTION', full_text, re.IGNORECASE)
+                            ):
+                                questions[_hqid]["hidden_recode_table"] = True
+                                questions[_hqid]["quota_variable"] = True
+                                questions[_hqid]["recode_categories"] = []
                             # Extract full TYPE string for weak-detection logic
                             if not questions[_hqid].get("question_type"):
                                 for _trow in rows[1:6]:
@@ -5218,6 +6338,20 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         return
 
     job = jobs[job_id]
+    survey_url = _normalize_live_url(survey_url or job.get('survey_url', ''))
+    qc_mode = 'ADVANCED' if survey_url else 'STANDARD'
+    job['survey_url'] = survey_url
+    job['qc_mode'] = qc_mode
+    job['qc_mode_label'] = 'ADVANCED QC — DOC + XML + LIVE' if qc_mode == 'ADVANCED' else 'STANDARD QC — DOC + XML'
+    if qc_mode == 'STANDARD':
+        job['live_status'] = 'NOT_PROVIDED'
+        job['termination_live_status'] = 'SKIPPED_NO_LIVE_URL'
+        job['playwright_status'] = 'SKIPPED_NO_LIVE_URL'
+        job['playwright_tests'] = {
+            "results": [],
+            "summary": {"total": 0, "passed": 0, "failed": 0, "errors": 0, "skipped": 0},
+            "error": "SKIPPED_NO_LIVE_URL",
+        }
 
     def log(msg, color='white'):
         job['logs'].append({'msg': msg, 'color': color})
@@ -5714,6 +6848,37 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             questions[qid]["text"] = re.sub(r'\s+', ' ', questions[qid]["text"]).strip()
 
         term_count = sum(len(q.get("termination_rules", [])) for q in questions.values())
+        _hidden_recode_qids = []
+        for _rqid, _rq in questions.items():
+            _qt = (_rq.get("question_type") or "").upper()
+            if (
+                _rq.get("hidden_recode_table")
+                or (_rq.get("is_numeric") and "NUMERIC" in _qt and _rq.get("quota_variable"))
+            ):
+                _rq["question_type"] = "NUMERIC"
+                _rq["is_numeric"] = True
+                _rq["hidden_recode_table"] = True
+                _rq["quota_variable"] = True
+                if _rq.get("options"):
+                    _rq["recode_categories"] = list(_rq.get("options") or [])
+                    _rq["options"] = []
+                _hidden_recode_qids.append(_rqid)
+        if _hidden_recode_qids:
+            job["hidden_recode_quota_variables"] = [
+                {
+                    "qid": _qid,
+                    "status": "HIDDEN_RECODE_TABLE_DETECTED",
+                    "root_cause": "REVIEW_REQUIRED",
+                    "details": "Numeric respondent input has a hidden recode/quota table; recode categories are excluded from answer-option comparison.",
+                }
+                for _qid in _hidden_recode_qids
+            ]
+            log(
+                "  Hidden/Recode/Quota Variables: "
+                + ", ".join(sorted(_hidden_recode_qids))
+                + " (excluded from visible answer-option checks)",
+                "blue",
+            )
         # ── [TERM DEBUG] checkpoint 3: post-parse canonical model ────────────
         app.logger.debug("[TERM DEBUG] Total termination rules in canonical model: %d", term_count)
         for _dbg_qid, _dbg_q in questions.items():
@@ -5947,7 +7112,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         _subq_re = re.compile(r'^[A-Za-z]{1,8}\d+[a-zA-Z]\d*$')
 
         def _is_true_ghost(qid, v):
-            if qid.upper() in SCREENER_QIDS:  # imported from qid_normalizer
+            if normalize_qid(qid) in SCREENER_QIDS:  # imported from qid_normalizer
                 return False
             if _subq_re.match(qid):
                 return False
@@ -6010,11 +7175,55 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 log('  PHASE 1.5: XML EXPORT PARSING', 'cyan')
                 log('════════════════════════════════════', 'cyan')
                 import xml_parser as _xml_parser_mod
-                xml_questions, _xml_meta = _xml_parser_mod.parse_export_with_stats(_xml_path)
+
+                def _xml_parse_progress(_message):
+                    progress(18, _message)
+                    log(f'  XML: {_message}', 'cyan')
+
+                def _xml_parse_log(_message):
+                    log(f'  XML timing: {_message}', 'grey')
+
+                _xml_ui_start = time.time()
+                _xml_meta = {}
+                log(f'  XML_UI_PARSE_CALL_START file={os.path.basename(_xml_path)}', 'grey')
+                _xml_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                _xml_future = _xml_executor.submit(
+                    _xml_parser_mod.parse_export_with_stats,
+                    _xml_path,
+                    progress_cb=_xml_parse_progress,
+                    log_cb=_xml_parse_log,
+                    timeout_s=45,
+                )
+                try:
+                    xml_questions, _xml_meta = _xml_future.result(timeout=45)
+                except concurrent.futures.TimeoutError:
+                    _xml_future.cancel()
+                    xml_questions = []
+                    _xml_meta = {
+                        'warning': 'XML_PARSER_TIMEOUT',
+                        'timeout': True,
+                        'timeout_at': 'XML_UI_PARSE_CALL',
+                    }
+                    job['xml_parse_failed'] = True
+                    log('  XML_UI_PARSE_CALL_TIMEOUT duration=45.00s warning=XML_PARSER_TIMEOUT', 'yellow')
+                    log('  Phase 1.5: WARNING — XML parse call exceeded 45s; continuing without blocking QC', 'yellow')
+                finally:
+                    _xml_executor.shutdown(wait=False, cancel_futures=True)
+                _xml_ui_elapsed = time.time() - _xml_ui_start
+                log(f'  XML_UI_PARSE_CALL_END duration={_xml_ui_elapsed:.2f}s', 'grey')
+                log(f'  XML_UI_PARSE_RETURNED questions={len(xml_questions)} warning={_xml_meta.get("warning", "")}', 'grey')
+
+                _xml_canon_start = time.time()
+                log('  XML_UI_CANONICAL_START', 'grey')
                 _xml_hidden = _xml_meta.get('hidden_count', 0)
                 job['xml_questions'] = xml_questions
                 job['xml_qids'] = len(xml_questions)
                 job['xml_hidden_count'] = _xml_hidden
+                if _xml_meta:
+                    job['xml_parse_metadata'] = _xml_meta
+                log(f'  XML_UI_CANONICAL_END duration={time.time() - _xml_canon_start:.2f}s', 'grey')
+                if _xml_meta.get('warning') == 'XML_PARSER_TIMEOUT':
+                    log('  Phase 1.5: WARNING — XML parsing exceeded 45s; using partial XML model', 'yellow')
                 if xml_questions:
                     _hidden_note = f' ({_xml_hidden} hidden/template variables skipped)' if _xml_hidden else ''
                     log(f'  Phase 1.5: Parsed {len(xml_questions)} visible questions from XML export{_hidden_note}', 'green')
@@ -6031,6 +7240,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             if _xml_path:
                 log('  Phase 1.5: XML file not found, continuing without it', 'yellow')
 
+        scope_info = _detect_doc_xml_scope(os.path.basename(doc_path), questions, xml_questions)
+        job['doc_xml_fingerprint'] = {
+            'doc_filename': os.path.basename(doc_path),
+            'xml_filename': os.path.basename(_xml_path) if _xml_path else '',
+            'doc_qids': list(questions.keys())[:60],
+            'xml_qids': [(x.get('qid') or '') for x in (xml_questions or [])[:80]],
+            'scope_type': scope_info.get('scope_type'),
+            'signals': scope_info.get('signals', []),
+        }
+        job['scope_type'] = scope_info.get('scope_type', 'FULL_DOC_SCOPE')
+        if job['scope_type'] in ('SCREENER_ONLY_DOC', 'PARTIAL_DOC_SCOPE'):
+            log(f'  Scope: {job["scope_type"]} — XML-only full-survey questions will be separated from main bugs', 'blue')
+
         # ══════════════════════════════════════════════════════════════════════
         # PHASE 2.5: PRIMARY DOC vs XML COMPARISON
         # This is the main QC engine when XML is present.
@@ -6038,6 +7260,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         # mismatches, routing issues, mandatory mismatches, piping mismatches.
         # Runs in BOTH Standard mode (no live URL) and Advanced mode (with URL).
         # ══════════════════════════════════════════════════════════════════════
+        log('  XML_UI_NEXT_PHASE_START phase=PHASE_2.5_DOC_XML_COMPARISON', 'grey')
         if xml_questions:
             progress(22, 'Comparing spec doc vs XML export...')
             log('', 'white')
@@ -6046,15 +7269,77 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             log('════════════════════════════════════', 'cyan')
 
             _xml_by_norm = {}
+            _xml_alias_index = {}
             for _xq in xml_questions:
-                _xn = re.sub(r'[^a-z0-9]', '', (_xq.get('qid_normalized') or _xq.get('qid', '')).lower())
+                _xraw = _xq.get('qid') or _xq.get('qid_normalized') or ''
+                _xn = normalize_qid(_xraw)
                 if _xn:
                     _xml_by_norm[_xn] = _xq
+                    for _alias in qid_alias_candidates(_xraw):
+                        _xml_alias_index.setdefault(_alias, []).append(_xq)
             _doc_by_norm = {}
+            _doc_alias_index = {}
             for _dq, _dv in questions.items():
-                _dn = re.sub(r'[^a-z0-9]', '', _dq.lower())
+                _dn = normalize_qid(_dq)
                 if _dn:
                     _doc_by_norm[_dn] = (_dq, _dv)
+                    for _alias in qid_alias_candidates(_dq):
+                        _doc_alias_index.setdefault(_alias, []).append((_dq, _dv))
+
+            _mapping_summary = {
+                'exact_matches': 0,
+                'normalized_matches': 0,
+                'alias_matches': 0,
+                'block_text_matches': 0,
+                'low_confidence_mappings': 0,
+                'unmapped_doc_questions': 0,
+                'unmapped_xml_questions': 0,
+                'skipped_internal_xml_items': 0,
+                'skipped_live_navigator_nodes': 0,
+                'matches': [],
+            }
+            _matched_doc_norms = set()
+            _matched_xml_norms = set()
+
+            def _best_xml_match(_dq_orig, _dv):
+                _dn = normalize_qid(_dq_orig)
+                candidates = []
+                if _dn in _xml_by_norm:
+                    candidates.append(_xml_by_norm[_dn])
+                for _alias in qid_alias_candidates(_dq_orig):
+                    candidates.extend(_xml_alias_index.get(_alias, []))
+                if not candidates:
+                    dblock = _question_block(_dq_orig)
+                    for _xq in xml_questions:
+                        if should_skip_qid(_xq.get('qid', '')):
+                            continue
+                        if not _blocks_compatible(dblock, _xml_block(_xq.get('qid', ''))):
+                            continue
+                        sim = _text_similarity(_dv.get('text', ''), _xq.get('text', ''))
+                        ov = _option_overlap(_dv, _xq)
+                        if sim >= 0.72 or ov >= 0.40:
+                            candidates.append(_xq)
+                best = None
+                best_score = -1.0
+                best_method = 'no match'
+                for _cand in candidates:
+                    score, method = _mapping_confidence(_dq_orig, _dv, _cand)
+                    if score > best_score:
+                        best, best_score, best_method = _cand, score, method
+                if not best:
+                    return None
+                _xnorm = normalize_qid(best.get('qid') or best.get('qid_normalized') or '')
+                return {
+                    'doc_qid': _dq_orig,
+                    'xml_qid': best.get('qid', ''),
+                    'xml_q': best,
+                    'mapping_confidence': best_score,
+                    'mapping_method': best_method,
+                    'doc_block': _question_block(_dq_orig),
+                    'xml_block': _xml_block(best.get('qid', '')),
+                    'doc_norm': _dn,
+                    'xml_norm': _xnorm,
+                }
 
             _xml_miss_in_doc = 0
             _doc_miss_in_xml = 0
@@ -6065,35 +7350,53 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             _xml_routing_issues = 0
             _xml_piping_issues = 0
 
-            # ── Check XML questions against doc ───────────────────────────
-            for _xn, _xq in _xml_by_norm.items():
-                if should_skip_qid(_xq.get('qid', '')):
+            # ── Check DOC questions against XML inside compatible blocks ──
+            _doc_matches = {}
+            for _dn, (_dq_orig, _dv) in _doc_by_norm.items():
+                if should_skip_qid(_dq_orig):
                     continue
-                if _xn not in _doc_by_norm:
-                    _xraw = _xq.get('qid', '')
-                    _variants = [re.sub(r'[^a-z0-9]', '', v.lower())
-                                 for v in build_strip_candidates(_xraw, _xn)]
-                    if not any(v in _doc_by_norm for v in _variants if v):
-                        _xml_miss_in_doc += 1
-                        issues.append({
-                            'qid': _xraw,
-                            'type': 'IN_XML_NOT_IN_DOC',
-                            'details': f'Question found in XML export but missing from spec doc',
-                            'severity': 'MEDIUM',
-                            'confidence': 72,
-                            'conf_level': 'MEDIUM',
-                            'source_phase': 'PHASE_2.5_XML',
-                        })
-                else:
-                    _dq_orig, _dv = _doc_by_norm[_xn]
+                _match = _best_xml_match(_dq_orig, _dv)
+                if not _match:
+                    _doc_miss_in_xml += 1
+                    _mapping_summary['unmapped_doc_questions'] += 1
+                    continue
+                _doc_matches[_dn] = _match
+                _matched_doc_norms.add(_match['doc_norm'])
+                _matched_xml_norms.add(_match['xml_norm'])
+                _mc = _match['mapping_confidence']
+                _method = _match['mapping_method']
+                if _method == 'exact qid match':
+                    _mapping_summary['exact_matches'] += 1
+                elif _method == 'normalized qid match':
+                    _mapping_summary['normalized_matches'] += 1
+                elif _method == 'alias match':
+                    _mapping_summary['alias_matches'] += 1
+                elif _mc >= 0.70:
+                    _mapping_summary['block_text_matches'] += 1
+                if _mc < 0.70:
+                    _mapping_summary['low_confidence_mappings'] += 1
+                _mapping_summary['matches'].append({
+                    'doc_qid': _match['doc_qid'],
+                    'xml_qid': _match['xml_qid'],
+                    'mapping_confidence': round(_mc, 2),
+                    'mapping_method': _method,
+                    'doc_block': _match['doc_block'],
+                    'xml_block': _match['xml_block'],
+                })
+                _xq = _match['xml_q']
+                _dq_orig, _dv = _match['doc_qid'], _dv
+                _doc_is_numeric = bool(_dv.get('is_numeric')) or 'NUMERIC' in str(_dv.get('question_type', '')).upper()
+                _hidden_recode = bool(_dv.get('hidden_recode_table') or _dv.get('quota_variable'))
 
-                    # ── Option count mismatch ──────────────────────────────
-                    _doc_opt_count = len(_dv.get('options', []))
-                    _xml_opt_count = len([o for o in _xq.get('options', []) if o.get('text')])
-                    if (_doc_opt_count > 0 and _xml_opt_count > 0
-                            and abs(_doc_opt_count - _xml_opt_count) > 1):
-                        _xml_opt_mismatch += 1
-                        issues.append({
+                # ── Option count mismatch ──────────────────────────────
+                _doc_opt_count = len(_dv.get('options', []))
+                _xml_opt_count = len([o for o in _xq.get('options', []) if o.get('text')])
+                if (_doc_is_numeric or _hidden_recode):
+                    pass
+                elif (not _is_grid_or_loop_qid(_dq_orig) and _doc_opt_count > 0 and _xml_opt_count > 0
+                        and abs(_doc_opt_count - _xml_opt_count) > 1):
+                    _xml_opt_mismatch += 1
+                    issues.append(_issue_with_mapping({
                             'qid': _dq_orig,
                             'type': 'OPTIONS COUNT MISMATCH',
                             'details': (f'Doc has {_doc_opt_count} options, '
@@ -6103,25 +7406,25 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                             'confidence': 85,
                             'conf_level': 'HIGH' if abs(_doc_opt_count - _xml_opt_count) > 3 else 'MEDIUM',
                             'source_phase': 'PHASE_2.5_XML',
-                        })
-                    elif _doc_opt_count > 0 and _xml_opt_count > 0:
-                        # ── Per-option text check (detect missing specific options) ──
-                        _doc_opt_texts = [o.get('text', '').strip().lower() for o in _dv.get('options', []) if o.get('text')]
-                        _xml_opt_texts = [o.get('text', '').strip().lower() for o in _xq.get('options', []) if o.get('text')]
-                        _missing_in_xml = []
-                        for _dt in _doc_opt_texts:
-                            if len(_dt) < 3:
-                                continue
-                            _best = max(
-                                (SequenceMatcher(None, _dt[:80], _xt[:80]).ratio()
-                                 for _xt in _xml_opt_texts),
-                                default=0.0
-                            )
-                            if _best < 0.6:
-                                _missing_in_xml.append(_dt[:40])
-                        if _missing_in_xml:
-                            _xml_opt_mismatch += 1
-                            issues.append({
+                        }, _match))
+                elif not _is_grid_or_loop_qid(_dq_orig) and _doc_opt_count > 0 and _xml_opt_count > 0:
+                    # ── Per-option text check (detect missing specific options) ──
+                    _doc_opt_texts = [o.get('text', '').strip().lower() for o in _dv.get('options', []) if o.get('text')]
+                    _xml_opt_texts = [o.get('text', '').strip().lower() for o in _xq.get('options', []) if o.get('text')]
+                    _missing_in_xml = []
+                    for _dt in _doc_opt_texts:
+                        if len(_dt) < 3:
+                            continue
+                        _best = max(
+                            (SequenceMatcher(None, _dt[:80], _xt[:80]).ratio()
+                             for _xt in _xml_opt_texts),
+                            default=0.0
+                        )
+                        if _best < 0.6:
+                            _missing_in_xml.append(_dt[:40])
+                    if _missing_in_xml:
+                        _xml_opt_mismatch += 1
+                        issues.append(_issue_with_mapping({
                                 'qid': _dq_orig,
                                 'type': 'OPTION TEXT MISSING IN XML',
                                 'details': (f'Doc option(s) not found in XML: '
@@ -6131,16 +7434,18 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                 'confidence': 75,
                                 'conf_level': 'MEDIUM',
                                 'source_phase': 'PHASE_2.5_XML',
-                            })
+                            }, _match))
 
-                    # ── Answer code sequence check ────────────────────────
-                    _doc_codes = [o.get('code', '') for o in _dv.get('options', []) if o.get('code')]
-                    _xml_codes = [o.get('code', '') for o in _xq.get('options', []) if o.get('code')]
-                    if _doc_codes and _xml_codes and _doc_codes != _xml_codes:
-                        # Check if codes are just reordered vs genuinely different
-                        if sorted(_doc_codes) != sorted(_xml_codes):
-                            _xml_code_mismatch += 1
-                            issues.append({
+                # ── Answer code sequence check ────────────────────────
+                _doc_codes = [o.get('code', '') for o in _dv.get('options', []) if o.get('code')]
+                _xml_codes = [o.get('code', '') for o in _xq.get('options', []) if o.get('code')]
+                if (not _doc_is_numeric and not _hidden_recode
+                        and not _is_grid_or_loop_qid(_dq_orig)
+                        and _doc_codes and _xml_codes and _doc_codes != _xml_codes):
+                    # Check if codes are just reordered vs genuinely different
+                    if sorted(_doc_codes) != sorted(_xml_codes):
+                        _xml_code_mismatch += 1
+                        issues.append(_issue_with_mapping({
                                 'qid': _dq_orig,
                                 'type': 'CODE MISMATCH',
                                 'details': (f'Doc codes: {_doc_codes[:6]} — '
@@ -6149,26 +7454,17 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                 'confidence': 88,
                                 'conf_level': 'HIGH',
                                 'source_phase': 'PHASE_2.5_XML',
-                            })
+                            }, _match))
 
-                    # ── Mandatory flag mismatch ───────────────────────────
-                    _doc_mandatory = bool(_dv.get('is_mandatory'))
-                    _xml_type = (_xq.get('type') or '').upper()
-                    # XML doesn't always carry mandatory flag — only check when
-                    # doc says mandatory but XML type is open/numeric (no required attr)
-                    # This is a weak signal; keep at MEDIUM confidence
-                    # (XML rarely stores mandatory explicitly, so skip this check
-                    #  to avoid false positives — mandatory is best verified in live)
-
-                    # ── Routing/logic check ───────────────────────────────
-                    _xml_routing = (_xq.get('routing') or '').strip()
-                    _doc_has_routing = bool(_dv.get('termination_rules'))
-                    if _xml_routing and not _doc_has_routing:
-                        # XML has routing but doc has no logic table for this Q
-                        # Only flag if routing is non-trivial (not just a skip)
-                        if len(_xml_routing) > 10 and 'terminate' in _xml_routing.lower():
-                            _xml_routing_issues += 1
-                            issues.append({
+                # ── Routing/logic check ───────────────────────────────
+                _xml_routing = (_xq.get('routing') or '').strip()
+                _doc_has_routing = bool(_dv.get('termination_rules'))
+                if _xml_routing and not _doc_has_routing:
+                    # XML has routing but doc has no logic table for this Q
+                    # Only flag if routing is non-trivial (not just a skip)
+                    if len(_xml_routing) > 10 and 'terminate' in _xml_routing.lower():
+                        _xml_routing_issues += 1
+                        issues.append(_issue_with_mapping({
                                 'qid': _dq_orig,
                                 'type': 'ROUTING IN XML NOT IN DOC',
                                 'details': (f'XML has termination routing for {_dq_orig} '
@@ -6178,18 +7474,18 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                 'confidence': 65,
                                 'conf_level': 'MEDIUM',
                                 'source_phase': 'PHASE_2.5_XML',
-                            })
+                            }, _match))
 
-                    # ── Piping check ──────────────────────────────────────
-                    _doc_has_piping = bool(_dv.get('has_piping'))
-                    _xml_text_str = (_xq.get('text') or '').lower()
-                    _xml_has_pipe_marker = any(
-                        marker in _xml_text_str
-                        for marker in ["[pipe", "{{", "<pipe", "[q", "[r"]
-                    )
-                    if _doc_has_piping and not _xml_has_pipe_marker:
-                        _xml_piping_issues += 1
-                        issues.append({
+                # ── Piping check ──────────────────────────────────────
+                _doc_has_piping = bool(_dv.get('has_piping'))
+                _xml_text_str = (_xq.get('text') or '').lower()
+                _xml_has_pipe_marker = any(
+                    marker in _xml_text_str
+                    for marker in ["[pipe", "{{", "<pipe", "[q", "[r"]
+                )
+                if _doc_has_piping and not _xml_has_pipe_marker:
+                    _xml_piping_issues += 1
+                    issues.append(_issue_with_mapping({
                             'qid': _dq_orig,
                             'type': 'PIPING IN DOC NOT IN XML',
                             'details': (f'Doc specifies piping for {_dq_orig} '
@@ -6199,20 +7495,84 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                             'confidence': 68,
                             'conf_level': 'MEDIUM',
                             'source_phase': 'PHASE_2.5_XML',
-                        })
+                        }, _match))
 
-            # ── Check doc questions against XML ───────────────────────────
-            for _dn, (_dq_orig, _dv) in _doc_by_norm.items():
-                if should_skip_qid(_dq_orig):
+            # ── Check XML-only questions after alias/block matching ───────
+            for _xn, _xq in _xml_by_norm.items():
+                _xraw = _xq.get('qid', '')
+                if not _xn or _xn in _matched_xml_norms:
                     continue
-                if _dn not in _xml_by_norm:
-                    _variants = [re.sub(r'[^a-z0-9]', '', v.lower())
-                                 for v in build_strip_candidates(_dq_orig, _dn)]
-                    if not any(v in _xml_by_norm for v in _variants if v):
-                        _doc_miss_in_xml += 1
+                _variant_matched, _variant_reason = _xml_only_duplicate_evidence(
+                    _xraw, _xq, _doc_by_norm, _matched_doc_norms
+                )
+                if _variant_matched:
+                    _mapping_summary['alias_matches'] += 1
+                    _mapping_summary['skipped_internal_xml_items'] += 1
+                    job.setdefault('suppressed_internal_xml_items', []).append({
+                        'qid': _xraw,
+                        'type': 'XML_ALIAS_OR_VARIANT',
+                        'details': f'XML-only variant suppressed: {_variant_reason}.',
+                        'severity': 'INFO',
+                        'confidence': 90,
+                        'conf_level': 'HIGH',
+                        'source_phase': 'PHASE_2.5_XML',
+                        'root_cause': 'SUPPRESSED_INTERNAL' if 'loop' in _variant_reason else 'MAPPING',
+                        'suppressed_from_main_count': True,
+                    })
+                    continue
+                _xblock = _xml_block(_xraw)
+                _scope_cls = _classify_xml_only_scope(_xraw, scope_info)
+                if (_scope_cls in ('XML_OUT_OF_DOC_SCOPE', 'FULL_SURVEY_EXTRA', 'TEMPLATE_OR_INTERNAL', 'SUPPRESSED_INTERNAL')
+                        or _xblock in ('HIDDEN_INTERNAL_TEMPLATE', 'ADMIN_PAYMENT_CONTRACT')
+                        or should_skip_qid(_xraw)
+                        or re.search(r'(X\d+|_\d+)$', str(_xraw), re.I)):
+                    _supp = {
+                        'qid': _xraw,
+                        'type': 'IN_XML_NOT_IN_DOC',
+                        'details': 'XML item is internal/template/helper/admin/out-of-scope or loop child.',
+                        'severity': 'INFO',
+                        'confidence': 0,
+                        'conf_level': 'NEEDS_MANUAL',
+                        'source_phase': 'PHASE_2.5_XML',
+                        'scope_classification': _scope_cls,
+                        'root_cause': 'SUPPRESSED_INTERNAL' if _xblock != 'ADMIN_PAYMENT_CONTRACT' else 'ADMIN_CONTRACT_PAYMENT',
+                        'suppressed_from_main_count': True,
+                    }
+                    job.setdefault('suppressed_internal_xml_items', []).append(_supp)
+                    _mapping_summary['skipped_internal_xml_items'] += 1
+                    continue
+                _xml_only_issue = _issue_with_mapping({
+                    'qid': _xraw,
+                    'type': 'IN_XML_NOT_IN_DOC',
+                    'details': 'Visible XML question appears inside DOC scope but no DOC QID/text/option match was found.',
+                    'severity': 'MEDIUM',
+                    'confidence': 50,
+                    'conf_level': 'NEEDS_MANUAL',
+                    'source_phase': 'PHASE_2.5_XML',
+                    'scope_classification': _scope_cls,
+                    'root_cause': 'REVIEW_REQUIRED',
+                }, {'xml_qid': _xraw, 'mapping_confidence': 0.0, 'mapping_method': 'no match'})
+                _xml_miss_in_doc += 1
+                _mapping_summary['unmapped_xml_questions'] += 1
+                issues.append(_xml_only_issue)
+
+            _loop_meta = _build_loop_metadata(questions, xml_questions)
+            if _loop_meta:
+                job['loop_metadata'] = _loop_meta
+
+            job['mapping_quality_summary'] = _mapping_summary
 
             # ── Summary logging ───────────────────────────────────────────
             log(f'  Phase 2.5: {len(questions)} doc QIDs vs {len(xml_questions)} XML QIDs', 'blue')
+            log('  Mapping Quality: '
+                f'exact={_mapping_summary["exact_matches"]}, '
+                f'normalized={_mapping_summary["normalized_matches"]}, '
+                f'alias={_mapping_summary["alias_matches"]}, '
+                f'block/text={_mapping_summary["block_text_matches"]}, '
+                f'low={_mapping_summary["low_confidence_mappings"]}, '
+                f'unmapped_doc={_mapping_summary["unmapped_doc_questions"]}, '
+                f'unmapped_xml={_mapping_summary["unmapped_xml_questions"]}, '
+                f'skipped_xml={_mapping_summary["skipped_internal_xml_items"]}', 'cyan')
             _phase25_issues = _xml_miss_in_doc + _xml_opt_mismatch + _xml_code_mismatch + _xml_routing_issues + _xml_piping_issues
             if _phase25_issues:
                 log(f'  Phase 2.5: {_phase25_issues} issue(s) found', 'yellow')
@@ -6268,9 +7628,9 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 if _gc > 0:
                     log(f'    G{_gn} {_re_group_names.get(_gn,"")}: {_gc}', 'yellow')
             if _re_term_matrix:
-                _mismatches = sum(1 for r in _re_term_matrix if r.get('status') == 'MISMATCH')
+                _needs_review = sum(1 for r in _re_term_matrix if r.get('status') != 'MATCH')
                 log(f'  Termination Matrix: {len(_re_term_matrix)} termination point(s)'
-                    f'{f", {_mismatches} mismatch(es)" if _mismatches else " — all aligned"}', 'cyan')
+                    f'{f", {_needs_review} review item(s)" if _needs_review else " — all aligned"}', 'cyan')
             job['rule_engine_findings']   = _re_findings
             job['rule_engine_summary']    = _re_summary
             job['termination_matrix']     = _re_term_matrix
@@ -6616,6 +7976,20 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                                 if _is_container_id(doc_qid):
                                     _container_skipped += 1
                                     continue
+                                try:
+                                    _node_label = el.inner_text(timeout=1000)
+                                except Exception:
+                                    _node_label = ''
+                                _node = classify_live_navigator_node(
+                                    doc_qid,
+                                    label=_node_label,
+                                    visible_text=_node_label,
+                                    doc_qids=questions.keys(),
+                                    xml_qids=[_x.get('qid') for _x in (xml_questions or [])],
+                                )
+                                if not _node.get('is_user_question'):
+                                    _fw_skipped += 1
+                                    continue
                                 if should_skip_qid(doc_qid):
                                     _fw_skipped += 1
                                     continue
@@ -6631,21 +8005,27 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
 
                     _skip_note = f' ({_container_skipped} container IDs skipped)' if _container_skipped else ''
                     log('  ' + str(len(qid_index_map)) + ' QIDs found in navigator' + _skip_note, 'blue')
+                    job['live_navigator_nodes'] = [
+                        classify_live_navigator_node(qid, label='', has_inputs=True, input_count=1)
+                        for _, qid, _ in qid_index_map
+                    ]
+                    if job.get('mapping_quality_summary') is not None:
+                        job['mapping_quality_summary']['skipped_live_navigator_nodes'] = _fw_skipped
                     if _fw_skipped:
                         log(f'  Skipped {_fw_skipped} framework/system pages from live navigator', 'grey')
 
                     # Re-test filter: only crawl requested QIDs
                     if filter_qids:
-                        _fset = set(q.upper() for q in filter_qids)
+                        _fset = set(normalize_qid(q) for q in filter_qids)
                         qid_index_map = [(ni, qid, pq) for ni, qid, pq in qid_index_map
-                                         if qid.upper() in _fset]
+                                         if normalize_qid(qid) in _fset]
                         log(f'  Re-test filter applied: crawling {len(qid_index_map)} of {len(filter_qids)} requested QIDs', 'cyan')
 
                     # --- Phase B: parse all question texts from static HTML in one pass ---
                     _static_qtext = _parse_question_texts_from_html(page_html)
                     _static_hits = sum(1 for v in _static_qtext.values() if v.get("text"))
                     log(f'  Static text parse: {_static_hits}/{len(_static_qtext)} question blocks with text', 'blue')
-                    def _nq(s): return s.replace('.','').replace('_','').replace('-','').replace(' ','').lower()
+                    def _nq(s): return normalize_qid(s)
 
                     _platform = detect_platform(page)
                     log(f'  Platform detected: {_platform}', 'cyan')
@@ -7469,7 +8849,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     continue
                 if live_data[_live_key]["status"] == "CONDITIONAL — could not verify":
                     # If question is in XML, it's confirmed in platform — routing hides it in test
-                    _qid_cond_norm = re.sub(r'[^a-z0-9]', '', qid.lower())
+                    _qid_cond_norm = normalize_qid(qid)
                     if _xml_qid_set and _qid_cond_norm in _xml_qid_set:
                         issues.append({
                             "qid": qid,
@@ -7536,7 +8916,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                             # Phase 5: If question exists in XML, it is NOT a bug —
                             # it was likely hidden by routing/conditional display in live.
                             # Report as NEEDS_MANUAL instead of HIGH bug.
-                            _qid_norm_chk = re.sub(r'[^a-z0-9]', '', _u["qid"].lower())
+                            _qid_norm_chk = normalize_qid(_u["qid"])
                             if _xml_qid_set and _qid_norm_chk in _xml_qid_set:
                                 log(f'      → In XML — routing/conditional (NEEDS_MANUAL, not a bug)', 'green')
                                 issues.append({
@@ -7563,7 +8943,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     # No AI model — use MEDIUM by default since there's no semantic
                     # validation; a human must confirm before treating as HIGH.
                     for _u in _ai_unmatched:
-                        _qid_norm_chk = re.sub(r'[^a-z0-9]', '', _u["qid"].lower())
+                        _qid_norm_chk = normalize_qid(_u["qid"])
                         if _xml_qid_set and _qid_norm_chk in _xml_qid_set:
                             # In XML — conditional/routing, not a bug
                             issues.append({
@@ -7767,7 +9147,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         validate_ranges as _rv_validate,
                         generate_range_test_cases as _rv_tcs,
                     )
-                    _rv_issues = _rv_validate(questions, live_data)
+                    _rv_issues = _rv_validate(questions, live_data) if survey_url and live_data else []
                     job['range_issues'] = _rv_issues
                     if _rv_issues:
                         log(f'  Range validation: {len(_rv_issues)} issue(s) found', 'yellow')
@@ -7775,7 +9155,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                             log(f'    [{_ri["rule"]}] {_ri["qid"]:8s} {_ri["evidence"][:65]}', 'yellow')
                     else:
                         log('  Range validation: no issues', 'green')
-                    _rng_tcs = _rv_tcs(questions)
+                    _rng_tcs = _rv_tcs(questions) if survey_url else []
                     _seen_tc_keys: set = {
                         (t.get('qid'), t.get('action'), t.get('expected'))
                         for t in _tc_list
@@ -7816,7 +9196,15 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             # ── PLAYWRIGHT AUTO-RUNNER ────────────────────────────────────────
             # Runs auto_runnable test cases against the live survey.
             # Never blocks the main QC — all failures are caught internally.
-            job['playwright_tests'] = {"results": [], "summary": {}, "error": None}
+            if not survey_url:
+                job['playwright_status'] = 'SKIPPED_NO_LIVE_URL'
+                job['playwright_tests'] = {
+                    "results": [],
+                    "summary": {"total": 0, "passed": 0, "failed": 0, "errors": 0, "skipped": 0},
+                    "error": "SKIPPED_NO_LIVE_URL",
+                }
+            else:
+                job['playwright_tests'] = {"results": [], "summary": {}, "error": None}
             _pw_tc = job.get('test_cases', [])
             _pw_runnable = [t for t in _pw_tc if t.get('auto_runnable') and t.get('type') != 'GRID']
             if survey_url and _pw_runnable:
@@ -7866,12 +9254,12 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             if xml_questions:
                 _xml_by_nqid = {}
                 for _xq in xml_questions:
-                    _xnorm = re.sub(r'[^a-z0-9]', '', (_xq.get('qid_normalized') or _xq.get('qid', '')).lower())
+                    _xnorm = normalize_qid(_xq.get('qid') or _xq.get('qid_normalized') or '')
                     _xml_by_nqid[_xnorm] = _xq
 
                 for _ci in issues:
                     _iqid = _ci.get('qid', '')
-                    _inorm = re.sub(r'[^a-z0-9]', '', _iqid.lower())
+                    _inorm = normalize_qid(_iqid)
                     _xq = _xml_by_nqid.get(_inorm)
                     if not _xq:
                         continue
@@ -7898,8 +9286,13 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                             _ci['xml_verdict'] = 'all_differ'
 
                 # Flag QIDs in XML that appear in neither doc nor live
-                _doc_norms = set(re.sub(r'[^a-z0-9]', '', q.lower()) for q in questions.keys())
-                _live_norms = set(re.sub(r'[^a-z0-9]', '', q.lower()) for q in live_data.keys())
+                _doc_norms = set(normalize_qid(q) for q in questions.keys())
+                _live_norms = set(normalize_qid(q) for q in live_data.keys())
+                _doc_by_norm_late = {
+                    normalize_qid(_dq): (_dq, _dv)
+                    for _dq, _dv in (questions or {}).items()
+                    if normalize_qid(_dq)
+                }
 
                 # INTERNAL_NORMS, S99_DATE_PAT, FW_NORM_PAT imported from qid_normalizer.
                 # Aliases keep the rest of this block unchanged.
@@ -7925,22 +9318,23 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     if should_skip_qid(_xraw):
                         _xml_skip_internal += 1; continue
                     # Gate 1: exact internal match (kept as belt-and-suspenders)
-                    if _xnorm in _INTERNAL_XML_NORMS:
+                    if _xnorm.lower() in _INTERNAL_XML_NORMS:
                         _xml_skip_internal += 1; continue
                     # Gate 2: S99-type date/time pattern (S99Datex1, S99Timex2, …)
-                    if _S99_DATE_PAT.match(_xnorm):
+                    if _S99_DATE_PAT.match(_xnorm.lower()):
                         _xml_skip_internal += 1; continue
                     # Gate 3: direct match in doc or live
                     if _xnorm in _doc_norms or _xnorm in _live_norms:
                         continue
                     # Gate 4: progressive suffix-stripping — xN → _N → _BIS → bis/ter parent
-                    _raw_qid = _xq.get('qid_normalized') or _xq.get('qid', _xnorm)
+                    _raw_qid = _xq.get('qid') or _xq.get('qid_normalized') or _xnorm
                     _cands = _xml_strip_candidates(_raw_qid, _xnorm)
                     _skip = False; _skip_reason = None
                     for _c in _cands:
-                        if _c in _INTERNAL_XML_NORMS:          # e.g. S99Datex1 → s99date
+                        _c_key = normalize_qid(_c)
+                        if _c.lower() in _INTERNAL_XML_NORMS:          # e.g. S99Datex1 → s99date
                             _skip = True; _skip_reason = 'internal'; break
-                        if _c in _doc_norms or _c in _live_norms:
+                        if _c_key in _live_norms:
                             _skip = True; _skip_reason = 'norm'; break
                     if _skip:
                         if _skip_reason == 'internal':
@@ -7950,7 +9344,24 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         continue
                     # Gate 5: grid container expansion (gQ12Q13 → Q12, Q13)
                     _components = _xml_grid_components(_xnorm)
-                    if _components and any(c in _doc_norms or c in _live_norms for c in _components):
+                    if _components and any(normalize_qid(c) in _doc_norms or normalize_qid(c) in _live_norms for c in _components):
+                        continue
+                    _dup, _dup_reason = _xml_only_duplicate_evidence(
+                        _raw_qid, _xq, _doc_by_norm_late, _doc_norms
+                    )
+                    if _dup:
+                        _xml_skip_norm += 1
+                        job.setdefault('suppressed_internal_xml_items', []).append({
+                            'qid': _raw_qid,
+                            'type': 'XML_ALIAS_OR_VARIANT',
+                            'details': f'XML-only variant suppressed: {_dup_reason}.',
+                            'severity': 'INFO',
+                            'confidence': 90,
+                            'conf_level': 'HIGH',
+                            'source_phase': 'PHASE_1.5_XML',
+                            'root_cause': 'MAPPING',
+                            'suppressed_from_main_count': True,
+                        })
                         continue
                     # Gate 6: structural and prefix-based framework variable detection.
                     # Catches Confirmit internal variables not covered by earlier gates.
@@ -7968,21 +9379,32 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                         # Confirmit Hid-block prefix: HidATUEnd, HidAllQs, HidLang
                         bool(re.match(r'^Hid[A-Z]', _raw_name)) or
                         # Normalized prefix families (Confirmit scripting conventions)
-                        _FW_NORM_PAT.match(_xnorm) or
+                        _FW_NORM_PAT.match(_xnorm.lower()) or
                         # Normalized _hidden suffix: c2hidden, rppshidden, etudianthi...
-                        _xnorm.endswith('hidden')
+                        _xnorm.lower().endswith('hidden')
                     ):
                         _xml_skip_internal += 1
                         continue
-                    issues.append({
+                    _scope_cls = _classify_xml_only_scope(_xq.get('qid', _xnorm), scope_info)
+                    _xml_only_late = {
                         "qid": _xq.get('qid', _xnorm),
                         "type": "QID IN EXPORT NOT IN DOC/LIVE",
                         "details": "Found in XML export but missing from both spec doc and live survey",
-                        "severity": "MEDIUM",
-                        "confidence": 70,
-                        "conf_level": "MEDIUM",
+                        "severity": "INFO",
+                        "confidence": 50,
+                        "conf_level": "NEEDS_MANUAL",
                         "source_phase": "PHASE_1.5_XML",
-                    })
+                        "scope_classification": _scope_cls,
+                        "root_cause": "REVIEW_REQUIRED",
+                    }
+                    if _scope_cls != 'IN_SCOPE_XML_ONLY':
+                        _xml_only_late['suppressed_from_main_count'] = True
+                        job.setdefault('suppressed_internal_xml_items', []).append(_xml_only_late)
+                    else:
+                        issues.append(_issue_with_mapping(
+                            _xml_only_late,
+                            {'xml_qid': _xml_only_late['qid'], 'mapping_confidence': 0.0, 'mapping_method': 'no match'},
+                        ))
                 if _xml_skip_norm:
                     log(f'  Normalized {_xml_skip_norm} sub-question variant(s) to parent QID — no issue raised', 'grey')
                 if _xml_skip_internal:
@@ -8000,11 +9422,20 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     _pi['source_phase'] = 'PHASE_3_COMPARISON'
 
         # PHASE 4: TERMINATION — skipped for re-tests (filter_qids set)
-        if mode in ('full', 'logic') and not filter_qids:
+        if mode in ('full', 'logic') and not filter_qids and not survey_url:
+            job['termination_live_status'] = 'SKIPPED_NO_LIVE_URL'
+            log('', 'white')
+            log('════════════════════════════════════', 'cyan')
+            log('  PHASE 4: TERMINATION LOGIC REVIEW — DOC vs XML', 'cyan')
+            log('════════════════════════════════════', 'cyan')
+            log('  Live survey URL not provided — Playwright termination verification skipped', 'blue')
+            log('  Termination evidence is reviewed in the DOC vs XML matrix.', 'blue')
+        elif mode in ('full', 'logic') and not filter_qids:
+            job['termination_live_status'] = 'RUNNING'
             progress(75, 'Testing termination rules...')
             log('', 'white')
             log('════════════════════════════════════', 'cyan')
-            log('  PHASE 4: TERMINATION TESTING', 'cyan')
+            log('  PHASE 4: LIVE TERMINATION VERIFICATION — Playwright', 'cyan')
             log('════════════════════════════════════', 'cyan')
 
             rules = []
@@ -8275,6 +9706,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
 
             passed = sum(1 for r in term_results if r["passed"])
             log(f'\n  Termination: {passed}/{len(term_results)} passed', 'green' if passed==len(term_results) else 'yellow')
+            job['termination_live_status'] = 'COMPLETE'
 
         # PHASE 4.5: SURVEY FLOW ANALYSIS
         try:
@@ -8302,7 +9734,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     f'{_frs["termination_points"]} termination pt(s), '
                     f'{_frs["conditional_questions"]} conditional', 'blue')
                 log(f'  Live: {_flow_other.summary()["questions"]} questions', 'blue')
-                def _fn(s): return re.sub(r'[^a-z0-9]', '', s.lower())
+                def _fn(s): return normalize_qid(s)
                 _live_keys_norm  = {_fn(q) for q in live_data.keys()}
                 _existing_q_norm = {_fn(i.get('qid', '')) for i in issues}
                 # Emit MISSING only; TERMINATION only when quick mode skipped PHASE 4.
@@ -8370,6 +9802,14 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         except Exception as _flow_err:
             log(f'  Flow analysis skipped ({str(_flow_err)[:80]})', 'yellow')
 
+        issues = _move_suppressed_standard_findings(issues, job, scope_info)
+        if job.get('suppressed_out_of_scope_count') or job.get('suppressed_internal_count'):
+            log(
+                f'  Main issue filter: {job.get("suppressed_out_of_scope_count", 0)} out-of-scope XML '
+                f'and {job.get("suppressed_internal_count", 0)} internal/template item(s) separated',
+                'cyan',
+            )
+
         # Evidence Engine: enrich every issue with evidence snippets and
         # recalculate confidence using all available data.  Must run after
         # all phases so xml_questions, live_data, questions are complete.
@@ -8377,6 +9817,23 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             _enrich_issues(issues, questions, live_data, xml_questions)
         except Exception as _ee_err:
             log(f'  Evidence enrichment error (non-fatal): {str(_ee_err)[:80]}', 'yellow')
+
+        if job.get("diagnostic_evidence_mode"):
+            try:
+                job["diagnostic_evidence"] = _build_diagnostic_evidence(
+                    issues,
+                    job.get("rule_engine_findings", []),
+                    term_results,
+                    questions,
+                    live_data,
+                    xml_questions,
+                    job,
+                )
+                log('  Diagnostic evidence mode: compact evidence attached', 'cyan')
+            except Exception as _de_err:
+                job["diagnostic_evidence"] = {"enabled": True, "error": str(_de_err)[:200]}
+                job["root_cause_summary"] = {bucket: 0 for bucket in ROOT_CAUSE_BUCKETS}
+                log(f'  Diagnostic evidence error (non-fatal): {str(_de_err)[:80]}', 'yellow')
 
         # PHASE 5: REPORT
         progress(92, 'Generating report...')
@@ -8503,7 +9960,9 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         term_passed = sum(1 for r in term_results if r.get("passed") and not r.get("needs_review"))
         term_review = sum(1 for r in term_results if r.get("needs_review"))
         term_failed = len(term_results) - term_passed - term_review
-        total_issues = sev['HIGH'] + sev['MEDIUM']
+        total_issues = sum(1 for i in issues if _is_main_issue(i))
+        review_items_count = sum(1 for i in issues if _is_review_item(i))
+        suppressed_items_count = len(job.get('suppressed_internal_xml_items', []) or []) + len(job.get('xml_out_of_scope_questions', []) or [])
 
         if len(live_data) == 0 and survey_url:
             # Live URL was provided but crawl returned nothing
@@ -8516,9 +9975,9 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             if total_issues == 0:
                 vt = "STANDARD QC PASS — No issues found in DOC vs XML comparison"; vc = (0x00, 0x70, 0x00)
             elif sev['HIGH'] > 0:
-                vt = f"STANDARD QC — {total_issues} issue(s) found (add live URL for full ADVANCED QC)"; vc = (0xC0, 0x00, 0x00)
+                vt = f"STANDARD QC — {total_issues} main issue(s) found (add live URL for full ADVANCED QC)"; vc = (0xC0, 0x00, 0x00)
             else:
-                vt = f"STANDARD QC — {total_issues} issue(s) to review (add live URL for full ADVANCED QC)"; vc = (0xBA, 0x75, 0x17)
+                vt = f"STANDARD QC — {total_issues} main issue(s), {review_items_count} review item(s)"; vc = (0xBA, 0x75, 0x17)
         elif total_issues == 0 and term_failed == 0:
             vt = "ALL GOOD — Survey ready to go live!"; vc = (0x00, 0x70, 0x00)
         elif sev['HIGH'] > 0 or term_failed > 0:
@@ -8558,11 +10017,19 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         else:
             _accuracy_mode = "Standard (doc vs live comparison)"
         _needs_manual_count = sum(1 for i in issues if i.get("conf_level") == "NEEDS_MANUAL")
+        _scope_type_rpt = job.get('scope_type', 'FULL_DOC_SCOPE')
+        _out_scope_rpt = job.get('suppressed_out_of_scope_count', len(job.get('xml_out_of_scope_questions', []) or []))
+        _supp_int_rpt = job.get('suppressed_internal_count', len(job.get('suppressed_internal_xml_items', []) or []))
         for line in [
             f"Sources: Doc ({len(questions)} questions) · XML ({_xml_q_count} questions) · Live ({len(live_data)} questions)" if _xml_q_count else f"Sources: Doc ({len(questions)} questions) · Live ({len(live_data)} pages crawled)",
             f"QC Mode: {_accuracy_mode}",
+            "Live Survey: not provided" if _is_standard_qc else None,
+            "Playwright: skipped" if _is_standard_qc else None,
+            f"Scope Type: {_scope_type_rpt}",
+            f"Suppressed/internal items: {suppressed_items_count}",
             f"Termination tests: {term_passed}/{len(term_results) - term_review} validated · {term_review} need manual review" if term_results else None,
-            f"Total issues found: {total_issues}",
+            f"Main issues found: {total_issues}",
+            f"Review items: {review_items_count}",
             f"Confidence breakdown: {_rpt_chigh} confirmed bugs, {_rpt_cmed} possible issues, {_rpt_clow} low-confidence, {_needs_manual_count} needs manual review",
             f"Time saved: ~8 hours vs manual QC",
         ]:
@@ -8571,6 +10038,39 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             p.add_run(f"  - {line}").font.size = Pt(11)
 
         report.add_paragraph()
+
+        _mqs = job.get('mapping_quality_summary', {}) or {}
+        if _mqs:
+            _mqh = report.add_paragraph()
+            _mqhr = _mqh.add_run("Mapping Quality Summary")
+            _mqhr.font.size = Pt(14); _mqhr.font.bold = True
+            _mqhr.font.color.rgb = RGBColor(0x0F, 0x76, 0x6E)
+            for _ml in [
+                f"Exact matches: {_mqs.get('exact_matches', 0)}",
+                f"Normalized matches: {_mqs.get('normalized_matches', 0)}",
+                f"Alias matches: {_mqs.get('alias_matches', 0)}",
+                f"Block/text matches: {_mqs.get('block_text_matches', 0)}",
+                f"Low-confidence mappings: {_mqs.get('low_confidence_mappings', 0)}",
+                f"Unmapped DOC questions: {_mqs.get('unmapped_doc_questions', 0)}",
+                f"Unmapped XML questions: {_mqs.get('unmapped_xml_questions', 0)}",
+                f"Skipped internal XML items: {_mqs.get('skipped_internal_xml_items', 0)}",
+                f"Skipped live navigator nodes: {_mqs.get('skipped_live_navigator_nodes', 0)}",
+            ]:
+                report.add_paragraph().add_run(f"  - {_ml}").font.size = Pt(10)
+            report.add_paragraph()
+
+        _hidden_recode_items = job.get("hidden_recode_quota_variables", []) or []
+        if _hidden_recode_items:
+            _hrh = report.add_paragraph()
+            _hrhr = _hrh.add_run("Hidden/Recode/Quota Variables")
+            _hrhr.font.size = Pt(14); _hrhr.font.bold = True
+            _hrhr.font.color.rgb = RGBColor(0x0F, 0x76, 0x6E)
+            for _hri in _hidden_recode_items:
+                report.add_paragraph().add_run(
+                    f"  - {_hri.get('qid','')}: {_hri.get('status','HIDDEN_RECODE_TABLE_DETECTED')} "
+                    f"| Root cause: {_hri.get('root_cause','REVIEW_REQUIRED')} | {_hri.get('details','')}"
+                ).font.size = Pt(10)
+            report.add_paragraph()
 
         type_names = {
             "WORDS MISSING": "Missing words",
@@ -8609,8 +10109,8 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             "TERMINATION MISSING": "Manually test this termination rule in the live survey",
         }
 
-        _fix_issues    = [i for i in issues if i.get("conf_level") in ("HIGH", "MEDIUM") and not i.get("is_export_issue") and i.get("conf_level") != "NEEDS_MANUAL"]
-        _review_issues = [i for i in issues if i.get("conf_level") in ("LOW", "NEEDS_MANUAL") and not i.get("is_export_issue")]
+        _fix_issues    = [i for i in issues if _is_main_issue(i) and not i.get("is_export_issue")]
+        _review_issues = [i for i in issues if _is_review_item(i) and not i.get("is_export_issue")]
 
         if _fix_issues or term_failed:
             h = report.add_paragraph()
@@ -8642,6 +10142,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 pr = p.add_run(f"Issue {n}: {simple}  [{conf_pct}% — {conf_label}]")
                 pr.font.size = Pt(12); pr.font.bold = True; pr.font.color.rgb = RGBColor(*color)
                 report.add_paragraph().add_run(f"   Where: {issue['qid']}").font.size = Pt(11)
+                report.add_paragraph().add_run(
+                    f"   Matched ID: {issue.get('matched_id', '') or 'n/a'}  |  "
+                    f"Mapping Confidence: {issue.get('mapping_confidence', '')}  |  "
+                    f"Root Cause: {((issue.get('diagnostic') or {}).get('root_cause') or issue.get('root_cause', ''))}"
+                ).font.size = Pt(9)
                 # What line: prefer evidence mismatch_detail over raw details
                 ev = issue.get('evidence', {})
                 what_text = ev.get('mismatch_detail') or issue.get('details', '')
@@ -8681,7 +10186,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     _rr.font.size = Pt(9); _rr.font.italic = True
                     _rr.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
                 # ── Fix suggestion ─────────────────────────────────────────
-                fix = fix_sug.get(issue['type'], 'Review and fix manually')
+                fix = issue.get('suggested_fix') or fix_sug.get(issue['type'], 'Review and fix manually')
                 p2 = report.add_paragraph()
                 p2r = p2.add_run(f"   Fix: {fix}")
                 p2r.font.size = Pt(11); p2r.font.italic = True
@@ -8695,13 +10200,17 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         if _needs_manual_issues:
             report.add_paragraph()
             h = report.add_paragraph()
-            hr = h.add_run("Questions Present in XML — Not Verified in Live Survey")
+            _needs_title = "Questions Present in XML — Not Verified in Live Survey" if survey_url else "XML Questions Requiring Mapping Review"
+            hr = h.add_run(_needs_title)
             hr.font.size = Pt(14); hr.font.bold = True; hr.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
             sub_p = report.add_paragraph()
             sub_p.add_run(
-                "These questions exist in the survey XML export but were not reached during live crawling. "
-                "This is NOT a bug — they may be hidden by routing or require specific answers to reach. "
-                "Manually navigate to each one to verify it renders correctly."
+                ("These questions exist in the survey XML export but were not reached during live crawling. "
+                 "This is NOT a bug — they may be hidden by routing or require specific answers to reach. "
+                 "Manually navigate to each one to verify it renders correctly.")
+                if survey_url else
+                ("These XML questions appear inside the uploaded DOC scope but were not confidently matched "
+                 "to a DOC QID/text/options. This is a mapping/manual review item, not a live verification failure.")
             ).font.size = Pt(10)
             report.add_paragraph()
             for issue in _needs_manual_issues:
@@ -8712,6 +10221,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 pr.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
                 what_text = issue.get('details', '')
                 report.add_paragraph().add_run(f"   {what_text[:200]}").font.size = Pt(10)
+                report.add_paragraph().add_run(
+                    f"   Matched ID: {issue.get('matched_id', '') or 'n/a'}  |  "
+                    f"Mapping Confidence: {issue.get('mapping_confidence', '')}  |  "
+                    f"Root Cause: {((issue.get('diagnostic') or {}).get('root_cause') or issue.get('root_cause', ''))}"
+                ).font.size = Pt(9)
                 report.add_paragraph()
 
         if _low_conf_issues:
@@ -8737,6 +10251,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                 ev = issue.get('evidence', {})
                 what_text = ev.get('mismatch_detail') or issue.get('details', '')
                 report.add_paragraph().add_run(f"   {what_text[:200]}").font.size = Pt(10)
+                report.add_paragraph().add_run(
+                    f"   Matched ID: {issue.get('matched_id', '') or 'n/a'}  |  "
+                    f"Mapping Confidence: {issue.get('mapping_confidence', '')}  |  "
+                    f"Root Cause: {((issue.get('diagnostic') or {}).get('root_cause') or issue.get('root_cause', ''))}"
+                ).font.size = Pt(9)
                 reasons = issue.get('confidence_reasons', [])
                 if reasons:
                     _rp = report.add_paragraph()
@@ -8794,29 +10313,32 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         if _tm_rpt:
             report.add_paragraph()
             _tmh = report.add_paragraph()
-            _tmhr = _tmh.add_run("Termination Matrix")
+            _tmhr = _tmh.add_run("Termination Logic Review — DOC vs XML")
             _tmhr.font.size = Pt(14); _tmhr.font.bold = True
             _tmhr.font.color.rgb = RGBColor(0xC8, 0x4B, 0x31)
             _tm_match_cnt    = sum(1 for r in _tm_rpt if r.get('status') == 'MATCH')
-            _tm_mismatch_cnt = sum(1 for r in _tm_rpt if r.get('status') == 'MISMATCH')
+            _tm_review_cnt = sum(1 for r in _tm_rpt if r.get('status') != 'MATCH')
             _tmsub = report.add_paragraph()
             _tmsub.add_run(
                 f"{len(_tm_rpt)} termination point(s): "
-                f"{_tm_match_cnt} aligned, {_tm_mismatch_cnt} mismatch. "
-                "DOC_ONLY = spec defines termination but not in XML. "
-                "XML_ONLY = XML terminates but spec does not mention it."
+                f"{_tm_match_cnt} aligned, {_tm_review_cnt} need review. "
+                "Complex/script-based XML logic is marked for review, not live failure."
             ).font.size = Pt(10)
             report.add_paragraph()
 
             _TM_STATUS_LABEL = {
-                'MATCH': 'MATCH', 'MISMATCH': 'MISMATCH',
-                'DOC_ONLY': 'DOC ONLY', 'XML_ONLY': 'XML ONLY',
+                'MATCH': 'MATCH',
+                'MISSING_IN_XML': 'MISSING IN XML',
+                'XML_NOT_PARSEABLE': 'XML NOT PARSEABLE',
+                'NEEDS_REVIEW': 'NEEDS REVIEW',
+                'COMPOUND_MANUAL_REVIEW': 'COMPOUND MANUAL REVIEW',
             }
             _TM_STATUS_COLOR = {
                 'MATCH':    (0x1A, 0x56, 0x32),
-                'MISMATCH': (0xC0, 0x00, 0x00),
-                'DOC_ONLY': (0xBA, 0x75, 0x17),
-                'XML_ONLY': (0x1D, 0x4E, 0xD8),
+                'MISSING_IN_XML': (0xBA, 0x75, 0x17),
+                'XML_NOT_PARSEABLE': (0x1D, 0x4E, 0xD8),
+                'NEEDS_REVIEW': (0x1D, 0x4E, 0xD8),
+                'COMPOUND_MANUAL_REVIEW': (0x1D, 0x4E, 0xD8),
             }
             for _tmrow in _tm_rpt:
                 _ts = _tmrow.get('status', '')
@@ -8828,7 +10350,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
                     f"Doc codes: {', '.join(_tmrow.get('doc_codes',[]) or ['—'])}  |  "
                     f"XML: {(_tmrow.get('xml_condition') or '—')[:80]}"
                 )
-                _tr.font.size = Pt(10); _tr.font.bold = (_ts == 'MISMATCH')
+                _tr.font.size = Pt(10); _tr.font.bold = (_ts != 'MATCH')
                 _tr.font.color.rgb = RGBColor(*_tc)
                 if _tmrow.get('missing_in_xml'):
                     _mp = report.add_paragraph()
@@ -8843,20 +10365,25 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         _re_summary_rpt  = job.get('rule_engine_summary', {})
         if _re_findings_rpt:
             # Filter to non-INFO findings for the report
-            _re_report_items = [f for f in _re_findings_rpt if f.get('severity') != 'INFO']
+            _re_report_items = [
+                f for f in _re_findings_rpt
+                if f.get('severity') != 'INFO'
+                and f.get('rule_group') != 1
+                and not (f.get('rule_group') == 9 and f.get('severity') in ('LOW', 'MEDIUM'))
+            ]
             if _re_report_items:
                 report.add_paragraph()
                 _reh = report.add_paragraph()
-                _rehr = _reh.add_run("Rule Engine Findings")
+                _rehr = _reh.add_run("Rule Engine Supporting Findings")
                 _rehr.font.size = Pt(14); _rehr.font.bold = True
                 _rehr.font.color.rgb = RGBColor(0x6D, 0x28, 0xD9)
                 _resub = report.add_paragraph()
                 _resub.add_run(
-                    f"Deterministic rule engine: {len(_re_report_items)} finding(s) "
-                    f"(HIGH={_re_summary_rpt.get('high',0)}, "
-                    f"MEDIUM={_re_summary_rpt.get('medium',0)}, "
-                    f"LOW={_re_summary_rpt.get('low',0)}). "
-                    "Run directly on survey model — no DOM, no Playwright."
+                    f"Deterministic rule engine: {len(_re_report_items)} supporting finding(s) "
+                    f"(HIGH={sum(1 for f in _re_report_items if f.get('severity')=='HIGH')}, "
+                    f"MEDIUM={sum(1 for f in _re_report_items if f.get('severity')=='MEDIUM')}, "
+                    f"LOW={sum(1 for f in _re_report_items if f.get('severity')=='LOW')}). "
+                    "Supporting evidence only unless promoted to the main issue list; not counted as separate main issues."
                 ).font.size = Pt(10)
                 report.add_paragraph()
 
@@ -9230,14 +10757,18 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         _qsum_hr = _qsum_h.add_run("QC Summary")
         _qsum_hr.font.size = Pt(14); _qsum_hr.font.bold = True
         _qsum_hr.font.color.rgb = RGBColor(0x7C, 0x65, 0xFF)
-        _sum_high = sum(1 for i in issues if i.get('confidence', 0) >= 75)
-        _sum_med  = sum(1 for i in issues if 55 <= i.get('confidence', 0) < 75)
-        _sum_low  = sum(1 for i in issues if i.get('confidence', 0) < 55)
+        _supporting_count_rpt = sum(
+            1 for f in (job.get('rule_engine_findings', []) or [])
+            if f.get('severity') != 'INFO'
+            and f.get('rule_group') != 1
+            and not (f.get('rule_group') == 9 and f.get('severity') in ('LOW', 'MEDIUM'))
+        )
         for _sl in [
-            f"Total issues found: {len(issues)}",
-            f"Likely Bug / Confirmed Bug (75%+): {_sum_high}",
-            f"Possible Issue (55-74%): {_sum_med}",
-            f"Needs Review / Likely False Positive (<55%): {_sum_low}",
+            f"Main issues found: {total_issues}",
+            f"Review items: {review_items_count}",
+            f"Supporting findings: {_supporting_count_rpt}",
+            f"Suppressed/internal items: {suppressed_items_count}",
+            f"Total findings including review items: {total_issues + review_items_count}",
         ]:
             _slp = report.add_paragraph()
             _slp.add_run(f"  • {_sl}").font.size = Pt(11)
@@ -9255,6 +10786,83 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
             _xfp2.add_run(
                 f"  (XML upload helped catch {_xml_flagged} issue(s) with higher confidence)"
             ).font.size = Pt(10)
+
+        # ── Diagnostic Evidence Appendix (optional) ─────────────────────────
+        if job.get("diagnostic_evidence_mode"):
+            _diag_payload = job.get("diagnostic_evidence", {}) or {}
+            _diag_items = [
+                i for i in issues
+                if isinstance(i, dict) and i.get("diagnostic")
+            ]
+            report.add_paragraph()
+            _deh = report.add_paragraph()
+            _dehr = _deh.add_run("Diagnostic Evidence Appendix")
+            _dehr.font.size = Pt(14); _dehr.font.bold = True
+            _dehr.font.color.rgb = RGBColor(0x0F, 0x76, 0x6E)
+            _desub = report.add_paragraph()
+            _desub.add_run(
+                f"Diagnostic mode captured compact source evidence for "
+                f"{len(_diag_items)} issue(s) and "
+                f"{len(_diag_payload.get('rule_findings', []))} rule-engine finding(s). "
+                "This appendix does not alter QC counts, severity, or confidence."
+            ).font.size = Pt(10)
+            _rc_summary_rpt = job.get("root_cause_summary") or _diag_payload.get("root_cause_summary") or {}
+            if _rc_summary_rpt:
+                _rcp = report.add_paragraph()
+                _rc_line = "Root Cause Breakdown: " + " | ".join(
+                    f"{_b}={_rc_summary_rpt.get(_b, 0)}"
+                    for _b in ROOT_CAUSE_BUCKETS
+                    if _b != "UNCLASSIFIED" or _rc_summary_rpt.get(_b, 0)
+                )
+                _rcp.add_run(f"  {_rc_line}").font.size = Pt(9)
+            report.add_paragraph()
+
+            for _di in _diag_items[:25]:
+                _dg = _di.get("diagnostic", {}) or {}
+                _src_doc = _dg.get("source_doc", {}) or {}
+                _src_xml = _dg.get("source_xml", {}) or {}
+                _src_live = _dg.get("source_live", {}) or {}
+                _dp = report.add_paragraph()
+                _dpr = _dp.add_run(
+                    f"{_di.get('qid','?')} - {_di.get('type','?')} "
+                    f"[{_di.get('severity','')}, {_di.get('confidence','')}%]"
+                )
+                _dpr.font.size = Pt(11); _dpr.font.bold = True
+                _dpr.font.color.rgb = RGBColor(0x0F, 0x76, 0x6E)
+                for _label, _src in [
+                    ("DOC", _src_doc),
+                    ("XML", _src_xml),
+                    ("LIVE", _src_live),
+                ]:
+                    _src_line = (
+                        f"   {_label}: QID={_src.get('qid','')} | "
+                        f"Status={_src.get('status','') or _src.get('selector_status','')} | "
+                        f"Text={str(_src.get('text',''))[:160]}"
+                    )
+                    report.add_paragraph().add_run(_src_line).font.size = Pt(9)
+                report.add_paragraph().add_run(
+                    f"   Root Cause: {_dg.get('root_cause','UNCLASSIFIED')} | "
+                    f"Created By: {_dg.get('created_by_engine','')} | "
+                    f"Mapping Confidence: {_dg.get('mapping_confidence','')} | "
+                    f"Parser Health: {_dg.get('parser_health','UNKNOWN')}"
+                ).font.size = Pt(9)
+                report.add_paragraph().add_run(
+                    f"   Root Cause Reason: {str(_dg.get('root_cause_reason',''))[:220]}"
+                ).font.size = Pt(9)
+                _sig_line = "; ".join(str(s)[:120] for s in (_dg.get('classification_signals') or [])[:5])
+                if _sig_line:
+                    report.add_paragraph().add_run(
+                        f"   Classification Signals: {_sig_line}"
+                    ).font.size = Pt(9)
+                report.add_paragraph().add_run(
+                    f"   Evidence Notes: {str(_dg.get('evidence_notes',''))[:220]}"
+                ).font.size = Pt(9)
+                report.add_paragraph()
+            if len(_diag_items) > 25:
+                report.add_paragraph().add_run(
+                    f"  Showing 25 of {len(_diag_items)} diagnostic issue records."
+                ).font.size = Pt(9)
+        # ─────────────────────────────────────────────────────────────────
         report.add_paragraph()
 
         footer_p = report.add_paragraph(); footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -9266,7 +10874,7 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         report.save(report_path)
         log(f'  Report saved', 'green')
 
-        verdict = 'PASS' if (sev['HIGH']==0 and term_failed==0 and term_review==0) else ('FAIL' if (sev['HIGH']>0 or term_failed>0) else 'REVIEW')
+        verdict = 'PASS' if (total_issues == 0 and term_failed == 0 and term_review == 0 and review_items_count == 0) else ('FAIL' if (total_issues > 0 or term_failed > 0) else 'REVIEW')
 
         progress(100, 'Complete!')
         log('', 'white')
@@ -9276,7 +10884,12 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         log(f'  Document QIDs:  {len(questions)}', 'blue')
         log(f'  XML QIDs:       {len(xml_questions)}', 'blue')
         log(f'  Live QIDs:      {len(live_data)}', 'blue')
-        log(f'  Total Issues:   {len(issues)}', 'yellow')
+        _main_issue_count = total_issues
+        _review_item_count = review_items_count
+        _suppressed_item_count = suppressed_items_count
+        log(f'  Total Issues:   {_main_issue_count}', 'yellow')
+        log(f'  Review Items:   {_review_item_count}', 'yellow' if _review_item_count else 'green')
+        log(f'  Suppressed:     {_suppressed_item_count}', 'grey')
         if term_results:
             log(f'  Termination:    {term_passed}/{len(term_results)} passed', 'green' if term_passed==len(term_results) else 'yellow')
         log(f'\n  DONE! Verdict: {verdict}', 'green')
@@ -9286,7 +10899,11 @@ def run_qc_engine(job_id, doc_path, survey_url, country, mode, ss_paths, filter_
         job['doc_qids'] = len(questions)
         job['xml_qids'] = len(xml_questions)
         job['live_qids'] = len(live_data)
-        job['total_issues'] = len(issues)
+        job['total_issues'] = _main_issue_count
+        job['main_issues_count'] = _main_issue_count
+        job['review_items_count'] = _review_item_count
+        job['suppressed_count'] = _suppressed_item_count
+        job['total_findings_count'] = _main_issue_count + _review_item_count
         job['term_passed'] = term_passed
         job['term_review'] = term_review
         job['term_total'] = len(term_results)

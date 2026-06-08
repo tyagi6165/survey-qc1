@@ -78,13 +78,15 @@ except ImportError:
     nx = None  # type: ignore
 
 try:
-    from qid_normalizer import should_skip_qid
+    from qid_normalizer import should_skip_qid, normalize_qid
     _HAVE_NORM = True
 except ImportError:
     log.warning("qid_normalizer not available — using basic QID filter")
     _HAVE_NORM = False
     def should_skip_qid(qid: str) -> bool:  # type: ignore
         return not bool(re.match(r'^[A-Za-z]{1,8}\d', qid or ''))
+    def normalize_qid(qid: str) -> str:  # type: ignore
+        return re.sub(r'[^A-Z0-9]', '', str(qid or '').upper())
 
 
 # ── RuleResult dataclass ──────────────────────────────────────────────────────
@@ -171,16 +173,135 @@ def _canon_xml_type(raw: str) -> str:
     return _XML_TYPE_CANON.get((raw or '').strip().upper(), 'UNKNOWN')
 
 
+def _is_numeric_doc_question(q: dict) -> bool:
+    raw = (q or {}).get('question_type') or ''
+    return bool((q or {}).get('is_numeric') or _canon_doc_type(raw) == 'NUMERIC')
+
+
+def _xml_has_categorical_options(q: dict) -> bool:
+    opts = (q or {}).get('options') or []
+    return any(str(o.get('text', '')).strip() for o in opts if isinstance(o, dict))
+
+
+def _is_static_info_or_legal_text(text: str) -> bool:
+    blob = (text or '').lower()
+    return any(k in blob for k in (
+        'traitement des donnees a caractere personnel',
+        'traitement des données à caractère personnel',
+        'loi bertrand', 'privacy', 'legal', 'consent', 'static info',
+        'information page',
+    ))
+
+
+def _has_strong_termination_signal(text: str) -> bool:
+    blob = (text or '').lower()
+    if _is_static_info_or_legal_text(blob):
+        return False
+    return any(k in blob for k in (
+        'terminate', 'termination', 'screenout', 'screen out', 'disqualify',
+        'complete interview', 'end interview', 'stop interview',
+        'goto end', 'go to end', 'thanks', 'status set', 'set status',
+        'complete/respondent', 'end/thanks', 'hard terminate',
+        'screenedset', 'setinterviewend', 'screenedredirect',
+    ))
+
+
+def _qid_term_aliases(qid: str) -> Set[str]:
+    q = normalize_qid(qid)
+    out = {q}
+    if q.endswith('BIS'):
+        out.add(q[:-3])
+    else:
+        out.add(q + 'BIS')
+    out.add(re.sub(r'(?<=\d)[A-Z]$', '', q))
+    # Grid children used by Confirmit for parent rows/columns.
+    if re.match(r'^[A-Z]{1,8}\d+$', q):
+        for suffix in ('A', 'B', 'C'):
+            out.add(q + suffix)
+    return {x for x in out if x}
+
+
+def _termination_refers_to_qid(text: str, qid: str) -> bool:
+    if not text or not qid:
+        return False
+    refs = {normalize_qid(r) for r in re.findall(
+        r'\b(?:f|qf|ReturnNum|gridGetRowsByScale|EqualTo)\s*\(\s*[\'"]([A-Za-z]{1,8}\d+[A-Za-z]*(?:_[0-9]+)?)',
+        text,
+        re.I,
+    )}
+    return bool(refs & _qid_term_aliases(qid))
+
+
+def _xml_term_records_for_qid(qid: str, xml_index: dict) -> List[dict]:
+    records: List[dict] = []
+    aliases = _qid_term_aliases(qid)
+    for xqid, xml_q in xml_index.items():
+        term_str = (xml_q.get('termination') or '').strip()
+        if _is_static_info_or_legal_text(term_str):
+            term_str = ''
+        evs = xml_q.get('termination_evidence') or []
+        xaliases = _qid_term_aliases(xqid)
+        relevant = bool(aliases & xaliases)
+        if not relevant and term_str:
+            relevant = _termination_refers_to_qid(term_str, qid)
+        if not relevant:
+            for ev in evs:
+                if _termination_refers_to_qid(str(ev.get('evidence_text') or ev.get('xml_condition') or ''), qid):
+                    relevant = True
+                    break
+        if not relevant:
+            continue
+        if term_str and (_has_strong_termination_signal(term_str) or int(xml_q.get('termination_confidence') or 0) >= 80):
+            records.append({
+                'xml_qid': xqid,
+                'condition': term_str,
+                'source_node': xml_q.get('termination_source_node', ''),
+                'evidence_text': term_str,
+                'confidence': int(xml_q.get('termination_confidence') or 75),
+            })
+        for ev in evs:
+            etxt = str(ev.get('evidence_text') or ev.get('xml_condition') or '')
+            if _is_static_info_or_legal_text(etxt):
+                continue
+            if not _has_strong_termination_signal(etxt) and int(ev.get('confidence') or 0) < 80:
+                continue
+            records.append({
+                'xml_qid': xqid,
+                'condition': str(ev.get('xml_condition') or etxt),
+                'source_node': str(ev.get('xml_source_node') or xml_q.get('termination_source_node') or ''),
+                'evidence_text': etxt,
+                'confidence': int(ev.get('confidence') or xml_q.get('termination_confidence') or 75),
+            })
+    dedup = []
+    seen = set()
+    for rec in records:
+        key = (rec.get('xml_qid'), rec.get('condition')[:160], rec.get('source_node'))
+        if key not in seen:
+            seen.add(key)
+            dedup.append(rec)
+    return dedup
+
+
+def _is_compound_termination_row(row: dict) -> bool:
+    raw_blob = ' '.join(row.get('doc_raw') or []).upper()
+    xml_blob = (row.get('xml_condition') or '').upper()
+    return any(k in raw_blob or k in xml_blob for k in (
+        ' AND ', ' OR ', 'OTHERWISE', 'TOTAL', 'LESS THAN', 'GREATER THAN',
+        '<', '>', '<=', '>=', 'ALL PRODUCT', 'ALL PRODUCTS',
+        'GRIDGETROWSBYSCALE', 'RETURNNUM',
+    ))
+
+
 def _extract_qid_refs(text: str) -> List[str]:
     """Extract all QID-like references from a routing/condition string."""
     if not text:
         return []
-    return [m.group(0).upper() for m in _QID_REF_PAT.finditer(text)]
+    return [normalize_qid(m.group(0)) for m in _QID_REF_PAT.finditer(text)]
 
 
 def _norm_qid(qid: str) -> str:
-    """Alphanumeric-only lower-case — same form used in qid_normalizer._norm."""
-    return re.sub(r'[^a-z0-9]', '', (qid or '').lower())
+    """Canonical QID key shared with DOC/XML/live matching."""
+    return normalize_qid(qid)
 
 
 def _make_result(
@@ -210,15 +331,15 @@ def _make_result(
 # ── Index builders ────────────────────────────────────────────────────────────
 
 def _build_doc_index(doc_questions: dict) -> dict:
-    """Return {qid_upper: question_dict} for O(1) doc lookups."""
-    return {k.upper(): v for k, v in (doc_questions or {}).items()}
+    """Return {normalized_qid: question_dict} for O(1) doc lookups."""
+    return {normalize_qid(k): v for k, v in (doc_questions or {}).items() if normalize_qid(k)}
 
 
 def _build_xml_index(xml_questions: list) -> dict:
-    """Return {qid_upper: question_dict} for O(1) xml lookups."""
+    """Return {normalized_qid: question_dict} for O(1) xml lookups."""
     idx: dict = {}
     for q in (xml_questions or []):
-        qid = (q.get('qid') or '').upper()
+        qid = normalize_qid(q.get('qid') or q.get('qid_normalized') or '')
         if qid:
             idx[qid] = q
     return idx
@@ -247,7 +368,8 @@ def build_termination_matrix(doc_index: dict, xml_index: dict) -> List[dict]:
         doc_xml_match:  bool|None   — True when doc codes ⊆ xml codes and vice versa
         missing_in_xml: list[str]   — doc codes absent from xml termination
         extra_in_xml:   list[str]   — xml codes not in doc
-        status:         str         — DOC_ONLY | XML_ONLY | BOTH | MATCH | MISMATCH
+        status:         str         — MATCH | MISSING_IN_XML | XML_NOT_PARSEABLE |
+                                      NEEDS_REVIEW | COMPOUND_MANUAL_REVIEW
     }
     """
     matrix: Dict[str, dict] = {}
@@ -266,7 +388,9 @@ def build_termination_matrix(doc_index: dict, xml_index: dict) -> List[dict]:
             'doc_xml_match': None,
             'missing_in_xml': [],
             'extra_in_xml': [],
-            'status': 'DOC_ONLY',
+            'status': 'XML_NOT_PARSEABLE' if xml_index else 'NEEDS_REVIEW',
+            'root_cause': 'XML_PARSER' if xml_index else 'REVIEW_REQUIRED',
+            'recommendation': 'Verify termination logic in XML or review script-based routing.',
         }
         for rule in rules:
             codes = rule.get('answer_codes') or []
@@ -276,14 +400,60 @@ def build_termination_matrix(doc_index: dict, xml_index: dict) -> List[dict]:
                 row['doc_raw'].append(raw[:120])
         matrix[qid] = row
 
+    # Attach deep/global XML termination evidence to DOC rows, including
+    # aliases such as S1 -> S1bis and grid children such as S4 -> S4A/S4B.
+    for qid, row in list(matrix.items()):
+        records = _xml_term_records_for_qid(qid, xml_index)
+        if not records:
+            continue
+        doc_code_set = set(row.get('doc_codes') or [])
+        def _rec_score(rec):
+            rec_codes = set(_CODE_PAT.findall((rec.get('condition') or '') + ' ' + (rec.get('evidence_text') or '')))
+            score = int(rec.get('confidence') or 0)
+            if doc_code_set and doc_code_set <= rec_codes:
+                score += 100
+            if 'hard terminate' in ((rec.get('condition') or '') + ' ' + (rec.get('evidence_text') or '')).lower():
+                score += 10
+            return score
+        best = max(records, key=_rec_score)
+        condition = best.get('condition') or best.get('evidence_text') or ''
+        row['xml_condition'] = condition[:300]
+        row['xml_source_node'] = best.get('source_node', '')
+        row['evidence_text'] = best.get('evidence_text', '')[:500]
+        row['confidence'] = best.get('confidence', 0)
+        row['xml_codes'] = sorted(set(_CODE_PAT.findall(condition + ' ' + row.get('evidence_text', ''))))
+        doc_set = set(row['doc_codes'])
+        xml_set = set(row['xml_codes'])
+        row['missing_in_xml'] = sorted(doc_set - xml_set)
+        row['extra_in_xml'] = sorted(xml_set - doc_set)
+        if _is_compound_termination_row(row):
+            row['status'] = 'COMPOUND_MANUAL_REVIEW'
+            row['root_cause'] = 'REVIEW_REQUIRED'
+            row['recommendation'] = 'XML termination evidence found, but condition is compound/grid/numeric and needs manual review.'
+        elif doc_set and not row['missing_in_xml']:
+            row['status'] = 'MATCH'
+            row['doc_xml_match'] = True
+            row['root_cause'] = 'REVIEW_REQUIRED'
+            row['recommendation'] = 'DOC termination code is represented in XML termination logic.'
+        else:
+            row['status'] = 'NEEDS_REVIEW'
+            row['root_cause'] = 'REVIEW_REQUIRED'
+            row['recommendation'] = 'XML termination evidence found but code mapping is unclear.'
+
     # Gather xml-side termination
     for qid, xml_q in xml_index.items():
         term_str = (xml_q.get('termination') or '').strip()
+        if _is_static_info_or_legal_text(term_str):
+            term_str = ''
+        if term_str and not _has_strong_termination_signal(term_str):
+            term_str = ''
         if not term_str:
             continue
         xml_codes = sorted(set(_CODE_PAT.findall(term_str)))
         if qid in matrix:
             row = matrix[qid]
+            if row.get('xml_condition') and row.get('status') in ('MATCH', 'COMPOUND_MANUAL_REVIEW', 'NEEDS_REVIEW'):
+                continue
             row['xml_condition'] = term_str[:200]
             row['xml_codes'] = xml_codes
             doc_set = set(row['doc_codes'])
@@ -292,8 +462,22 @@ def build_termination_matrix(doc_index: dict, xml_index: dict) -> List[dict]:
             row['extra_in_xml'] = sorted(xml_set - doc_set)
             match = (not row['missing_in_xml'] and not row['extra_in_xml'])
             row['doc_xml_match'] = match
-            row['status'] = 'MATCH' if match else 'MISMATCH'
+            if match:
+                row['status'] = 'MATCH'
+                row['root_cause'] = 'REVIEW_REQUIRED'
+                row['recommendation'] = 'DOC termination condition is represented in XML.'
+            else:
+                if any(c in ('?', '') for c in row['doc_codes']) or any(k in ' '.join(row['doc_raw']).upper() for k in (' AND ', ' OR ', 'OTHERWISE', 'TOTAL')):
+                    row['status'] = 'COMPOUND_MANUAL_REVIEW'
+                    row['root_cause'] = 'REVIEW_REQUIRED'
+                    row['recommendation'] = 'Compound termination logic requires manual review against XML script/routing.'
+                else:
+                    row['status'] = 'NEEDS_REVIEW'
+                    row['root_cause'] = 'REVIEW_REQUIRED'
+                    row['recommendation'] = 'Termination evidence exists but does not clearly map to the DOC code.'
         else:
+            if any(_qid_term_aliases(qid) & _qid_term_aliases(doc_qid) for doc_qid in matrix.keys()):
+                continue
             matrix[qid] = {
                 'qid': qid,
                 'doc_codes': [],
@@ -303,11 +487,24 @@ def build_termination_matrix(doc_index: dict, xml_index: dict) -> List[dict]:
                 'doc_xml_match': None,
                 'missing_in_xml': [],
                 'extra_in_xml': [],
-                'status': 'XML_ONLY',
+                'status': 'NEEDS_REVIEW',
+                'root_cause': 'REVIEW_REQUIRED',
+                'recommendation': 'XML contains termination evidence not found in uploaded DOC scope; confirm intent.',
             }
 
-    # Sort: MISMATCH first, then DOC_ONLY, then XML_ONLY, then MATCH
-    _order = {'MISMATCH': 0, 'DOC_ONLY': 1, 'XML_ONLY': 2, 'MATCH': 3}
+    for row in matrix.values():
+        if row.get('status') in ('MISSING_IN_XML', 'XML_NOT_PARSEABLE'):
+            raw_blob = ' '.join(row.get('doc_raw') or []).upper()
+            if any(k in raw_blob for k in (' AND ', ' OR ', 'OTHERWISE', 'TOTAL', 'LESS THAN', 'GREATER THAN')):
+                row['status'] = 'COMPOUND_MANUAL_REVIEW'
+                row['root_cause'] = 'REVIEW_REQUIRED'
+                row['recommendation'] = 'Compound termination logic needs manual review; not a live failure.'
+            elif row.get('xml_condition') and not row.get('xml_codes'):
+                row['status'] = 'XML_NOT_PARSEABLE'
+                row['root_cause'] = 'XML_PARSER'
+                row['recommendation'] = 'XML logic appears script-based/complex; review source script.'
+
+    _order = {'MISSING_IN_XML': 0, 'XML_NOT_PARSEABLE': 1, 'COMPOUND_MANUAL_REVIEW': 2, 'NEEDS_REVIEW': 3, 'MATCH': 4}
     return sorted(matrix.values(), key=lambda r: (_order.get(r['status'], 9), r['qid']))
 
 
@@ -428,6 +625,8 @@ def _run_g2_termination(
     xml_term_map: Dict[str, str] = {}
     for qid, xml_q in xml_index.items():
         term_str = (xml_q.get('termination') or '').strip()
+        if _is_static_info_or_legal_text(term_str) or not _has_strong_termination_signal(term_str):
+            term_str = ''
         if term_str:
             xml_term_qids.add(qid)
             xml_term_map[qid] = term_str
@@ -437,12 +636,14 @@ def _run_g2_termination(
         if qid in xml_index and qid not in xml_term_qids:
             rules = doc_index[qid].get('termination_rules') or []
             codes = [str(c) for r in rules for c in (r.get('answer_codes') or [])]
+            raw_blob = ' '.join((r.get('raw') or '') for r in rules).upper()
+            is_compound = any(k in raw_blob for k in (' AND ', ' OR ', 'OTHERWISE', 'TOTAL', 'LESS THAN', 'GREATER THAN'))
             results.append(_make_result(
                 f'{PREFIX}01', GROUP, NAME, qid,
-                'HIGH', 80, 'TERMINATION_MISSING_IN_XML',
+                'LOW' if is_compound else 'INFO', 45, 'TERMINATION_XML_NOT_PARSEABLE',
                 f'Doc defines termination at {qid} (codes: {codes or "unknown"}) '
-                f'but XML has no termination field for this question.',
-                'Add termination condition to XML question or verify doc source.',
+                f'but XML termination evidence was not strongly parsed for this question.',
+                'Review XML script/routing source; do not treat as missing unless parser proves absence.',
             ))
 
     # R2.2 — TERMINATION_EXTRA_IN_XML: xml has termination but doc doesn't
@@ -899,6 +1100,22 @@ def _run_g7_types(
         if doc_canon == xml_canon:
             continue
 
+        if doc_canon == 'NUMERIC' and xml_canon in ('MULTIPLE', 'GRID', 'SINGLE'):
+            severity = 'INFO'
+            confidence = 45
+            issue_type = 'GRID_NUMERIC_REPRESENTATION'
+            if xml_canon in ('SINGLE', 'MULTIPLE') and _xml_has_categorical_options(xml_q):
+                severity = 'LOW'
+                confidence = 55
+            results.append(_make_result(
+                f'{PREFIX}04', GROUP, NAME, qid,
+                severity, confidence, issue_type,
+                f'Numeric DOC question {qid} is represented in XML as {xml_canon}. '
+                f'This is usually a grid/cell export representation and needs validation/range review, not a closed-question bug.',
+                'Compare numeric validation/range and grid metadata rather than requiring answer options.',
+            ))
+            continue
+
         # R7.1 — SINGLE_MULTI_MISMATCH: SINGLE vs MULTIPLE is a critical data bug
         if (doc_canon == 'SINGLE' and xml_canon == 'MULTIPLE') or \
            (doc_canon == 'MULTIPLE' and xml_canon == 'SINGLE'):
@@ -953,6 +1170,8 @@ def _run_g8_options(
     for qid in sorted(set(doc_index.keys()) & set(xml_index.keys())):
         doc_q = doc_index[qid]
         xml_q = xml_index[qid]
+        if _is_numeric_doc_question(doc_q):
+            continue
 
         doc_opts = doc_q.get('options') or []
         xml_opts = xml_q.get('options') or []
@@ -1325,6 +1544,8 @@ def _run_g10_export(
     for qid in sorted(set(doc_index.keys()) & set(xml_index.keys())):
         doc_q = doc_index[qid]
         xml_q = xml_index[qid]
+        if _is_numeric_doc_question(doc_q):
+            continue
         doc_type = _canon_doc_type(doc_q.get('question_type') or '')
         xml_type = _canon_xml_type(xml_q.get('type') or '')
         if doc_type in ('SINGLE', 'MULTIPLE') or xml_type in ('SINGLE', 'MULTIPLE'):
